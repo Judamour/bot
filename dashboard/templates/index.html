@@ -81,7 +81,9 @@
     .main { padding: 14px 20px; display: flex; flex-direction: column; gap: 14px; }
 
     /* ── Metrics ── */
-    .metrics-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+    .metrics-row { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; }
+    @media (max-width: 900px) { .metrics-row { grid-template-columns: repeat(3, 1fr); } }
+    @media (max-width: 600px) { .metrics-row { grid-template-columns: repeat(2, 1fr); } }
 
     .metric-card {
       background: var(--surface);
@@ -100,6 +102,10 @@
 
     .metric-value { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; }
     .metric-sub { font-size: 11px; color: var(--muted); margin-top: 3px; }
+
+    /* ── Position progress ── */
+    .pos-progress { height: 4px; border-radius: 3px; background: rgba(248,81,73,0.2); margin-top: 5px; overflow: hidden; }
+    .pos-progress-fill { height: 100%; border-radius: 3px; transition: width 0.4s; }
 
     .positive { color: var(--green); }
     .negative { color: var(--red); }
@@ -323,6 +329,16 @@
       <div class="metric-value" id="metDrawdown">—</div>
       <div class="metric-sub">Perte max depuis un pic</div>
     </div>
+    <div class="metric-card">
+      <div class="metric-label">Profit Factor</div>
+      <div class="metric-value neutral" id="metPF">—</div>
+      <div class="metric-sub">Gains / Pertes brutes</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">Avg Trade</div>
+      <div class="metric-value" id="metAvg">—</div>
+      <div class="metric-sub">P&amp;L moyen par trade</div>
+    </div>
   </div>
 
   <!-- Graphique prix -->
@@ -466,6 +482,7 @@ socket.on('price_update', prices => { updateTicker(prices); updateLastUpdate(); 
 socket.on('state_update', data => {
   updateMetrics(data);
   updatePositions(data.positions || []);
+  if (data.trades) updateTrades(data.trades);
   if (data.equity_curve) updateEquityChart(data.equity_curve);
   updateLastUpdate();
 });
@@ -505,6 +522,13 @@ function updateMetrics(d) {
 
   setHtml('metDrawdown', `<span class="${d.max_drawdown < 0 ? 'negative' : 'neutral'}">${d.max_drawdown.toFixed(2)}%</span>`);
 
+  const pf = d.profit_factor;
+  setText('metPF', pf === 99 ? '∞' : (typeof pf === 'number' ? pf.toFixed(2) : '—'));
+  document.getElementById('metPF').className = 'metric-value ' + (pf >= 1.5 ? 'positive' : pf >= 1 ? 'neutral' : 'negative');
+
+  const avg = d.avg_trade;
+  setHtml('metAvg', `<span class="${avg >= 0 ? 'positive' : 'negative'}">${avg >= 0 ? '+' : ''}${fmt2(avg)} €</span>`);
+
   if (d.paper_mode !== undefined)
     document.getElementById('modeLabel').textContent = d.paper_mode ? 'PAPER' : 'LIVE';
 }
@@ -522,11 +546,14 @@ function updatePositions(positions) {
   body.innerHTML = `<table class="positions-table">
     <thead><tr>
       <th>Symbole</th><th>Entrée</th><th>Prix actuel</th>
-      <th>Taille</th><th>P&L</th><th>Stop</th>
+      <th>Taille</th><th>P&L</th><th>SL / TP</th>
     </tr></thead>
     <tbody>${positions.map(p => {
       const sign = p.pnl_pct >= 0 ? '+' : '';
       const cls = p.pnl_pct >= 0 ? 'positive' : 'negative';
+      const pct = p.tp && p.stop ? Math.max(0, Math.min(100,
+        (p.current_price - p.stop) / (p.tp - p.stop) * 100)) : 0;
+      const barColor = pct > 66 ? 'var(--green)' : pct > 33 ? 'var(--yellow)' : 'var(--orange)';
       return `<tr>
         <td><strong>${p.symbol}</strong></td>
         <td>${fmt2(p.entry)}</td>
@@ -534,7 +561,12 @@ function updatePositions(positions) {
         <td>${p.size}</td>
         <td class="${cls}">${sign}${p.pnl_pct.toFixed(2)}%<br>
           <small style="opacity:.7">${sign}${fmt2(p.pnl_eur)} €</small></td>
-        <td style="color:var(--red);font-size:11px">SL ${fmt2(p.stop)}</td>
+        <td style="font-size:11px">
+          <span style="color:var(--red)">SL ${fmt2(p.stop)}</span>
+          <span style="color:var(--muted);margin:0 3px">·</span>
+          <span style="color:var(--green)">TP ${fmt2(p.tp)}</span>
+          <div class="pos-progress"><div class="pos-progress-fill" style="width:${pct.toFixed(1)}%;background:${barColor}"></div></div>
+        </td>
       </tr>`;
     }).join('')}</tbody>
   </table>`;
@@ -607,7 +639,7 @@ function updateEquityChart(curve) {
 }
 
 // ── Price Chart ───────────────────────────────────────────────────────────────
-let chart = null, candleSeries, supertrendSeries, emaFastSeries, emaTrendSeries;
+let chart = null, candleSeries, supertrendSeries, emaFastSeries, emaTrendSeries, volumeSeries;
 let currentTf = DEFAULT_TF;
 
 function initPriceChart() {
@@ -652,6 +684,14 @@ function loadChart() {
       supertrendSeries.setData(d.filter(r => r.supertrend !== null).map(r => ({ time:r.time, value:r.supertrend })));
       emaFastSeries.setData(d.filter(r => r.ema_fast !== null).map(r => ({ time:r.time, value:r.ema_fast })));
       emaTrendSeries.setData(d.filter(r => r.ema_trend !== null).map(r => ({ time:r.time, value:r.ema_trend })));
+      const markers = d.filter(r => r.signal !== 0).map(r => ({
+        time: r.time,
+        position: r.signal === 1 ? 'belowBar' : 'aboveBar',
+        color: r.signal === 1 ? '#3fb950' : '#f85149',
+        shape: r.signal === 1 ? 'arrowUp' : 'arrowDown',
+        text: r.signal === 1 ? 'BUY' : 'SELL',
+      }));
+      candleSeries.setMarkers(markers);
       chart.timeScale().fitContent();
     })
     .catch(console.error);

@@ -91,6 +91,14 @@ def compute_metrics(state: dict, live_prices: dict) -> dict:
             if dd < max_dd:
                 max_dd = dd
 
+    # Profit factor
+    gross_profit = sum(t.get("pnl", 0) for t in trades if t.get("pnl", 0) > 0)
+    gross_loss = abs(sum(t.get("pnl", 0) for t in trades if t.get("pnl", 0) < 0))
+    profit_factor = round(gross_profit / gross_loss, 2) if gross_loss > 0 else (99.0 if gross_profit > 0 else 0.0)
+
+    # Avg trade
+    avg_trade = round(sum(t.get("pnl", 0) for t in trades) / len(trades), 2) if trades else 0.0
+
     return {
         "capital": round(capital, 2),
         "total_value": round(total_value, 2),
@@ -99,6 +107,8 @@ def compute_metrics(state: dict, live_prices: dict) -> dict:
         "pnl_eur": round(pnl_eur, 2),
         "win_rate": round(win_rate, 1),
         "max_drawdown": round(max_dd, 2),
+        "profit_factor": profit_factor,
+        "avg_trade": avg_trade,
         "open_trades": len(positions),
         "total_trades": len(trades),
         "positions": positions_detail,
@@ -229,6 +239,7 @@ def background_thread():
                     state = load_state()
                     metrics = compute_metrics(state, _live_prices)
                     metrics["equity_curve"] = compute_equity_curve(state)
+                    metrics["trades"] = list(reversed(state.get("trades", [])))[:50]
                     socketio.emit("state_update", metrics)
 
             # ── Nouvelles lignes de log ──
