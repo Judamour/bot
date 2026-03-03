@@ -15,9 +15,10 @@ from flask_socketio import SocketIO
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-STATE_FILE = os.path.join(BASE_DIR, "logs", "paper_state.json")
-LOG_FILE = os.path.join(BASE_DIR, "logs", "bot.log")
+BASE_DIR     = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+STATE_FILE   = os.path.join(BASE_DIR, "logs", "paper_state.json")
+LOG_FILE     = os.path.join(BASE_DIR, "logs", "bot.log")
+SIGNALS_FILE = os.path.join(BASE_DIR, "logs", "signals.jsonl")
 
 app = Flask(__name__)
 app.config["SECRET_KEY"] = "bot-trading-dashboard"
@@ -214,6 +215,24 @@ def api_system():
         })
     except ImportError:
         return jsonify({"error": "psutil non installé"}), 500
+
+
+@app.route("/api/signals")
+def api_signals():
+    """Retourne les derniers événements du signals.jsonl pour analyse."""
+    records = []
+    if os.path.exists(SIGNALS_FILE):
+        try:
+            with open(SIGNALS_FILE) as f:
+                lines = f.readlines()[-200:]
+            for line in lines:
+                try:
+                    records.append(json.loads(line))
+                except Exception:
+                    pass
+        except Exception:
+            pass
+    return jsonify({"signals": records})
 
 
 @app.route("/api/log")

@@ -14,7 +14,28 @@ from live.claude_filter import ask_claude
 
 init(autoreset=True)
 
-STATE_FILE = "logs/paper_state.json"
+STATE_FILE   = "logs/paper_state.json"
+SIGNALS_FILE = "logs/signals.jsonl"
+
+
+# ── Signal logger ─────────────────────────────────────────────────────────────
+
+def log_signal(event: str, symbol: str, data: dict):
+    """
+    Enregistre chaque évaluation de signal dans signals.jsonl.
+    Format JSON Lines : une ligne JSON par événement, facilement analysable.
+
+    Events: SCAN, BUY_EXECUTED, BUY_SKIP_CLAUDE, BUY_SKIP_MAX_POS,
+            BUY_SKIP_CAPITAL, EXIT_SL, EXIT_TP, EXIT_SIGNAL, TRAILING_STOP
+    """
+    record = {
+        "ts": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "event": event,
+        "symbol": symbol,
+        **data,
+    }
+    with open(SIGNALS_FILE, "a") as f:
+        f.write(json.dumps(record, default=str) + "\n")
 
 
 # ── Paper Trading State ──────────────────────────────────────────────────────
@@ -102,6 +123,22 @@ def process_symbol(symbol: str, state: dict) -> dict:
         log(f"{symbol} — Erreur récupération données: {e}", "WARN")
         return state
 
+    # ── Enregistrement scan complet ──
+    log_signal("SCAN", symbol, {
+        "price": current_price,
+        "signal": signal,
+        "adx": round(adx, 2),
+        "rsi": round(float(last["rsi"]), 2),
+        "volume_ratio": round(volume_ratio, 3),
+        "ema9": round(float(last["ema9"]), 4),
+        "ema21": round(float(last["ema21"]), 4),
+        "ema50": round(float(last["ema50"]), 4),
+        "ema200": round(float(last["ema200"]), 4),
+        "supertrend": round(float(last["supertrend"]), 4),
+        "atr": round(atr, 4),
+        "in_position": symbol in state["positions"],
+    })
+
     position = state["positions"].get(symbol)
 
     # ── Trailing stop avant vérification de sortie ──
@@ -138,6 +175,14 @@ def process_symbol(symbol: str, state: dict) -> dict:
                 "reason": reason,
             }
             state["trades"].append(trade)
+            log_signal(f"EXIT_{reason.upper()}", symbol, {
+                "entry_price": position["entry"],
+                "exit_price": exit_price,
+                "pnl": round(pnl, 2),
+                "pnl_r": round(pnl / position.get("risk_eur", 1), 2),
+                "duration_h": None,  # calculé à l'analyse
+                "reason": reason,
+            })
 
             pnl_r = round(pnl / position.get("risk_eur", 1), 1)
             log(
@@ -151,6 +196,7 @@ def process_symbol(symbol: str, state: dict) -> dict:
     if signal == 1 and symbol not in state["positions"]:
         if len(state["positions"]) >= config.MAX_OPEN_TRADES:
             log(f"{symbol} — Signal ignoré (max {config.MAX_OPEN_TRADES} positions ouvertes)", "WARN")
+            log_signal("BUY_SKIP_MAX_POS", symbol, {"price": current_price, "open_positions": len(state["positions"])})
             return state
 
         log(
@@ -170,8 +216,17 @@ def process_symbol(symbol: str, state: dict) -> dict:
             capital=state["capital"],
         )
         log(f"{symbol} — Claude: {'✓ CONFIRME' if confirme else '✗ IGNORE'} | {raison}", "INFO")
+        log_signal("CLAUDE_FILTER", symbol, {
+            "decision": "CONFIRME" if confirme else "IGNORE",
+            "raison": raison,
+            "adx": round(adx, 2),
+            "rsi": round(float(last["rsi"]), 2),
+            "volume_ratio": round(volume_ratio, 3),
+            "price": current_price,
+        })
 
         if not confirme:
+            log_signal("BUY_SKIP_CLAUDE", symbol, {"raison": raison, "price": current_price})
             return state
 
         pos = calculate_position_size(state["capital"], current_price, atr)
@@ -186,11 +241,22 @@ def process_symbol(symbol: str, state: dict) -> dict:
             "entry": current_price,
             "size": pos["size"],
             "stop": pos["stop_loss"],
-            "initial_stop": pos["stop_loss"],   # référence pour le trailing stop
+            "initial_stop": pos["stop_loss"],
             "tp": pos["take_profit"],
             "date": str(datetime.now()),
             "risk_eur": pos["risk_eur"],
         }
+        log_signal("BUY_EXECUTED", symbol, {
+            "price": current_price,
+            "size": pos["size"],
+            "stop_loss": pos["stop_loss"],
+            "take_profit": pos["take_profit"],
+            "risk_eur": pos["risk_eur"],
+            "adx": round(adx, 2),
+            "rsi": round(float(last["rsi"]), 2),
+            "volume_ratio": round(volume_ratio, 3),
+            "capital_before": round(state["capital"] + pos["size"] * current_price, 2),
+        })
 
         log(
             f"▲ {symbol} BUY | Prix: {current_price:.4f}€ | "
