@@ -11,9 +11,9 @@
 
 - [ ] **Telegram** — Créer bot @BotFather → TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID → ajouter dans .env VPS → tester
 - [ ] **Fix filtre volume xStocks** — Volume = 0 hors heures de marché → filtre bloque toutes les entrées. Utiliser volume de la dernière bougie de session
-- [ ] **Alpaca Connexion** — Créer compte alpaca.markets (gratuit) → API Key + Secret (paper) → `pip install alpaca-py` → créer `live/alpaca_client.py`
-- [ ] **Alpaca Fetcher OHLCV** — Remplacer yfinance par Alpaca `StockHistoricalDataClient` (même source que l'exécution, données temps réel)
-- [ ] **Alpaca Paper orders** — Envoyer BUY/SELL via `TradingClient(paper=True)` → suivi positions dans Alpaca dashboard
+- [ ] **Alpaca — Activer les clés** — `live/alpaca_client.py` déjà codé. Récupérer clés sur app.alpaca.markets → Paper Trading → API Keys → ajouter dans .env VPS → tester avec `venv/bin/python live/alpaca_client.py`
+- [ ] **Alpaca Fetcher OHLCV** — Une fois clés OK : décommenter le dispatcher Alpaca dans `data/fetcher.py` (1 ligne) → données temps réel NYSE/NASDAQ
+- [ ] **Alpaca Paper orders** — BUY/SELL déjà codé dans `live/bot.py` → actif automatiquement dès que clés présentes
 - [ ] **Backup paper_state.json** — Copie automatique quotidienne sur GitHub Gist. Si VPS crash → historique perdu
 - [ ] **Log rotation** — `bot.log` grossit indéfiniment. Configurer `logrotate` (max 10MB, 7 fichiers)
 - [ ] **Backtesting xStocks** — Valider la stratégie Supertrend sur données historiques actions avant de trader en réel
