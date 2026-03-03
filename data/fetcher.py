@@ -10,8 +10,13 @@ import config
 
 
 def _is_xstock(symbol: str) -> bool:
-    """True si le symbole est une action (données via yfinance, paper trading)."""
+    """True si le symbole est une action US (données via Alpaca ou yfinance)."""
     return symbol in config.XSTOCKS
+
+
+def _xstock_ticker(symbol: str) -> str:
+    """Convertit 'NVDA/EUR' → 'NVDA' (format Alpaca)."""
+    return symbol.split("/")[0]
 
 
 def get_exchange(use_auth: bool = False) -> ccxt.kraken:
@@ -104,6 +109,15 @@ def fetch_ohlcv(
         DataFrame avec colonnes: open, high, low, close, volume
     """
     if _is_xstock(symbol):
+        # Alpaca si configuré, sinon fallback yfinance
+        from live import alpaca_client
+        if alpaca_client.is_configured():
+            ticker = _xstock_ticker(symbol)
+            df_usd = alpaca_client.fetch_ohlcv(ticker, timeframe, days)
+            eurusd = _get_eurusd_rate()
+            for col in ["open", "high", "low", "close"]:
+                df_usd[col] = df_usd[col] / eurusd
+            return df_usd
         return fetch_yfinance_ohlcv(symbol, timeframe, days)
 
     # Binance pour les cryptos (API publique, pas de clé nécessaire)
