@@ -21,16 +21,16 @@
       --red: #f85149;
       --yellow: #d29922;
       --blue: #58a6ff;
-      --purple: #bc8cff;
       --orange: #ffa657;
     }
 
-    body {
+    html, body {
+      height: 100%;
       background: var(--bg);
       color: var(--text);
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
       font-size: 13px;
-      min-height: 100vh;
+      overflow-x: hidden;
     }
 
     /* ── Header ── */
@@ -38,25 +38,19 @@
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 12px 20px;
+      padding: 10px 20px;
       background: var(--surface);
       border-bottom: 1px solid var(--border);
       position: sticky;
       top: 0;
       z-index: 100;
+      flex-wrap: wrap;
+      gap: 8px;
     }
 
-    .header-left {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-    }
+    .header-left { display: flex; align-items: center; gap: 10px; }
 
-    .logo {
-      font-size: 16px;
-      font-weight: 700;
-      letter-spacing: 0.5px;
-    }
+    .logo { font-size: 15px; font-weight: 700; letter-spacing: 0.5px; }
 
     .badge {
       padding: 2px 8px;
@@ -67,84 +61,51 @@
       color: #000;
     }
 
-    .status-indicator {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      font-size: 12px;
-      color: var(--muted);
-    }
+    .status-indicator { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted); }
 
-    .dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: var(--muted);
-    }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex-shrink: 0; }
+    .dot.live { background: var(--green); box-shadow: 0 0 6px var(--green); animation: pulse 2s infinite; }
 
-    .dot.live {
-      background: var(--green);
-      box-shadow: 0 0 6px var(--green);
-      animation: pulse 2s infinite;
-    }
+    @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.4; } }
 
-    @keyframes pulse {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.4; }
-    }
+    .price-ticker { display: flex; gap: 16px; flex-wrap: wrap; }
+    .ticker-item { display: flex; align-items: center; gap: 5px; }
+    .ticker-symbol { color: var(--muted); font-size: 11px; }
+    .ticker-price { font-variant-numeric: tabular-nums; font-weight: 600; font-size: 13px; transition: color 0.3s; }
+    .ticker-price.up { color: var(--green); }
+    .ticker-price.down { color: var(--red); }
 
-    .last-update {
-      font-size: 11px;
-      color: var(--muted);
-    }
+    .last-update { font-size: 11px; color: var(--muted); white-space: nowrap; }
 
-    /* ── Main layout ── */
-    .main {
-      padding: 16px 20px;
-      display: flex;
-      flex-direction: column;
-      gap: 16px;
-    }
+    /* ── Layout ── */
+    .main { padding: 14px 20px; display: flex; flex-direction: column; gap: 14px; }
 
-    /* ── Metrics row ── */
-    .metrics-row {
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 12px;
-    }
+    /* ── Metrics ── */
+    .metrics-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
 
     .metric-card {
       background: var(--surface);
       border: 1px solid var(--border);
       border-radius: 8px;
-      padding: 16px;
+      padding: 14px 16px;
     }
 
     .metric-label {
-      font-size: 11px;
+      font-size: 10px;
       color: var(--muted);
       text-transform: uppercase;
       letter-spacing: 0.8px;
-      margin-bottom: 8px;
+      margin-bottom: 6px;
     }
 
-    .metric-value {
-      font-size: 22px;
-      font-weight: 700;
-      font-variant-numeric: tabular-nums;
-    }
-
-    .metric-sub {
-      font-size: 11px;
-      color: var(--muted);
-      margin-top: 4px;
-    }
+    .metric-value { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; }
+    .metric-sub { font-size: 11px; color: var(--muted); margin-top: 3px; }
 
     .positive { color: var(--green); }
     .negative { color: var(--red); }
     .neutral { color: var(--text); }
 
-    /* ── Chart section ── */
+    /* ── Chart ── */
     .chart-section {
       background: var(--surface);
       border: 1px solid var(--border);
@@ -156,15 +117,13 @@
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 10px 14px;
+      padding: 8px 14px;
       border-bottom: 1px solid var(--border);
+      gap: 8px;
+      flex-wrap: wrap;
     }
 
-    .chart-toolbar-left {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-    }
+    .chart-toolbar-left { display: flex; align-items: center; gap: 8px; }
 
     .symbol-select {
       background: var(--surface2);
@@ -176,10 +135,7 @@
       cursor: pointer;
     }
 
-    .tf-buttons {
-      display: flex;
-      gap: 4px;
-    }
+    .tf-buttons { display: flex; gap: 3px; }
 
     .tf-btn {
       padding: 3px 8px;
@@ -198,46 +154,28 @@
       border-color: var(--blue);
     }
 
-    .chart-legend {
-      display: flex;
-      gap: 12px;
-      font-size: 11px;
-    }
+    .chart-legend { display: flex; gap: 10px; font-size: 11px; }
+    .legend-item { display: flex; align-items: center; gap: 4px; }
+    .legend-dot { width: 10px; height: 3px; border-radius: 2px; }
 
-    .legend-item {
-      display: flex;
-      align-items: center;
-      gap: 4px;
-    }
-
-    .legend-dot {
-      width: 10px;
-      height: 3px;
-      border-radius: 2px;
-    }
-
-    #priceChart {
-      height: 380px;
-    }
+    #priceChart { height: 340px; width: 100%; }
 
     /* ── Bottom row ── */
-    .bottom-row {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 16px;
-    }
+    .bottom-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 
     .panel {
       background: var(--surface);
       border: 1px solid var(--border);
       border-radius: 8px;
       overflow: hidden;
+      display: flex;
+      flex-direction: column;
     }
 
     .panel-header {
-      padding: 10px 14px;
+      padding: 9px 14px;
       border-bottom: 1px solid var(--border);
-      font-size: 12px;
+      font-size: 11px;
       font-weight: 600;
       color: var(--muted);
       text-transform: uppercase;
@@ -245,6 +183,7 @@
       display: flex;
       align-items: center;
       justify-content: space-between;
+      flex-shrink: 0;
     }
 
     .panel-count {
@@ -255,14 +194,10 @@
       font-size: 11px;
     }
 
-    /* ── Positions table ── */
-    .positions-table {
-      width: 100%;
-      border-collapse: collapse;
-    }
-
+    /* ── Positions ── */
+    .positions-table { width: 100%; border-collapse: collapse; }
     .positions-table th {
-      padding: 8px 12px;
+      padding: 7px 12px;
       text-align: left;
       font-size: 10px;
       color: var(--muted);
@@ -270,43 +205,21 @@
       letter-spacing: 0.6px;
       border-bottom: 1px solid var(--border);
     }
-
     .positions-table td {
-      padding: 10px 12px;
+      padding: 9px 12px;
       border-bottom: 1px solid var(--border);
       font-variant-numeric: tabular-nums;
     }
+    .positions-table tr:last-child td { border-bottom: none; }
+    .positions-table tr:hover td { background: var(--surface2); }
 
-    .positions-table tr:last-child td {
-      border-bottom: none;
-    }
+    .empty-state { padding: 28px; text-align: center; color: var(--muted); font-size: 12px; }
 
-    .positions-table tr:hover td {
-      background: var(--surface2);
-    }
+    /* ── Equity ── */
+    .equity-wrapper { padding: 12px; flex: 1; min-height: 0; position: relative; height: 200px; }
+    #equityChart { width: 100% !important; height: 100% !important; }
 
-    .symbol-tag {
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
-      font-weight: 600;
-      font-size: 12px;
-    }
-
-    .empty-state {
-      padding: 32px;
-      text-align: center;
-      color: var(--muted);
-      font-size: 12px;
-    }
-
-    /* ── Equity chart ── */
-    #equityChart {
-      padding: 12px;
-      height: 220px;
-    }
-
-    /* ── Trades history ── */
+    /* ── Trades ── */
     .trades-section {
       background: var(--surface);
       border: 1px solid var(--border);
@@ -314,32 +227,16 @@
       overflow: hidden;
     }
 
-    .trades-table-wrapper {
-      max-height: 260px;
-      overflow-y: auto;
-    }
+    .trades-table-wrapper { max-height: 220px; overflow-y: auto; }
+    .trades-table-wrapper::-webkit-scrollbar { width: 5px; }
+    .trades-table-wrapper::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 
-    .trades-table-wrapper::-webkit-scrollbar {
-      width: 6px;
-    }
-    .trades-table-wrapper::-webkit-scrollbar-track {
-      background: var(--surface);
-    }
-    .trades-table-wrapper::-webkit-scrollbar-thumb {
-      background: var(--border);
-      border-radius: 3px;
-    }
-
-    .trades-table {
-      width: 100%;
-      border-collapse: collapse;
-    }
-
+    .trades-table { width: 100%; border-collapse: collapse; }
     .trades-table th {
       position: sticky;
       top: 0;
       background: var(--surface);
-      padding: 8px 12px;
+      padding: 7px 12px;
       text-align: left;
       font-size: 10px;
       color: var(--muted);
@@ -348,30 +245,20 @@
       border-bottom: 1px solid var(--border);
       z-index: 1;
     }
-
     .trades-table td {
-      padding: 8px 12px;
+      padding: 7px 12px;
       border-bottom: 1px solid var(--border);
       font-variant-numeric: tabular-nums;
       font-size: 12px;
     }
+    .trades-table tr:hover td { background: var(--surface2); }
 
-    .trades-table tr:hover td {
-      background: var(--surface2);
-    }
-
-    .reason-badge {
-      padding: 2px 6px;
-      border-radius: 3px;
-      font-size: 10px;
-      font-weight: 500;
-    }
-
+    .reason-badge { padding: 2px 6px; border-radius: 3px; font-size: 10px; font-weight: 500; }
     .reason-tp { background: rgba(63,185,80,0.15); color: var(--green); }
     .reason-sl { background: rgba(248,81,73,0.15); color: var(--red); }
     .reason-exit { background: rgba(88,166,255,0.15); color: var(--blue); }
 
-    /* ── Log section ── */
+    /* ── Log ── */
     .log-section {
       background: var(--surface);
       border: 1px solid var(--border);
@@ -383,67 +270,26 @@
       font-family: 'Courier New', monospace;
       font-size: 11px;
       padding: 10px;
-      max-height: 160px;
+      height: 140px;
       overflow-y: auto;
       background: var(--bg);
     }
 
-    .log-body::-webkit-scrollbar {
-      width: 6px;
-    }
-    .log-body::-webkit-scrollbar-track {
-      background: var(--bg);
-    }
-    .log-body::-webkit-scrollbar-thumb {
-      background: var(--border);
-      border-radius: 3px;
-    }
+    .log-body::-webkit-scrollbar { width: 5px; }
+    .log-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 
-    .log-line {
-      padding: 2px 0;
-      color: var(--muted);
-      white-space: nowrap;
-    }
-
+    .log-line { padding: 1px 0; color: var(--muted); white-space: pre-wrap; word-break: break-all; }
     .log-line.buy { color: var(--green); }
     .log-line.sell { color: var(--red); }
     .log-line.warn { color: var(--yellow); }
-
-    /* ── Live price ticker ── */
-    .price-ticker {
-      display: flex;
-      gap: 20px;
-    }
-
-    .ticker-item {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-    }
-
-    .ticker-symbol {
-      color: var(--muted);
-      font-size: 12px;
-    }
-
-    .ticker-price {
-      font-variant-numeric: tabular-nums;
-      font-weight: 600;
-      font-size: 13px;
-      transition: color 0.3s;
-    }
-
-    .ticker-price.up { color: var(--green); }
-    .ticker-price.down { color: var(--red); }
   </style>
 </head>
 <body>
 
-<!-- Header -->
 <header class="header">
   <div class="header-left">
     <div class="logo">BOT TRADING</div>
-    <span class="badge" id="modeLabel">PAPER MODE</span>
+    <span class="badge" id="modeLabel">PAPER</span>
     <div class="status-indicator">
       <div class="dot" id="statusDot"></div>
       <span id="statusText">Connexion...</span>
@@ -453,10 +299,9 @@
   <div class="last-update" id="lastUpdate">—</div>
 </header>
 
-<!-- Main -->
 <main class="main">
 
-  <!-- Metrics -->
+  <!-- Métriques -->
   <div class="metrics-row">
     <div class="metric-card">
       <div class="metric-label">Capital Libre</div>
@@ -476,19 +321,19 @@
     <div class="metric-card">
       <div class="metric-label">Drawdown Max</div>
       <div class="metric-value" id="metDrawdown">—</div>
-      <div class="metric-sub" id="metDrawdownSub">—</div>
+      <div class="metric-sub">Perte max depuis un pic</div>
     </div>
   </div>
 
-  <!-- Price Chart -->
+  <!-- Graphique prix -->
   <div class="chart-section">
     <div class="chart-toolbar">
       <div class="chart-toolbar-left">
         <select class="symbol-select" id="symbolSelect" onchange="loadChart()"></select>
         <div class="tf-buttons">
-          <button class="tf-btn" onclick="setTimeframe('1h', this)">1H</button>
-          <button class="tf-btn active" onclick="setTimeframe('4h', this)">4H</button>
-          <button class="tf-btn" onclick="setTimeframe('1d', this)">1D</button>
+          <button class="tf-btn" onclick="setTimeframe('1h',this)">1H</button>
+          <button class="tf-btn active" onclick="setTimeframe('4h',this)">4H</button>
+          <button class="tf-btn" onclick="setTimeframe('1d',this)">1D</button>
         </div>
       </div>
       <div class="chart-legend">
@@ -509,9 +354,8 @@
     <div id="priceChart"></div>
   </div>
 
-  <!-- Bottom row: positions + equity -->
+  <!-- Positions + Equity -->
   <div class="bottom-row">
-    <!-- Positions -->
     <div class="panel">
       <div class="panel-header">
         Positions Ouvertes
@@ -522,14 +366,15 @@
       </div>
     </div>
 
-    <!-- Equity curve -->
     <div class="panel">
       <div class="panel-header">Courbe d'Equity</div>
-      <canvas id="equityChart"></canvas>
+      <div class="equity-wrapper">
+        <canvas id="equityChart"></canvas>
+      </div>
     </div>
   </div>
 
-  <!-- Trades history -->
+  <!-- Trades -->
   <div class="trades-section">
     <div class="panel-header">
       Historique des Trades
@@ -563,93 +408,108 @@
 </main>
 
 <script>
-// ── Config ──────────────────────────────────────────────────────────────────
 const SYMBOLS = {{ symbols | tojson }};
 const DEFAULT_TF = {{ timeframe | tojson }};
+const MAX_LOG_LINES = 80;
 
-// ── Socket.IO ────────────────────────────────────────────────────────────────
+// ── Log buffer (évite la croissance infinie du DOM) ───────────────────────────
+let logBuffer = [];
+
+function renderLogs() {
+  const body = document.getElementById('logBody');
+  const atBottom = body.scrollHeight - body.scrollTop <= body.clientHeight + 20;
+  body.innerHTML = logBuffer.map(line => {
+    const cls = line.includes('[BUY]') ? 'buy'
+              : line.includes('[SELL]') ? 'sell'
+              : line.includes('[WARN]') ? 'warn' : '';
+    return `<div class="log-line ${cls}">${escHtml(line)}</div>`;
+  }).join('');
+  if (atBottom) body.scrollTop = body.scrollHeight;
+}
+
+function setLogs(lines) {
+  logBuffer = lines.slice(-MAX_LOG_LINES);
+  renderLogs();
+}
+
+function appendLogs(newLines) {
+  // Déduplique : n'ajoute que les lignes après la dernière déjà connue
+  if (logBuffer.length && newLines.length) {
+    const last = logBuffer[logBuffer.length - 1];
+    const idx = newLines.lastIndexOf(last);
+    newLines = idx >= 0 ? newLines.slice(idx + 1) : newLines;
+  }
+  if (!newLines.length) return;
+  logBuffer = [...logBuffer, ...newLines].slice(-MAX_LOG_LINES);
+  renderLogs();
+}
+
+function escHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ── Socket.IO ─────────────────────────────────────────────────────────────────
 const socket = io();
-let connected = false;
 
 socket.on('connect', () => {
-  connected = true;
   document.getElementById('statusDot').className = 'dot live';
   document.getElementById('statusText').textContent = 'EN COURS';
 });
 
 socket.on('disconnect', () => {
-  connected = false;
   document.getElementById('statusDot').className = 'dot';
   document.getElementById('statusText').textContent = 'DÉCONNECTÉ';
 });
 
-socket.on('price_update', (prices) => {
-  updateTicker(prices);
-  updateLastUpdate();
-});
+socket.on('price_update', prices => { updateTicker(prices); updateLastUpdate(); });
 
-socket.on('state_update', (data) => {
+socket.on('state_update', data => {
   updateMetrics(data);
   updatePositions(data.positions || []);
   if (data.equity_curve) updateEquityChart(data.equity_curve);
   updateLastUpdate();
 });
 
-socket.on('log_update', (data) => {
-  if (data.lines) appendLogs(data.lines);
-});
+socket.on('log_update', data => { if (data.lines) appendLogs(data.lines); });
 
-// ── Price Ticker ─────────────────────────────────────────────────────────────
+// ── Ticker ────────────────────────────────────────────────────────────────────
 const prevPrices = {};
 
 function updateTicker(prices) {
   const ticker = document.getElementById('priceTicker');
-  ticker.innerHTML = '';
-  for (const [sym, price] of Object.entries(prices)) {
+  ticker.innerHTML = Object.entries(prices).map(([sym, price]) => {
     const prev = prevPrices[sym];
     const dir = prev ? (price > prev ? 'up' : price < prev ? 'down' : '') : '';
     prevPrices[sym] = price;
-
-    const item = document.createElement('div');
-    item.className = 'ticker-item';
-    item.innerHTML = `
+    return `<div class="ticker-item">
       <span class="ticker-symbol">${sym.split('/')[0]}</span>
-      <span class="ticker-price ${dir}">${formatPrice(price)}</span>
-    `;
-    ticker.appendChild(item);
-
-    setTimeout(() => {
-      const el = item.querySelector('.ticker-price');
-      if (el) el.className = 'ticker-price';
-    }, 800);
-  }
+      <span class="ticker-price ${dir}" data-sym="${sym}">${fmtPrice(price)}</span>
+    </div>`;
+  }).join('');
+  setTimeout(() => {
+    document.querySelectorAll('.ticker-price').forEach(el => el.className = 'ticker-price');
+  }, 800);
 }
 
-// ── Metrics ──────────────────────────────────────────────────────────────────
-function updateMetrics(data) {
-  setText('metCapital', fmt2(data.capital) + ' €');
-  setText('metCapitalSub', `Total: ${fmt2(data.total_value)} € | Initial: ${fmt2(data.initial_capital)} €`);
+// ── Métriques ─────────────────────────────────────────────────────────────────
+function updateMetrics(d) {
+  setText('metCapital', fmt2(d.capital) + ' €');
+  setText('metCapitalSub', `Total: ${fmt2(d.total_value)} € · Initial: ${fmt2(d.initial_capital)} €`);
 
-  const pnlEl = document.getElementById('metPnl');
-  const sign = data.pnl_pct >= 0 ? '+' : '';
-  pnlEl.textContent = `${sign}${data.pnl_pct.toFixed(2)}%`;
-  pnlEl.className = 'metric-value ' + (data.pnl_pct >= 0 ? 'positive' : 'negative');
-  setText('metPnlSub', `${sign}${fmt2(data.pnl_eur)} € sur capital initial`);
+  const sign = d.pnl_pct >= 0 ? '+' : '';
+  setHtml('metPnl', `<span class="${d.pnl_pct >= 0 ? 'positive' : 'negative'}">${sign}${d.pnl_pct.toFixed(2)}%</span>`);
+  setText('metPnlSub', `${sign}${fmt2(d.pnl_eur)} € sur capital initial`);
 
-  setText('metWinRate', data.win_rate.toFixed(1) + '%');
-  setText('metWinRateSub', `${data.open_trades} ouverts · ${data.total_trades} fermés`);
+  setText('metWinRate', d.win_rate.toFixed(1) + '%');
+  setText('metWinRateSub', `${d.open_trades} ouverts · ${d.total_trades} fermés`);
 
-  const ddEl = document.getElementById('metDrawdown');
-  ddEl.textContent = data.max_drawdown.toFixed(2) + '%';
-  ddEl.className = 'metric-value ' + (data.max_drawdown < 0 ? 'negative' : 'neutral');
-  setText('metDrawdownSub', 'Perte max depuis un pic');
+  setHtml('metDrawdown', `<span class="${d.max_drawdown < 0 ? 'negative' : 'neutral'}">${d.max_drawdown.toFixed(2)}%</span>`);
 
-  if (data.paper_mode !== undefined) {
-    document.getElementById('modeLabel').textContent = data.paper_mode ? 'PAPER MODE' : 'LIVE MODE';
-  }
+  if (d.paper_mode !== undefined)
+    document.getElementById('modeLabel').textContent = d.paper_mode ? 'PAPER' : 'LIVE';
 }
 
-// ── Positions ────────────────────────────────────────────────────────────────
+// ── Positions ─────────────────────────────────────────────────────────────────
 function updatePositions(positions) {
   document.getElementById('posCount').textContent = positions.length;
   const body = document.getElementById('positionsBody');
@@ -659,32 +519,28 @@ function updatePositions(positions) {
     return;
   }
 
-  const rows = positions.map(p => {
-    const sign = p.pnl_pct >= 0 ? '+' : '';
-    const cls = p.pnl_pct >= 0 ? 'positive' : 'negative';
-    return `<tr>
-      <td><span class="symbol-tag">${p.symbol}</span></td>
-      <td>${fmt2(p.entry)}</td>
-      <td>${fmt2(p.current_price)}</td>
-      <td>${p.size}</td>
-      <td class="${cls}">${sign}${p.pnl_pct.toFixed(2)}%<br>
-        <small style="opacity:.7">${sign}${fmt2(p.pnl_eur)} €</small></td>
-      <td style="color:var(--red);font-size:11px">SL ${fmt2(p.stop)}</td>
-    </tr>`;
-  }).join('');
-
   body.innerHTML = `<table class="positions-table">
-    <thead>
-      <tr>
-        <th>Symbole</th><th>Entrée</th><th>Prix actuel</th>
-        <th>Taille</th><th>P&L</th><th>Stop</th>
-      </tr>
-    </thead>
-    <tbody>${rows}</tbody>
+    <thead><tr>
+      <th>Symbole</th><th>Entrée</th><th>Prix actuel</th>
+      <th>Taille</th><th>P&L</th><th>Stop</th>
+    </tr></thead>
+    <tbody>${positions.map(p => {
+      const sign = p.pnl_pct >= 0 ? '+' : '';
+      const cls = p.pnl_pct >= 0 ? 'positive' : 'negative';
+      return `<tr>
+        <td><strong>${p.symbol}</strong></td>
+        <td>${fmt2(p.entry)}</td>
+        <td>${fmt2(p.current_price)}</td>
+        <td>${p.size}</td>
+        <td class="${cls}">${sign}${p.pnl_pct.toFixed(2)}%<br>
+          <small style="opacity:.7">${sign}${fmt2(p.pnl_eur)} €</small></td>
+        <td style="color:var(--red);font-size:11px">SL ${fmt2(p.stop)}</td>
+      </tr>`;
+    }).join('')}</tbody>
   </table>`;
 }
 
-// ── Trades History ────────────────────────────────────────────────────────────
+// ── Trades ────────────────────────────────────────────────────────────────────
 function updateTrades(trades) {
   document.getElementById('tradesCount').textContent = trades.length;
   const tbody = document.getElementById('tradesBody');
@@ -697,72 +553,47 @@ function updateTrades(trades) {
   tbody.innerHTML = trades.map(t => {
     const sign = t.pnl >= 0 ? '+' : '';
     const cls = t.pnl >= 0 ? 'positive' : 'negative';
-    const reasonClass = t.reason === 'take_profit' ? 'reason-tp'
-                      : t.reason === 'stop_loss' ? 'reason-sl' : 'reason-exit';
-    const reasonLabel = t.reason === 'take_profit' ? 'TP'
-                      : t.reason === 'stop_loss' ? 'SL'
-                      : t.reason === 'signal_exit' ? 'Signal' : t.reason;
+    const rc = t.reason === 'take_profit' ? 'reason-tp' : t.reason === 'stop_loss' ? 'reason-sl' : 'reason-exit';
+    const rl = t.reason === 'take_profit' ? 'TP' : t.reason === 'stop_loss' ? 'SL' : 'Signal';
     return `<tr>
       <td style="color:var(--muted)">${fmtDate(t.exit_date)}</td>
       <td><strong>${t.symbol}</strong></td>
       <td>${fmt4(t.entry_price)}</td>
       <td>${fmt4(t.exit_price)}</td>
       <td class="${cls}">${sign}${fmt2(t.pnl)} €</td>
-      <td><span class="reason-badge ${reasonClass}">${reasonLabel}</span></td>
+      <td><span class="reason-badge ${rc}">${rl}</span></td>
     </tr>`;
   }).join('');
 }
 
-// ── Equity Chart (Chart.js) ───────────────────────────────────────────────────
+// ── Equity Chart ──────────────────────────────────────────────────────────────
 let equityChart = null;
 
 function initEquityChart() {
   const ctx = document.getElementById('equityChart').getContext('2d');
   equityChart = new Chart(ctx, {
     type: 'line',
-    data: {
-      labels: [],
-      datasets: [{
-        data: [],
-        borderColor: '#58a6ff',
-        backgroundColor: 'rgba(88,166,255,0.08)',
-        borderWidth: 2,
-        pointRadius: 3,
-        pointHoverRadius: 5,
-        fill: true,
-        tension: 0.3,
-      }]
-    },
+    data: { labels: [], datasets: [{
+      data: [],
+      borderColor: '#58a6ff',
+      backgroundColor: 'rgba(88,166,255,0.08)',
+      borderWidth: 2,
+      pointRadius: 3,
+      fill: true,
+      tension: 0.3,
+    }]},
     options: {
       responsive: true,
       maintainAspectRatio: false,
       animation: { duration: 300 },
-      plugins: {
-        legend: { display: false },
-        tooltip: {
-          callbacks: {
-            label: ctx => `${ctx.parsed.y.toFixed(2)} €`
-          }
-        }
+      plugins: { legend: { display: false },
+        tooltip: { callbacks: { label: c => `${c.parsed.y.toFixed(2)} €` } }
       },
       scales: {
-        x: {
-          ticks: {
-            color: '#8b949e',
-            font: { size: 10 },
-            maxTicksLimit: 6,
-            maxRotation: 0,
-          },
-          grid: { color: 'rgba(48,54,61,0.6)' }
-        },
-        y: {
-          ticks: {
-            color: '#8b949e',
-            font: { size: 10 },
-            callback: v => v.toFixed(0) + ' €'
-          },
-          grid: { color: 'rgba(48,54,61,0.6)' }
-        }
+        x: { ticks: { color: '#8b949e', font: { size: 10 }, maxTicksLimit: 5, maxRotation: 0 },
+             grid: { color: 'rgba(48,54,61,0.5)' } },
+        y: { ticks: { color: '#8b949e', font: { size: 10 }, callback: v => v.toFixed(0) + ' €' },
+             grid: { color: 'rgba(48,54,61,0.5)' } }
       }
     }
   });
@@ -775,102 +606,55 @@ function updateEquityChart(curve) {
   equityChart.update('none');
 }
 
-// ── Price Chart (Lightweight Charts) ─────────────────────────────────────────
-let chart = null;
-let candleSeries = null;
-let supertrendSeries = null;
-let emaFastSeries = null;
-let emaTrendSeries = null;
+// ── Price Chart ───────────────────────────────────────────────────────────────
+let chart = null, candleSeries, supertrendSeries, emaFastSeries, emaTrendSeries;
 let currentTf = DEFAULT_TF;
 
 function initPriceChart() {
   const container = document.getElementById('priceChart');
   chart = LightweightCharts.createChart(container, {
     width: container.clientWidth,
-    height: 380,
-    layout: {
-      background: { type: 'solid', color: '#161b22' },
-      textColor: '#8b949e',
-    },
-    grid: {
-      vertLines: { color: 'rgba(48,54,61,0.5)' },
-      horzLines: { color: 'rgba(48,54,61,0.5)' },
-    },
+    height: 340,
+    layout: { background: { type: 'solid', color: '#161b22' }, textColor: '#8b949e' },
+    grid: { vertLines: { color: 'rgba(48,54,61,0.5)' }, horzLines: { color: 'rgba(48,54,61,0.5)' } },
     crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
     rightPriceScale: { borderColor: '#30363d' },
     timeScale: { borderColor: '#30363d', timeVisible: true },
   });
 
   candleSeries = chart.addCandlestickSeries({
-    upColor: '#3fb950',
-    downColor: '#f85149',
-    borderUpColor: '#3fb950',
-    borderDownColor: '#f85149',
-    wickUpColor: '#3fb950',
-    wickDownColor: '#f85149',
+    upColor:'#3fb950', downColor:'#f85149',
+    borderUpColor:'#3fb950', borderDownColor:'#f85149',
+    wickUpColor:'#3fb950', wickDownColor:'#f85149',
   });
 
-  supertrendSeries = chart.addLineSeries({
-    color: '#f0b27a',
-    lineWidth: 2,
-    lineStyle: LightweightCharts.LineStyle.Dashed,
-    title: 'Supertrend',
-  });
+  supertrendSeries = chart.addLineSeries({ color:'#f0b27a', lineWidth:2,
+    lineStyle: LightweightCharts.LineStyle.Dashed });
+  emaFastSeries = chart.addLineSeries({ color:'#58a6ff', lineWidth:1 });
+  emaTrendSeries = chart.addLineSeries({ color:'#ffa657', lineWidth:2 });
 
-  emaFastSeries = chart.addLineSeries({
-    color: '#58a6ff',
-    lineWidth: 1,
-    title: 'EMA 50',
+  const ro = new ResizeObserver(() => {
+    if (chart) chart.resize(container.clientWidth, 340);
   });
-
-  emaTrendSeries = chart.addLineSeries({
-    color: '#ffa657',
-    lineWidth: 2,
-    title: 'EMA 200',
-  });
-
-  window.addEventListener('resize', () => {
-    if (chart) chart.resize(container.clientWidth, 380);
-  });
+  ro.observe(container);
 }
 
 function loadChart() {
   const symbol = document.getElementById('symbolSelect').value;
   if (!symbol || !chart) return;
 
-  const symEncoded = symbol.replace('/', '-');
-  fetch(`/api/prices/${symEncoded}`)
+  fetch(`/api/prices/${symbol.replace('/', '-')}`)
     .then(r => r.json())
     .then(data => {
-      if (data.error) { console.error(data.error); return; }
-
-      const candles = data.data.map(d => ({
-        time: d.time,
-        open: d.open,
-        high: d.high,
-        low: d.low,
-        close: d.close,
-      }));
-
-      const supertrend = data.data
-        .filter(d => d.supertrend !== null)
-        .map(d => ({ time: d.time, value: d.supertrend }));
-
-      const emaFast = data.data
-        .filter(d => d.ema_fast !== null)
-        .map(d => ({ time: d.time, value: d.ema_fast }));
-
-      const emaTrend = data.data
-        .filter(d => d.ema_trend !== null)
-        .map(d => ({ time: d.time, value: d.ema_trend }));
-
-      candleSeries.setData(candles);
-      supertrendSeries.setData(supertrend);
-      emaFastSeries.setData(emaFast);
-      emaTrendSeries.setData(emaTrend);
+      if (data.error) return;
+      const d = data.data;
+      candleSeries.setData(d.map(r => ({ time:r.time, open:r.open, high:r.high, low:r.low, close:r.close })));
+      supertrendSeries.setData(d.filter(r => r.supertrend !== null).map(r => ({ time:r.time, value:r.supertrend })));
+      emaFastSeries.setData(d.filter(r => r.ema_fast !== null).map(r => ({ time:r.time, value:r.ema_fast })));
+      emaTrendSeries.setData(d.filter(r => r.ema_trend !== null).map(r => ({ time:r.time, value:r.ema_trend })));
       chart.timeScale().fitContent();
     })
-    .catch(err => console.error('Chart error:', err));
+    .catch(console.error);
 }
 
 function setTimeframe(tf, btn) {
@@ -880,84 +664,43 @@ function setTimeframe(tf, btn) {
   loadChart();
 }
 
-// ── Logs ─────────────────────────────────────────────────────────────────────
-function appendLogs(lines) {
-  const body = document.getElementById('logBody');
-  lines.forEach(line => {
-    const div = document.createElement('div');
-    div.className = 'log-line' +
-      (line.includes('[BUY]') ? ' buy' :
-       line.includes('[SELL]') ? ' sell' :
-       line.includes('[WARN]') ? ' warn' : '');
-    div.textContent = line;
-    body.appendChild(div);
-  });
-  body.scrollTop = body.scrollHeight;
-}
-
-// ── Helpers ──────────────────────────────────────────────────────────────────
-function setText(id, val) {
-  const el = document.getElementById(id);
-  if (el) el.textContent = val;
-}
-
-function fmt2(n) {
-  return typeof n === 'number' ? n.toFixed(2) : '—';
-}
-
-function fmt4(n) {
-  return typeof n === 'number' ? n.toFixed(4) : '—';
-}
-
-function formatPrice(p) {
-  if (p >= 1000) return p.toFixed(2);
-  if (p >= 10) return p.toFixed(3);
-  return p.toFixed(4);
-}
-
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function setText(id, v) { const el = document.getElementById(id); if (el) el.textContent = v; }
+function setHtml(id, v) { const el = document.getElementById(id); if (el) el.innerHTML = v; }
+function fmt2(n) { return typeof n === 'number' ? n.toFixed(2) : '—'; }
+function fmt4(n) { return typeof n === 'number' ? n.toFixed(4) : '—'; }
+function fmtPrice(p) { return p >= 1000 ? p.toFixed(2) : p >= 10 ? p.toFixed(3) : p.toFixed(4); }
+function updateLastUpdate() { setText('lastUpdate', 'Mis à jour ' + new Date().toLocaleTimeString('fr')); }
 function fmtDate(s) {
   if (!s) return '—';
   const d = new Date(s);
   if (isNaN(d)) return s.slice(0, 16);
-  return d.toLocaleDateString('fr', { month: '2-digit', day: '2-digit' }) + ' ' +
-         d.toLocaleTimeString('fr', { hour: '2-digit', minute: '2-digit' });
-}
-
-function updateLastUpdate() {
-  document.getElementById('lastUpdate').textContent =
-    'Mis à jour ' + new Date().toLocaleTimeString('fr');
+  return d.toLocaleDateString('fr',{month:'2-digit',day:'2-digit'}) + ' ' +
+         d.toLocaleTimeString('fr',{hour:'2-digit',minute:'2-digit'});
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 function init() {
-  // Peupler le select des symboles
   const sel = document.getElementById('symbolSelect');
   SYMBOLS.forEach(sym => {
     const opt = document.createElement('option');
-    opt.value = sym;
-    opt.textContent = sym;
+    opt.value = sym; opt.textContent = sym;
     sel.appendChild(opt);
   });
 
-  // Init charts
   initPriceChart();
   initEquityChart();
 
-  // Charger les données initiales
-  fetch('/api/state')
-    .then(r => r.json())
-    .then(data => {
-      updateMetrics(data);
-      updatePositions(data.positions || []);
-      updateTrades(data.trades || []);
-      if (data.equity_curve) updateEquityChart(data.equity_curve);
-    });
+  fetch('/api/state').then(r => r.json()).then(data => {
+    updateMetrics(data);
+    updatePositions(data.positions || []);
+    updateTrades(data.trades || []);
+    if (data.equity_curve) updateEquityChart(data.equity_curve);
+  });
 
-  fetch('/api/log')
-    .then(r => r.json())
-    .then(data => {
-      if (data.lines) appendLogs(data.lines);
-    });
+  fetch('/api/log').then(r => r.json()).then(data => {
+    if (data.lines) setLogs(data.lines);
+  });
 
   loadChart();
 }
