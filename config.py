@@ -10,8 +10,7 @@ API_SECRET = os.getenv("KRAKEN_API_SECRET", "")
 
 # ── Paires tradées ──────────────────────────────────────────────────────────
 # Format Kraken : "BTC/EUR", "ETH/EUR", "SOL/EUR"
-# BTC/ETH exclus car en bear market prolongé (2025) — réactiver lors du prochain bull run
-SYMBOLS = ["SOL/EUR", "BNB/EUR"]
+SYMBOLS = ["BTC/EUR", "ETH/EUR", "SOL/EUR", "BNB/EUR", "ADA/EUR", "DOT/EUR"]
 
 # ── Timeframe ───────────────────────────────────────────────────────────────
 # Options : "1m", "5m", "15m", "1h", "4h", "1d"
