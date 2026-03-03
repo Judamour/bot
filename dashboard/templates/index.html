@@ -1,0 +1,968 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bot Trading — Dashboard</title>
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0d1117;
+      --surface: #161b22;
+      --surface2: #21262d;
+      --border: #30363d;
+      --text: #e6edf3;
+      --muted: #8b949e;
+      --green: #3fb950;
+      --red: #f85149;
+      --yellow: #d29922;
+      --blue: #58a6ff;
+      --purple: #bc8cff;
+      --orange: #ffa657;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 13px;
+      min-height: 100vh;
+    }
+
+    /* ── Header ── */
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 20px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+
+    .header-left {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .logo {
+      font-size: 16px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+    }
+
+    .badge {
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 600;
+      background: var(--yellow);
+      color: #000;
+    }
+
+    .status-indicator {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--muted);
+    }
+
+    .dot.live {
+      background: var(--green);
+      box-shadow: 0 0 6px var(--green);
+      animation: pulse 2s infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+
+    .last-update {
+      font-size: 11px;
+      color: var(--muted);
+    }
+
+    /* ── Main layout ── */
+    .main {
+      padding: 16px 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    /* ── Metrics row ── */
+    .metrics-row {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+    }
+
+    .metric-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px;
+    }
+
+    .metric-label {
+      font-size: 11px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      margin-bottom: 8px;
+    }
+
+    .metric-value {
+      font-size: 22px;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .metric-sub {
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 4px;
+    }
+
+    .positive { color: var(--green); }
+    .negative { color: var(--red); }
+    .neutral { color: var(--text); }
+
+    /* ── Chart section ── */
+    .chart-section {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    .chart-toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .chart-toolbar-left {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .symbol-select {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 4px 8px;
+      border-radius: 5px;
+      font-size: 12px;
+      cursor: pointer;
+    }
+
+    .tf-buttons {
+      display: flex;
+      gap: 4px;
+    }
+
+    .tf-btn {
+      padding: 3px 8px;
+      border-radius: 4px;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--muted);
+      font-size: 11px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .tf-btn.active, .tf-btn:hover {
+      background: var(--blue);
+      color: #fff;
+      border-color: var(--blue);
+    }
+
+    .chart-legend {
+      display: flex;
+      gap: 12px;
+      font-size: 11px;
+    }
+
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .legend-dot {
+      width: 10px;
+      height: 3px;
+      border-radius: 2px;
+    }
+
+    #priceChart {
+      height: 380px;
+    }
+
+    /* ── Bottom row ── */
+    .bottom-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+
+    .panel {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    .panel-header {
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--border);
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .panel-count {
+      background: var(--surface2);
+      color: var(--text);
+      padding: 1px 6px;
+      border-radius: 10px;
+      font-size: 11px;
+    }
+
+    /* ── Positions table ── */
+    .positions-table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    .positions-table th {
+      padding: 8px 12px;
+      text-align: left;
+      font-size: 10px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .positions-table td {
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .positions-table tr:last-child td {
+      border-bottom: none;
+    }
+
+    .positions-table tr:hover td {
+      background: var(--surface2);
+    }
+
+    .symbol-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-weight: 600;
+      font-size: 12px;
+    }
+
+    .empty-state {
+      padding: 32px;
+      text-align: center;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    /* ── Equity chart ── */
+    #equityChart {
+      padding: 12px;
+      height: 220px;
+    }
+
+    /* ── Trades history ── */
+    .trades-section {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    .trades-table-wrapper {
+      max-height: 260px;
+      overflow-y: auto;
+    }
+
+    .trades-table-wrapper::-webkit-scrollbar {
+      width: 6px;
+    }
+    .trades-table-wrapper::-webkit-scrollbar-track {
+      background: var(--surface);
+    }
+    .trades-table-wrapper::-webkit-scrollbar-thumb {
+      background: var(--border);
+      border-radius: 3px;
+    }
+
+    .trades-table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    .trades-table th {
+      position: sticky;
+      top: 0;
+      background: var(--surface);
+      padding: 8px 12px;
+      text-align: left;
+      font-size: 10px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      border-bottom: 1px solid var(--border);
+      z-index: 1;
+    }
+
+    .trades-table td {
+      padding: 8px 12px;
+      border-bottom: 1px solid var(--border);
+      font-variant-numeric: tabular-nums;
+      font-size: 12px;
+    }
+
+    .trades-table tr:hover td {
+      background: var(--surface2);
+    }
+
+    .reason-badge {
+      padding: 2px 6px;
+      border-radius: 3px;
+      font-size: 10px;
+      font-weight: 500;
+    }
+
+    .reason-tp { background: rgba(63,185,80,0.15); color: var(--green); }
+    .reason-sl { background: rgba(248,81,73,0.15); color: var(--red); }
+    .reason-exit { background: rgba(88,166,255,0.15); color: var(--blue); }
+
+    /* ── Log section ── */
+    .log-section {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    .log-body {
+      font-family: 'Courier New', monospace;
+      font-size: 11px;
+      padding: 10px;
+      max-height: 160px;
+      overflow-y: auto;
+      background: var(--bg);
+    }
+
+    .log-body::-webkit-scrollbar {
+      width: 6px;
+    }
+    .log-body::-webkit-scrollbar-track {
+      background: var(--bg);
+    }
+    .log-body::-webkit-scrollbar-thumb {
+      background: var(--border);
+      border-radius: 3px;
+    }
+
+    .log-line {
+      padding: 2px 0;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+
+    .log-line.buy { color: var(--green); }
+    .log-line.sell { color: var(--red); }
+    .log-line.warn { color: var(--yellow); }
+
+    /* ── Live price ticker ── */
+    .price-ticker {
+      display: flex;
+      gap: 20px;
+    }
+
+    .ticker-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .ticker-symbol {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .ticker-price {
+      font-variant-numeric: tabular-nums;
+      font-weight: 600;
+      font-size: 13px;
+      transition: color 0.3s;
+    }
+
+    .ticker-price.up { color: var(--green); }
+    .ticker-price.down { color: var(--red); }
+  </style>
+</head>
+<body>
+
+<!-- Header -->
+<header class="header">
+  <div class="header-left">
+    <div class="logo">BOT TRADING</div>
+    <span class="badge" id="modeLabel">PAPER MODE</span>
+    <div class="status-indicator">
+      <div class="dot" id="statusDot"></div>
+      <span id="statusText">Connexion...</span>
+    </div>
+  </div>
+  <div class="price-ticker" id="priceTicker"></div>
+  <div class="last-update" id="lastUpdate">—</div>
+</header>
+
+<!-- Main -->
+<main class="main">
+
+  <!-- Metrics -->
+  <div class="metrics-row">
+    <div class="metric-card">
+      <div class="metric-label">Capital Libre</div>
+      <div class="metric-value neutral" id="metCapital">—</div>
+      <div class="metric-sub" id="metCapitalSub">—</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">P&amp;L Total</div>
+      <div class="metric-value" id="metPnl">—</div>
+      <div class="metric-sub" id="metPnlSub">—</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">Win Rate</div>
+      <div class="metric-value neutral" id="metWinRate">—</div>
+      <div class="metric-sub" id="metWinRateSub">—</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">Drawdown Max</div>
+      <div class="metric-value" id="metDrawdown">—</div>
+      <div class="metric-sub" id="metDrawdownSub">—</div>
+    </div>
+  </div>
+
+  <!-- Price Chart -->
+  <div class="chart-section">
+    <div class="chart-toolbar">
+      <div class="chart-toolbar-left">
+        <select class="symbol-select" id="symbolSelect" onchange="loadChart()"></select>
+        <div class="tf-buttons">
+          <button class="tf-btn" onclick="setTimeframe('1h', this)">1H</button>
+          <button class="tf-btn active" onclick="setTimeframe('4h', this)">4H</button>
+          <button class="tf-btn" onclick="setTimeframe('1d', this)">1D</button>
+        </div>
+      </div>
+      <div class="chart-legend">
+        <div class="legend-item">
+          <div class="legend-dot" style="background:#f0b27a"></div>
+          <span style="color:var(--muted)">Supertrend</span>
+        </div>
+        <div class="legend-item">
+          <div class="legend-dot" style="background:#58a6ff"></div>
+          <span style="color:var(--muted)">EMA 50</span>
+        </div>
+        <div class="legend-item">
+          <div class="legend-dot" style="background:#ffa657"></div>
+          <span style="color:var(--muted)">EMA 200</span>
+        </div>
+      </div>
+    </div>
+    <div id="priceChart"></div>
+  </div>
+
+  <!-- Bottom row: positions + equity -->
+  <div class="bottom-row">
+    <!-- Positions -->
+    <div class="panel">
+      <div class="panel-header">
+        Positions Ouvertes
+        <span class="panel-count" id="posCount">0</span>
+      </div>
+      <div id="positionsBody">
+        <div class="empty-state">Aucune position ouverte</div>
+      </div>
+    </div>
+
+    <!-- Equity curve -->
+    <div class="panel">
+      <div class="panel-header">Courbe d'Equity</div>
+      <canvas id="equityChart"></canvas>
+    </div>
+  </div>
+
+  <!-- Trades history -->
+  <div class="trades-section">
+    <div class="panel-header">
+      Historique des Trades
+      <span class="panel-count" id="tradesCount">0</span>
+    </div>
+    <div class="trades-table-wrapper">
+      <table class="trades-table">
+        <thead>
+          <tr>
+            <th>Date sortie</th>
+            <th>Symbole</th>
+            <th>Entrée</th>
+            <th>Sortie</th>
+            <th>P&amp;L</th>
+            <th>Raison</th>
+          </tr>
+        </thead>
+        <tbody id="tradesBody">
+          <tr><td colspan="6" class="empty-state">Aucun trade fermé</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Log -->
+  <div class="log-section">
+    <div class="panel-header">Journal Bot</div>
+    <div class="log-body" id="logBody"></div>
+  </div>
+
+</main>
+
+<script>
+// ── Config ──────────────────────────────────────────────────────────────────
+const SYMBOLS = {{ symbols | tojson }};
+const DEFAULT_TF = {{ timeframe | tojson }};
+
+// ── Socket.IO ────────────────────────────────────────────────────────────────
+const socket = io();
+let connected = false;
+
+socket.on('connect', () => {
+  connected = true;
+  document.getElementById('statusDot').className = 'dot live';
+  document.getElementById('statusText').textContent = 'EN COURS';
+});
+
+socket.on('disconnect', () => {
+  connected = false;
+  document.getElementById('statusDot').className = 'dot';
+  document.getElementById('statusText').textContent = 'DÉCONNECTÉ';
+});
+
+socket.on('price_update', (prices) => {
+  updateTicker(prices);
+  updateLastUpdate();
+});
+
+socket.on('state_update', (data) => {
+  updateMetrics(data);
+  updatePositions(data.positions || []);
+  if (data.equity_curve) updateEquityChart(data.equity_curve);
+  updateLastUpdate();
+});
+
+socket.on('log_update', (data) => {
+  if (data.lines) appendLogs(data.lines);
+});
+
+// ── Price Ticker ─────────────────────────────────────────────────────────────
+const prevPrices = {};
+
+function updateTicker(prices) {
+  const ticker = document.getElementById('priceTicker');
+  ticker.innerHTML = '';
+  for (const [sym, price] of Object.entries(prices)) {
+    const prev = prevPrices[sym];
+    const dir = prev ? (price > prev ? 'up' : price < prev ? 'down' : '') : '';
+    prevPrices[sym] = price;
+
+    const item = document.createElement('div');
+    item.className = 'ticker-item';
+    item.innerHTML = `
+      <span class="ticker-symbol">${sym.split('/')[0]}</span>
+      <span class="ticker-price ${dir}">${formatPrice(price)}</span>
+    `;
+    ticker.appendChild(item);
+
+    setTimeout(() => {
+      const el = item.querySelector('.ticker-price');
+      if (el) el.className = 'ticker-price';
+    }, 800);
+  }
+}
+
+// ── Metrics ──────────────────────────────────────────────────────────────────
+function updateMetrics(data) {
+  setText('metCapital', fmt2(data.capital) + ' €');
+  setText('metCapitalSub', `Total: ${fmt2(data.total_value)} € | Initial: ${fmt2(data.initial_capital)} €`);
+
+  const pnlEl = document.getElementById('metPnl');
+  const sign = data.pnl_pct >= 0 ? '+' : '';
+  pnlEl.textContent = `${sign}${data.pnl_pct.toFixed(2)}%`;
+  pnlEl.className = 'metric-value ' + (data.pnl_pct >= 0 ? 'positive' : 'negative');
+  setText('metPnlSub', `${sign}${fmt2(data.pnl_eur)} € sur capital initial`);
+
+  setText('metWinRate', data.win_rate.toFixed(1) + '%');
+  setText('metWinRateSub', `${data.open_trades} ouverts · ${data.total_trades} fermés`);
+
+  const ddEl = document.getElementById('metDrawdown');
+  ddEl.textContent = data.max_drawdown.toFixed(2) + '%';
+  ddEl.className = 'metric-value ' + (data.max_drawdown < 0 ? 'negative' : 'neutral');
+  setText('metDrawdownSub', 'Perte max depuis un pic');
+
+  if (data.paper_mode !== undefined) {
+    document.getElementById('modeLabel').textContent = data.paper_mode ? 'PAPER MODE' : 'LIVE MODE';
+  }
+}
+
+// ── Positions ────────────────────────────────────────────────────────────────
+function updatePositions(positions) {
+  document.getElementById('posCount').textContent = positions.length;
+  const body = document.getElementById('positionsBody');
+
+  if (!positions.length) {
+    body.innerHTML = '<div class="empty-state">Aucune position ouverte</div>';
+    return;
+  }
+
+  const rows = positions.map(p => {
+    const sign = p.pnl_pct >= 0 ? '+' : '';
+    const cls = p.pnl_pct >= 0 ? 'positive' : 'negative';
+    return `<tr>
+      <td><span class="symbol-tag">${p.symbol}</span></td>
+      <td>${fmt2(p.entry)}</td>
+      <td>${fmt2(p.current_price)}</td>
+      <td>${p.size}</td>
+      <td class="${cls}">${sign}${p.pnl_pct.toFixed(2)}%<br>
+        <small style="opacity:.7">${sign}${fmt2(p.pnl_eur)} €</small></td>
+      <td style="color:var(--red);font-size:11px">SL ${fmt2(p.stop)}</td>
+    </tr>`;
+  }).join('');
+
+  body.innerHTML = `<table class="positions-table">
+    <thead>
+      <tr>
+        <th>Symbole</th><th>Entrée</th><th>Prix actuel</th>
+        <th>Taille</th><th>P&L</th><th>Stop</th>
+      </tr>
+    </thead>
+    <tbody>${rows}</tbody>
+  </table>`;
+}
+
+// ── Trades History ────────────────────────────────────────────────────────────
+function updateTrades(trades) {
+  document.getElementById('tradesCount').textContent = trades.length;
+  const tbody = document.getElementById('tradesBody');
+
+  if (!trades.length) {
+    tbody.innerHTML = '<tr><td colspan="6" class="empty-state">Aucun trade fermé</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = trades.map(t => {
+    const sign = t.pnl >= 0 ? '+' : '';
+    const cls = t.pnl >= 0 ? 'positive' : 'negative';
+    const reasonClass = t.reason === 'take_profit' ? 'reason-tp'
+                      : t.reason === 'stop_loss' ? 'reason-sl' : 'reason-exit';
+    const reasonLabel = t.reason === 'take_profit' ? 'TP'
+                      : t.reason === 'stop_loss' ? 'SL'
+                      : t.reason === 'signal_exit' ? 'Signal' : t.reason;
+    return `<tr>
+      <td style="color:var(--muted)">${fmtDate(t.exit_date)}</td>
+      <td><strong>${t.symbol}</strong></td>
+      <td>${fmt4(t.entry_price)}</td>
+      <td>${fmt4(t.exit_price)}</td>
+      <td class="${cls}">${sign}${fmt2(t.pnl)} €</td>
+      <td><span class="reason-badge ${reasonClass}">${reasonLabel}</span></td>
+    </tr>`;
+  }).join('');
+}
+
+// ── Equity Chart (Chart.js) ───────────────────────────────────────────────────
+let equityChart = null;
+
+function initEquityChart() {
+  const ctx = document.getElementById('equityChart').getContext('2d');
+  equityChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: [],
+      datasets: [{
+        data: [],
+        borderColor: '#58a6ff',
+        backgroundColor: 'rgba(88,166,255,0.08)',
+        borderWidth: 2,
+        pointRadius: 3,
+        pointHoverRadius: 5,
+        fill: true,
+        tension: 0.3,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: { duration: 300 },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: ctx => `${ctx.parsed.y.toFixed(2)} €`
+          }
+        }
+      },
+      scales: {
+        x: {
+          ticks: {
+            color: '#8b949e',
+            font: { size: 10 },
+            maxTicksLimit: 6,
+            maxRotation: 0,
+          },
+          grid: { color: 'rgba(48,54,61,0.6)' }
+        },
+        y: {
+          ticks: {
+            color: '#8b949e',
+            font: { size: 10 },
+            callback: v => v.toFixed(0) + ' €'
+          },
+          grid: { color: 'rgba(48,54,61,0.6)' }
+        }
+      }
+    }
+  });
+}
+
+function updateEquityChart(curve) {
+  if (!equityChart) return;
+  equityChart.data.labels = curve.map(p => p.date ? fmtDate(p.date) : 'Début');
+  equityChart.data.datasets[0].data = curve.map(p => p.value);
+  equityChart.update('none');
+}
+
+// ── Price Chart (Lightweight Charts) ─────────────────────────────────────────
+let chart = null;
+let candleSeries = null;
+let supertrendSeries = null;
+let emaFastSeries = null;
+let emaTrendSeries = null;
+let currentTf = DEFAULT_TF;
+
+function initPriceChart() {
+  const container = document.getElementById('priceChart');
+  chart = LightweightCharts.createChart(container, {
+    width: container.clientWidth,
+    height: 380,
+    layout: {
+      background: { type: 'solid', color: '#161b22' },
+      textColor: '#8b949e',
+    },
+    grid: {
+      vertLines: { color: 'rgba(48,54,61,0.5)' },
+      horzLines: { color: 'rgba(48,54,61,0.5)' },
+    },
+    crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+    rightPriceScale: { borderColor: '#30363d' },
+    timeScale: { borderColor: '#30363d', timeVisible: true },
+  });
+
+  candleSeries = chart.addCandlestickSeries({
+    upColor: '#3fb950',
+    downColor: '#f85149',
+    borderUpColor: '#3fb950',
+    borderDownColor: '#f85149',
+    wickUpColor: '#3fb950',
+    wickDownColor: '#f85149',
+  });
+
+  supertrendSeries = chart.addLineSeries({
+    color: '#f0b27a',
+    lineWidth: 2,
+    lineStyle: LightweightCharts.LineStyle.Dashed,
+    title: 'Supertrend',
+  });
+
+  emaFastSeries = chart.addLineSeries({
+    color: '#58a6ff',
+    lineWidth: 1,
+    title: 'EMA 50',
+  });
+
+  emaTrendSeries = chart.addLineSeries({
+    color: '#ffa657',
+    lineWidth: 2,
+    title: 'EMA 200',
+  });
+
+  window.addEventListener('resize', () => {
+    if (chart) chart.resize(container.clientWidth, 380);
+  });
+}
+
+function loadChart() {
+  const symbol = document.getElementById('symbolSelect').value;
+  if (!symbol || !chart) return;
+
+  const symEncoded = symbol.replace('/', '-');
+  fetch(`/api/prices/${symEncoded}`)
+    .then(r => r.json())
+    .then(data => {
+      if (data.error) { console.error(data.error); return; }
+
+      const candles = data.data.map(d => ({
+        time: d.time,
+        open: d.open,
+        high: d.high,
+        low: d.low,
+        close: d.close,
+      }));
+
+      const supertrend = data.data
+        .filter(d => d.supertrend !== null)
+        .map(d => ({ time: d.time, value: d.supertrend }));
+
+      const emaFast = data.data
+        .filter(d => d.ema_fast !== null)
+        .map(d => ({ time: d.time, value: d.ema_fast }));
+
+      const emaTrend = data.data
+        .filter(d => d.ema_trend !== null)
+        .map(d => ({ time: d.time, value: d.ema_trend }));
+
+      candleSeries.setData(candles);
+      supertrendSeries.setData(supertrend);
+      emaFastSeries.setData(emaFast);
+      emaTrendSeries.setData(emaTrend);
+      chart.timeScale().fitContent();
+    })
+    .catch(err => console.error('Chart error:', err));
+}
+
+function setTimeframe(tf, btn) {
+  currentTf = tf;
+  document.querySelectorAll('.tf-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  loadChart();
+}
+
+// ── Logs ─────────────────────────────────────────────────────────────────────
+function appendLogs(lines) {
+  const body = document.getElementById('logBody');
+  lines.forEach(line => {
+    const div = document.createElement('div');
+    div.className = 'log-line' +
+      (line.includes('[BUY]') ? ' buy' :
+       line.includes('[SELL]') ? ' sell' :
+       line.includes('[WARN]') ? ' warn' : '');
+    div.textContent = line;
+    body.appendChild(div);
+  });
+  body.scrollTop = body.scrollHeight;
+}
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+function setText(id, val) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = val;
+}
+
+function fmt2(n) {
+  return typeof n === 'number' ? n.toFixed(2) : '—';
+}
+
+function fmt4(n) {
+  return typeof n === 'number' ? n.toFixed(4) : '—';
+}
+
+function formatPrice(p) {
+  if (p >= 1000) return p.toFixed(2);
+  if (p >= 10) return p.toFixed(3);
+  return p.toFixed(4);
+}
+
+function fmtDate(s) {
+  if (!s) return '—';
+  const d = new Date(s);
+  if (isNaN(d)) return s.slice(0, 16);
+  return d.toLocaleDateString('fr', { month: '2-digit', day: '2-digit' }) + ' ' +
+         d.toLocaleTimeString('fr', { hour: '2-digit', minute: '2-digit' });
+}
+
+function updateLastUpdate() {
+  document.getElementById('lastUpdate').textContent =
+    'Mis à jour ' + new Date().toLocaleTimeString('fr');
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+function init() {
+  // Peupler le select des symboles
+  const sel = document.getElementById('symbolSelect');
+  SYMBOLS.forEach(sym => {
+    const opt = document.createElement('option');
+    opt.value = sym;
+    opt.textContent = sym;
+    sel.appendChild(opt);
+  });
+
+  // Init charts
+  initPriceChart();
+  initEquityChart();
+
+  // Charger les données initiales
+  fetch('/api/state')
+    .then(r => r.json())
+    .then(data => {
+      updateMetrics(data);
+      updatePositions(data.positions || []);
+      updateTrades(data.trades || []);
+      if (data.equity_curve) updateEquityChart(data.equity_curve);
+    });
+
+  fetch('/api/log')
+    .then(r => r.json())
+    .then(data => {
+      if (data.lines) appendLogs(data.lines);
+    });
+
+  loadChart();
+}
+
+document.addEventListener('DOMContentLoaded', init);
+</script>
+</body>
+</html>

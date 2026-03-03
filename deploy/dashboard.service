@@ -1,0 +1,14 @@
+[Unit]
+Description=Bot Trading Dashboard (Flask)
+After=network.target
+
+[Service]
+Type=simple
+User=botuser
+WorkingDirectory=/home/botuser/bot-trading
+ExecStart=/home/botuser/bot-trading/venv/bin/python main.py dashboard
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

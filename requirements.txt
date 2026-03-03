@@ -1,0 +1,12 @@
+ccxt>=4.4.27
+pandas>=2.2.3
+pandas-ta>=0.4.67b0
+python-dotenv>=1.0.1
+matplotlib>=3.9.0
+numpy>=2.2.6
+schedule>=1.2.2
+colorama>=0.4.6
+flask>=3.0.0
+flask-socketio>=5.3.6
+python-engineio>=4.9.0
+python-socketio>=5.11.0
