@@ -16,7 +16,7 @@ useradd -m -s /bin/bash botuser
 
 # 4. Cloner le repo (remplacer l'URL)
 cd /home/botuser
-git clone https://github.com/TON_USER/bot-trading.git
+git clone https://github.com/Judamour/bot.git bot-trading
 chown -R botuser:botuser bot-trading
 
 # 5. Venv + dépendances
