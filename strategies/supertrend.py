@@ -1,5 +1,5 @@
 import pandas as pd
-import pandas_ta as ta
+import numpy as np
 import sys
 import os
 
@@ -7,33 +7,78 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
 
 
+def compute_ema(series: pd.Series, span: int) -> pd.Series:
+    return series.ewm(span=span, adjust=False).mean()
+
+
+def compute_rsi(series: pd.Series, length: int = 14) -> pd.Series:
+    delta = series.diff()
+    gain = delta.clip(lower=0)
+    loss = -delta.clip(upper=0)
+    avg_gain = gain.ewm(alpha=1 / length, adjust=False).mean()
+    avg_loss = loss.ewm(alpha=1 / length, adjust=False).mean()
+    rs = avg_gain / avg_loss
+    return 100 - (100 / (1 + rs))
+
+
+def compute_atr(high: pd.Series, low: pd.Series, close: pd.Series, length: int = 14) -> pd.Series:
+    tr = pd.concat([
+        high - low,
+        (high - close.shift(1)).abs(),
+        (low - close.shift(1)).abs(),
+    ], axis=1).max(axis=1)
+    return tr.ewm(alpha=1 / length, adjust=False).mean()
+
+
+def compute_supertrend(high: pd.Series, low: pd.Series, close: pd.Series,
+                       length: int = 14, multiplier: float = 4.5):
+    atr = compute_atr(high, low, close, length)
+    hl2 = (high + low) / 2
+
+    upper_base = hl2 + multiplier * atr
+    lower_base = hl2 - multiplier * atr
+
+    upper = upper_base.values.copy()
+    lower = lower_base.values.copy()
+    close_arr = close.values
+    direction = np.ones(len(close), dtype=int)
+    supertrend = np.zeros(len(close))
+
+    for i in range(1, len(close)):
+        lower[i] = lower[i] if lower[i] > lower[i - 1] or close_arr[i - 1] < lower[i - 1] else lower[i - 1]
+        upper[i] = upper[i] if upper[i] < upper[i - 1] or close_arr[i - 1] > upper[i - 1] else upper[i - 1]
+
+        if direction[i - 1] == -1 and close_arr[i] > upper[i - 1]:
+            direction[i] = 1
+        elif direction[i - 1] == 1 and close_arr[i] < lower[i - 1]:
+            direction[i] = -1
+        else:
+            direction[i] = direction[i - 1]
+
+        supertrend[i] = lower[i] if direction[i] == 1 else upper[i]
+
+    return pd.Series(supertrend, index=close.index), pd.Series(direction, index=close.index)
+
+
 def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     """
     Calcule les indicateurs pour la stratégie Supertrend + Golden Cross.
 
     Indicateurs :
-    - Supertrend (ATR 10, mult 3.0) : signal principal
+    - Supertrend (ATR 14, mult 4.5) : signal principal
     - EMA 50 et EMA 200 : filtre de tendance longue (Golden Cross)
     - RSI 14 : filtre d'entrée (évite les zones de surachat)
     - ATR 14 : stop-loss dynamique
     """
     df = df.copy()
 
-    # Supertrend — signal principal de direction
-    # length=14, mult=4.5 : moins sensible, évite les faux signaux
-    st = ta.supertrend(df["high"], df["low"], df["close"], length=14, multiplier=4.5)
-    df["supertrend"] = st["SUPERT_14_4.5"]
-    df["supertrend_dir"] = st["SUPERTd_14_4.5"]  # 1 = haussier, -1 = baissier
-
-    # Golden Cross — filtre tendance longue
-    df["ema50"] = ta.ema(df["close"], length=50)
-    df["ema200"] = ta.ema(df["close"], length=200)
-
-    # RSI — filtre surachat
-    df["rsi"] = ta.rsi(df["close"], length=14)
-
-    # ATR — stop-loss dynamique
-    df["atr"] = ta.atr(df["high"], df["low"], df["close"], length=14)
+    df["supertrend"], df["supertrend_dir"] = compute_supertrend(
+        df["high"], df["low"], df["close"], length=14, multiplier=4.5
+    )
+    df["ema50"] = compute_ema(df["close"], span=50)
+    df["ema200"] = compute_ema(df["close"], span=200)
+    df["rsi"] = compute_rsi(df["close"], length=14)
+    df["atr"] = compute_atr(df["high"], df["low"], df["close"], length=14)
 
     return df.dropna()
 
@@ -53,21 +98,13 @@ def generate_signals(df: pd.DataFrame) -> pd.DataFrame:
     """
     df = add_indicators(df)
 
-    # Supertrend passe en haussier ET confirmation : 2 bougies consécutives haussières
-    supertrend_up = (
-        (df["supertrend_dir"] == 1) &
-        (df["supertrend_dir"].shift(1) == -1)
-    )
-
-    # Supertrend passe en baissier
+    supertrend_up = (df["supertrend_dir"] == 1) & (df["supertrend_dir"].shift(1) == -1)
     supertrend_down = (df["supertrend_dir"] == -1) & (df["supertrend_dir"].shift(1) == 1)
 
-    # Filtres de qualité
     above_ema200 = df["close"] > df["ema200"]
-    bullish_structure = df["ema50"] > df["ema200"]  # Golden cross actif
+    bullish_structure = df["ema50"] > df["ema200"]
     not_overbought = df["rsi"] < 75
 
-    # Signaux
     df["signal"] = 0
     df.loc[supertrend_up & above_ema200 & bullish_structure & not_overbought, "signal"] = 1
     df.loc[supertrend_down, "signal"] = -1
