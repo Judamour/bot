@@ -43,8 +43,6 @@ def log(msg: str, level: str = "INFO"):
     colors = {"INFO": Fore.CYAN, "BUY": Fore.GREEN, "SELL": Fore.RED, "WARN": Fore.YELLOW}
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     print(f"{colors.get(level, '')}{ts} [{level}] {msg}{Style.RESET_ALL}")
-
-    os.makedirs("logs", exist_ok=True)
     with open("logs/bot.log", "a") as f:
         f.write(f"{ts} [{level}] {msg}\n")
 
@@ -54,7 +52,7 @@ def log(msg: str, level: str = "INFO"):
 def process_symbol(symbol: str, state: dict) -> dict:
     """Analyse un symbole et exécute les ordres si nécessaire."""
     try:
-        df = fetch_ohlcv(symbol, config.TIMEFRAME, days=60)
+        df = fetch_ohlcv(symbol, config.TIMEFRAME, days=45)
         df = generate_signals(df)
         last = df.iloc[-1]
         current_price = last["close"]
@@ -195,6 +193,7 @@ def run():
             log("Annulé.")
             return
 
+    os.makedirs("logs", exist_ok=True)
     state = load_state()
     log(f"Capital de départ: {state['capital']:.2f}€")
 

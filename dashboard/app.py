@@ -146,12 +146,18 @@ def api_state():
 
 @app.route("/api/prices/<path:symbol>")
 def api_prices(symbol):
-    """Retourne les données OHLCV + indicateurs pour le graphique."""
+    """Retourne les données OHLCV + indicateurs pour le graphique (cache 5 min)."""
     try:
         import ccxt
         from strategies.supertrend import generate_signals
 
         symbol_decoded = symbol.replace("-", "/")
+
+        # Servir depuis le cache si encore frais
+        cached = _chart_cache.get(symbol_decoded)
+        if cached and (time.time() - cached[0]) < CHART_CACHE_TTL:
+            return jsonify(cached[1])
+
         binance_symbol = symbol_decoded.split("/")[0] + "/USDT"
 
         exchange = ccxt.binance({"enableRateLimit": True})
@@ -183,10 +189,31 @@ def api_prices(symbol):
                 "signal": int(row["signal"]) if "signal" in row else 0,
             })
 
-        return jsonify({"symbol": symbol_decoded, "timeframe": config.TIMEFRAME, "data": result})
+        payload = {"symbol": symbol_decoded, "timeframe": config.TIMEFRAME, "data": result}
+        _chart_cache[symbol_decoded] = (time.time(), payload)
+        return jsonify(payload)
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/system")
+def api_system():
+    """Retourne les métriques système du serveur."""
+    try:
+        import psutil
+        cpu = psutil.cpu_percent(interval=0.5)
+        mem = psutil.virtual_memory()
+        disk = psutil.disk_usage("/")
+        return jsonify({
+            "cpu_pct": round(cpu, 1),
+            "mem_used_mb": round(mem.used / 1024 / 1024),
+            "mem_total_mb": round(mem.total / 1024 / 1024),
+            "mem_pct": round(mem.percent, 1),
+            "disk_pct": round(disk.percent, 1),
+        })
+    except ImportError:
+        return jsonify({"error": "psutil non installé"}), 500
 
 
 @app.route("/api/log")
@@ -206,6 +233,9 @@ def api_log():
 _live_prices: dict = {}
 _state_mtime: float = 0.0
 _log_size: int = 0
+_chart_cache: dict = {}          # {symbol: (timestamp, payload)}
+CHART_CACHE_TTL = 300            # 5 minutes
+POLL_INTERVAL = 30               # secondes entre chaque poll prix/état
 
 
 def background_thread():
@@ -217,7 +247,7 @@ def background_thread():
 
     while True:
         try:
-            # ── Prix live (toutes les 10s) ──
+            # ── Prix live (toutes les 30s) ──
             prices = {}
             for symbol in config.SYMBOLS:
                 binance_sym = symbol.split("/")[0] + "/USDT"
@@ -251,10 +281,10 @@ def background_thread():
                         lines = f.readlines()[-10:]
                     socketio.emit("log_update", {"lines": [l.rstrip() for l in lines]})
 
-        except Exception as e:
+        except Exception:
             pass
 
-        time.sleep(10)
+        time.sleep(POLL_INTERVAL)
 
 
 def run(host: str = "0.0.0.0", port: int = 5000, debug: bool = False):

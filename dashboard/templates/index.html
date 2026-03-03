@@ -77,6 +77,12 @@
 
     .last-update { font-size: 11px; color: var(--muted); white-space: nowrap; }
 
+    /* ── System stats ── */
+    .sys-stats { display: flex; align-items: center; gap: 12px; font-size: 11px; color: var(--muted); }
+    .sys-item { display: flex; align-items: center; gap: 5px; }
+    .sys-bar { width: 36px; height: 4px; border-radius: 3px; background: var(--surface2); overflow: hidden; }
+    .sys-bar-fill { height: 100%; border-radius: 3px; transition: width 0.5s; }
+
     /* ── Layout ── */
     .main { padding: 14px 20px; display: flex; flex-direction: column; gap: 14px; }
 
@@ -302,6 +308,7 @@
     </div>
   </div>
   <div class="price-ticker" id="priceTicker"></div>
+  <div class="sys-stats" id="sysStats"></div>
   <div class="last-update" id="lastUpdate">—</div>
 </header>
 
@@ -719,6 +726,26 @@ function fmtDate(s) {
          d.toLocaleTimeString('fr',{hour:'2-digit',minute:'2-digit'});
 }
 
+// ── System stats ──────────────────────────────────────────────────────────────
+function updateSysStats() {
+  fetch('/api/system').then(r => r.json()).then(d => {
+    if (d.error) return;
+    const cpuColor = d.cpu_pct > 80 ? 'var(--red)' : d.cpu_pct > 50 ? 'var(--yellow)' : 'var(--green)';
+    const memColor = d.mem_pct > 80 ? 'var(--red)' : d.mem_pct > 60 ? 'var(--yellow)' : 'var(--blue)';
+    document.getElementById('sysStats').innerHTML = `
+      <div class="sys-item">
+        <span>CPU</span>
+        <div class="sys-bar"><div class="sys-bar-fill" style="width:${d.cpu_pct}%;background:${cpuColor}"></div></div>
+        <span style="color:${cpuColor}">${d.cpu_pct}%</span>
+      </div>
+      <div class="sys-item">
+        <span>RAM</span>
+        <div class="sys-bar"><div class="sys-bar-fill" style="width:${d.mem_pct}%;background:${memColor}"></div></div>
+        <span style="color:${memColor}">${d.mem_used_mb}/${d.mem_total_mb} Mo</span>
+      </div>`;
+  }).catch(() => {});
+}
+
 // ── Init ──────────────────────────────────────────────────────────────────────
 function init() {
   const sel = document.getElementById('symbolSelect');
@@ -743,6 +770,8 @@ function init() {
   });
 
   loadChart();
+  updateSysStats();
+  setInterval(updateSysStats, 30000);
 }
 
 document.addEventListener('DOMContentLoaded', init);
