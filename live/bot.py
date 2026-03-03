@@ -10,6 +10,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
 from data.fetcher import fetch_ohlcv, get_exchange
 from strategies.supertrend import generate_signals, calculate_position_size
+from live.claude_filter import ask_claude
 
 init(autoreset=True)
 
@@ -109,6 +110,22 @@ def process_symbol(symbol: str, state: dict) -> dict:
     if signal == 1 and symbol not in state["positions"]:
         if len(state["positions"]) >= config.MAX_OPEN_TRADES:
             log(f"{symbol} — Signal achat ignoré (max {config.MAX_OPEN_TRADES} positions)", "WARN")
+            return state
+
+        # ── Validation par Claude ──
+        log(f"{symbol} — Signal détecté, consultation Claude AI...", "INFO")
+        confirme, raison = ask_claude(
+            symbol=symbol,
+            price=current_price,
+            rsi=float(last["rsi"]),
+            ema50=float(last["ema50"]),
+            ema200=float(last["ema200"]),
+            atr=atr,
+            capital=state["capital"],
+        )
+        log(f"{symbol} — Claude: {'✓ CONFIRME' if confirme else '✗ IGNORE'} | {raison}", "INFO")
+
+        if not confirme:
             return state
 
         pos = calculate_position_size(state["capital"], current_price, atr)
