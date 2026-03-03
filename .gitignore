@@ -21,6 +21,9 @@ data/cache/
 # Backtest images (générées localement)
 logs/*.png
 
+# Local only
+CLAUDE.md
+
 # IDE
 .vscode/
 .idea/
