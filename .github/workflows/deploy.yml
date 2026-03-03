@@ -1,0 +1,21 @@
+name: Deploy to VPS
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: 141.253.112.143
+          username: ubuntu
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            sudo chown -R botuser:botuser /home/botuser/bot-trading
+            sudo -u botuser bash -c "cd /home/botuser/bot-trading && git pull"
+            sudo systemctl restart bot dashboard
+            echo "✓ Déployé à $(date)"
