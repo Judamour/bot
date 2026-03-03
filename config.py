@@ -32,6 +32,10 @@ ATR_MULTIPLIER = 3.0     # Stop-loss = 3x ATR sous le prix d'entrée (adapté au
 TAKE_PROFIT_RATIO = 2.5  # Take-profit = 2.5x le stop-loss (ratio R:R = 1:2.5)
 MAX_OPEN_TRADES = 3      # Maximum de trades ouverts simultanément
 
+# ── Coûts de transaction ────────────────────────────────────────────────────
+EXCHANGE_FEE = 0.0026   # 0.26% taker Kraken (pire cas)
+SLIPPAGE     = 0.001    # 0.10% slippage moyen estimé
+
 # ── Paper trading ───────────────────────────────────────────────────────────
 PAPER_TRADING = os.getenv("PAPER_TRADING", "true").lower() == "true"
 PAPER_CAPITAL = float(os.getenv("PAPER_CAPITAL", "1000"))

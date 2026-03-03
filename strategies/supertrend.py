@@ -141,6 +141,15 @@ def generate_signals(df: pd.DataFrame) -> pd.DataFrame:
     not_overbought   = df["rsi"] < config.RSI_OVERBOUGHT      # Pas de surachat
     strong_volume    = df["volume_ratio"] > 1.1               # Volume > 110% moyenne
 
+    # ── Colonnes booléennes pour analyse contrefactuelle ──
+    df["f_supertrend_up"] = supertrend_up
+    df["f_trending"]      = trending_market
+    df["f_above_ema200"]  = above_ema200
+    df["f_structure"]     = bullish_structure
+    df["f_momentum"]      = momentum_up
+    df["f_rsi"]           = not_overbought
+    df["f_volume"]        = strong_volume
+
     df["signal"] = 0
     df.loc[
         supertrend_up

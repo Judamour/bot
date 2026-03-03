@@ -50,13 +50,16 @@ def run_backtest(symbol: str, timeframe: str = config.TIMEFRAME, days: int = con
                 exit_reason = "signal"
 
             if exit_reason:
-                pnl = (exit_price - position["entry"]) * position["size"]
+                exit_price_eff = exit_price * (1 - config.SLIPPAGE)
+                fee_exit = exit_price_eff * position["size"] * config.EXCHANGE_FEE
+                proceeds = exit_price_eff * position["size"] - fee_exit
+                pnl = proceeds - (position["entry"] * position["size"] + position["fee_entry"])
                 capital += pnl
                 trades.append({
                     "entry_date": position["date"],
                     "exit_date": ts,
                     "entry_price": position["entry"],
-                    "exit_price": exit_price,
+                    "exit_price": exit_price_eff,
                     "size": position["size"],
                     "pnl": pnl,
                     "pnl_pct": pnl / (position["entry"] * position["size"]) * 100,
@@ -67,15 +70,18 @@ def run_backtest(symbol: str, timeframe: str = config.TIMEFRAME, days: int = con
 
         # Ouvrir position sur signal achat (si pas déjà en position)
         if row["signal"] == 1 and position is None and capital > 0:
-            pos = calculate_position_size(capital, row["close"], row["atr"])
-            cost = pos["size"] * row["close"]
+            entry_price = row["close"] * (1 + config.SLIPPAGE)
+            pos = calculate_position_size(capital, entry_price, row["atr"])
+            fee_entry = entry_price * pos["size"] * config.EXCHANGE_FEE
+            cost = pos["size"] * entry_price + fee_entry
             if cost <= capital:
                 position = {
-                    "entry": row["close"],
+                    "entry": entry_price,
                     "size": pos["size"],
                     "stop": pos["stop_loss"],
                     "tp": pos["take_profit"],
                     "date": ts,
+                    "fee_entry": fee_entry,
                 }
 
         equity_curve.append(capital)
@@ -84,13 +90,16 @@ def run_backtest(symbol: str, timeframe: str = config.TIMEFRAME, days: int = con
     # Clôturer position ouverte en fin de période
     if position:
         last = df.iloc[-1]
-        pnl = (last["close"] - position["entry"]) * position["size"]
+        exit_price_eff = last["close"] * (1 - config.SLIPPAGE)
+        fee_exit = exit_price_eff * position["size"] * config.EXCHANGE_FEE
+        proceeds = exit_price_eff * position["size"] - fee_exit
+        pnl = proceeds - (position["entry"] * position["size"] + position["fee_entry"])
         capital += pnl
         trades.append({
             "entry_date": position["date"],
             "exit_date": df.index[-1],
             "entry_price": position["entry"],
-            "exit_price": last["close"],
+            "exit_price": exit_price_eff,
             "size": position["size"],
             "pnl": pnl,
             "pnl_pct": pnl / (position["entry"] * position["size"]) * 100,

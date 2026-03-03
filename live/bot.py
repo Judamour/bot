@@ -9,8 +9,9 @@ from colorama import Fore, Style, init
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
 from data.fetcher import fetch_ohlcv, get_exchange
-from strategies.supertrend import generate_signals, calculate_position_size
+from strategies.supertrend import generate_signals, calculate_position_size, add_indicators
 from live.claude_filter import ask_claude
+from live.notifier import notify
 
 init(autoreset=True)
 
@@ -36,6 +37,27 @@ def log_signal(event: str, symbol: str, data: dict):
     }
     with open(SIGNALS_FILE, "a") as f:
         f.write(json.dumps(record, default=str) + "\n")
+
+
+# ── Contexte BTC global ──────────────────────────────────────────────────────
+
+def fetch_btc_context() -> dict:
+    """Récupère le contexte macro BTC (prix + EMA200) une fois par cycle."""
+    try:
+        df = fetch_ohlcv("BTC/EUR", config.TIMEFRAME, days=45)
+        df = add_indicators(df)
+        last = df.iloc[-1]
+        btc_price = float(last["close"])
+        btc_ema200 = float(last["ema200"])
+        above = btc_price > btc_ema200
+        return {
+            "btc_price": round(btc_price, 2),
+            "btc_above_ema200": above,
+            "btc_trend": "bull" if above else "bear",
+        }
+    except Exception as e:
+        log(f"Contexte BTC indisponible: {e}", "WARN")
+        return {}
 
 
 # ── Paper Trading State ──────────────────────────────────────────────────────
@@ -101,13 +123,15 @@ def apply_trailing_stop(position: dict, current_price: float, symbol: str) -> di
         position["stop"] = new_stop
         label = "breakeven" if new_stop == entry else f"+{r:.1f}R verrouillé"
         log(f"{symbol} — Trailing stop → {new_stop:.4f}€ ({label})", "INFO")
+        if new_stop == entry:
+            notify(f"🔒 <b>{symbol}</b> stop breakeven → {new_stop:.2f}€")
 
     return position
 
 
 # ── Logique principale ────────────────────────────────────────────────────────
 
-def process_symbol(symbol: str, state: dict) -> dict:
+def process_symbol(symbol: str, state: dict, btc_context: dict = None) -> dict:
     """Analyse un symbole et exécute les ordres si nécessaire."""
     try:
         df = fetch_ohlcv(symbol, config.TIMEFRAME, days=45)
@@ -123,8 +147,8 @@ def process_symbol(symbol: str, state: dict) -> dict:
         log(f"{symbol} — Erreur récupération données: {e}", "WARN")
         return state
 
-    # ── Enregistrement scan complet ──
-    log_signal("SCAN", symbol, {
+    # ── Enregistrement scan complet avec breakdown des filtres ──
+    scan_data = {
         "price": current_price,
         "signal": signal,
         "adx": round(adx, 2),
@@ -137,7 +161,18 @@ def process_symbol(symbol: str, state: dict) -> dict:
         "supertrend": round(float(last["supertrend"]), 4),
         "atr": round(atr, 4),
         "in_position": symbol in state["positions"],
-    })
+        # Breakdown booléen de chaque filtre
+        "f_supertrend_up": bool(last["f_supertrend_up"]),
+        "f_trending":      bool(last["f_trending"]),
+        "f_above_ema200":  bool(last["f_above_ema200"]),
+        "f_structure":     bool(last["f_structure"]),
+        "f_momentum":      bool(last["f_momentum"]),
+        "f_rsi":           bool(last["f_rsi"]),
+        "f_volume":        bool(last["f_volume"]),
+    }
+    if btc_context:
+        scan_data.update(btc_context)
+    log_signal("SCAN", symbol, scan_data)
 
     position = state["positions"].get(symbol)
 
@@ -161,23 +196,27 @@ def process_symbol(symbol: str, state: dict) -> dict:
             reason = "signal_exit"
 
         if reason:
-            pnl = (exit_price - position["entry"]) * position["size"]
-            state["capital"] += exit_price * position["size"]
+            exit_price_eff = exit_price * (1 - config.SLIPPAGE)
+            fee_exit = exit_price_eff * position["size"] * config.EXCHANGE_FEE
+            proceeds = exit_price_eff * position["size"] - fee_exit
+            state["capital"] += proceeds
             state["positions"].pop(symbol)
 
+            pnl = proceeds - (position["entry"] * position["size"] + position.get("fee_entry", 0))
             trade = {
                 "symbol": symbol,
                 "entry_date": position["date"],
                 "exit_date": str(datetime.now()),
                 "entry_price": position["entry"],
-                "exit_price": exit_price,
+                "exit_price": exit_price_eff,
                 "pnl": round(pnl, 2),
                 "reason": reason,
             }
             state["trades"].append(trade)
             log_signal(f"EXIT_{reason.upper()}", symbol, {
                 "entry_price": position["entry"],
-                "exit_price": exit_price,
+                "exit_price": exit_price_eff,
+                "fee_exit": round(fee_exit, 4),
                 "pnl": round(pnl, 2),
                 "pnl_r": round(pnl / position.get("risk_eur", 1), 2),
                 "duration_h": None,  # calculé à l'analyse
@@ -187,10 +226,17 @@ def process_symbol(symbol: str, state: dict) -> dict:
             pnl_r = round(pnl / position.get("risk_eur", 1), 1)
             log(
                 f"{'✓' if pnl > 0 else '✗'} {symbol} CLOSE [{reason}] | "
-                f"{position['entry']:.4f}€ → {exit_price:.4f}€ | "
+                f"{position['entry']:.4f}€ → {exit_price_eff:.4f}€ | "
                 f"PnL: {pnl:+.2f}€ ({pnl_r:+.1f}R) | Capital: {state['capital']:.2f}€",
                 "BUY" if pnl > 0 else "SELL",
             )
+            # ── Notification Telegram ──
+            if reason == "take_profit":
+                notify(f"✅ <b>{symbol}</b> TP +{pnl:.2f}€ ({pnl_r:+.1f}R)")
+            elif reason == "stop_loss":
+                notify(f"🔴 <b>{symbol}</b> SL {pnl:.2f}€ ({pnl_r:+.1f}R)")
+            else:
+                notify(f"⏹ <b>{symbol}</b> EXIT [{reason}] {pnl:+.2f}€ ({pnl_r:+.1f}R)")
 
     # ── Ouvrir position sur signal achat ──
     if signal == 1 and symbol not in state["positions"]:
@@ -229,40 +275,50 @@ def process_symbol(symbol: str, state: dict) -> dict:
             log_signal("BUY_SKIP_CLAUDE", symbol, {"raison": raison, "price": current_price})
             return state
 
-        pos = calculate_position_size(state["capital"], current_price, atr)
-        cost = pos["size"] * current_price
+        effective_buy = current_price * (1 + config.SLIPPAGE)
+        pos = calculate_position_size(state["capital"], effective_buy, atr)
+        fee_entry = effective_buy * pos["size"] * config.EXCHANGE_FEE
+        total_cost = pos["size"] * effective_buy + fee_entry
 
-        if cost > state["capital"]:
+        if total_cost > state["capital"]:
             log(f"{symbol} — Capital insuffisant ({state['capital']:.2f}€)", "WARN")
             return state
 
-        state["capital"] -= cost
+        state["capital"] -= total_cost
         state["positions"][symbol] = {
-            "entry": current_price,
+            "entry": effective_buy,
             "size": pos["size"],
             "stop": pos["stop_loss"],
             "initial_stop": pos["stop_loss"],
             "tp": pos["take_profit"],
             "date": str(datetime.now()),
             "risk_eur": pos["risk_eur"],
+            "fee_entry": round(fee_entry, 4),
         }
         log_signal("BUY_EXECUTED", symbol, {
-            "price": current_price,
+            "price": effective_buy,
             "size": pos["size"],
             "stop_loss": pos["stop_loss"],
             "take_profit": pos["take_profit"],
+            "fee_entry": round(fee_entry, 4),
+            "total_cost": round(total_cost, 4),
             "risk_eur": pos["risk_eur"],
             "adx": round(adx, 2),
             "rsi": round(float(last["rsi"]), 2),
             "volume_ratio": round(volume_ratio, 3),
-            "capital_before": round(state["capital"] + pos["size"] * current_price, 2),
+            "capital_before": round(state["capital"] + total_cost, 2),
         })
 
         log(
-            f"▲ {symbol} BUY | Prix: {current_price:.4f}€ | "
+            f"▲ {symbol} BUY | Prix: {effective_buy:.4f}€ | "
             f"Taille: {pos['size']} | SL: {pos['stop_loss']:.4f}€ | "
-            f"TP: {pos['take_profit']:.4f}€ | Risque: {pos['risk_eur']:.2f}€",
+            f"TP: {pos['take_profit']:.4f}€ | Risque: {pos['risk_eur']:.2f}€ | "
+            f"Frais: {fee_entry:.2f}€",
             "BUY",
+        )
+        notify(
+            f"▲ <b>{symbol}</b> BUY | {effective_buy:.2f}€ | "
+            f"SL {pos['stop_loss']:.2f}€ | TP {pos['take_profit']:.2f}€"
         )
 
     return state
@@ -287,6 +343,37 @@ def print_status(state: dict):
 
     if state["positions"]:
         log(f"Positions ouvertes: {list(state['positions'].keys())}")
+
+
+def _check_daily_snapshot(state: dict):
+    """Enregistre un snapshot journalier dans signals.jsonl si la date a changé."""
+    today = datetime.now().strftime("%Y-%m-%d")
+    if state.get("last_snapshot_date", "") == today:
+        return
+
+    trades = state["trades"]
+    wins = [t for t in trades if t["pnl"] > 0]
+    total_value = state["capital"] + sum(
+        p["entry"] * p["size"] for p in state["positions"].values()
+    )
+    win_rate = round(len(wins) / len(trades) * 100, 1) if trades else 0
+    pnl_pct = round((total_value - state["initial_capital"]) / state["initial_capital"] * 100, 2)
+
+    log_signal("DAILY_SNAPSHOT", "ALL", {
+        "capital": round(state["capital"], 2),
+        "total_value": round(total_value, 2),
+        "open_positions": len(state["positions"]),
+        "total_trades": len(trades),
+        "win_rate": win_rate,
+        "pnl_pct": pnl_pct,
+    })
+    notify(
+        f"📊 <b>Snapshot journalier</b>\n"
+        f"Capital libre: {state['capital']:.2f}€\n"
+        f"Valeur totale: {total_value:.2f}€ ({pnl_pct:+.2f}%)\n"
+        f"Trades: {len(trades)} | Win rate: {win_rate}%"
+    )
+    state["last_snapshot_date"] = today
 
 
 def run():
@@ -319,11 +406,21 @@ def run():
         try:
             log(f"--- Analyse en cours ({datetime.now().strftime('%H:%M:%S')}) ---")
 
+            btc_context = fetch_btc_context()
+            if btc_context:
+                log(
+                    f"BTC context: {btc_context['btc_price']:.0f}€ | "
+                    f"Trend: {btc_context['btc_trend'].upper()} | "
+                    f"Above EMA200: {btc_context['btc_above_ema200']}",
+                    "INFO",
+                )
+
             for symbol in config.SYMBOLS:
-                state = process_symbol(symbol, state)
+                state = process_symbol(symbol, state, btc_context=btc_context)
 
             save_state(state)
             print_status(state)
+            _check_daily_snapshot(state)
 
             log(f"Prochaine analyse dans {sleep_time // 60} minutes...")
             time.sleep(sleep_time)
