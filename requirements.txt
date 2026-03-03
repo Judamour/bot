@@ -1,6 +1,6 @@
 ccxt>=4.4.27
 pandas>=2.2.3
-pandas-ta @ git+https://github.com/twopirllc/pandas-ta.git@development
+pandas-ta==0.3.14b0
 python-dotenv>=1.0.1
 matplotlib>=3.9.0
 numpy>=2.2.6
