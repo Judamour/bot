@@ -239,6 +239,10 @@ def process_symbol(symbol: str, state: dict, btc_context: dict = None) -> dict:
                 notify(f"⏹ <b>{symbol}</b> EXIT [{reason}] {pnl:+.2f}€ ({pnl_r:+.1f}R)")
 
     # ── Ouvrir position sur signal achat ──
+    if signal == 1 and symbol in config.XSTOCKS and not _is_us_market_open():
+        log(f"{symbol} — Marché US fermé, entrée ignorée", "INFO")
+        return state
+
     if signal == 1 and symbol not in state["positions"]:
         if len(state["positions"]) >= config.MAX_OPEN_TRADES:
             log(f"{symbol} — Signal ignoré (max {config.MAX_OPEN_TRADES} positions ouvertes)", "WARN")
@@ -376,6 +380,39 @@ def _check_daily_snapshot(state: dict):
     state["last_snapshot_date"] = today
 
 
+def _is_us_market_open() -> bool:
+    """Marché US ouvert : lun-ven, 14h30-21h00 CET (heure d'hiver, UTC+1)."""
+    from datetime import timezone, timedelta as td
+    cet = datetime.now(timezone(td(hours=1)))
+    if cet.weekday() >= 5:   # samedi=5, dimanche=6
+        return False
+    t = cet.hour * 60 + cet.minute
+    open_t  = config.XSTOCK_MARKET_OPEN_CET[0]  * 60 + config.XSTOCK_MARKET_OPEN_CET[1]
+    close_t = config.XSTOCK_MARKET_CLOSE_CET[0] * 60 + config.XSTOCK_MARKET_CLOSE_CET[1]
+    return open_t <= t <= close_t
+
+
+def _check_premarket(state: dict):
+    """Déclenche l'analyse pré-marché Claude une fois par jour ouvré à 14h00 CET."""
+    from datetime import timezone, timedelta as td
+    cet = datetime.now(timezone(td(hours=1)))
+    today = cet.strftime("%Y-%m-%d")
+    if cet.weekday() >= 5:
+        return
+    ph, pm = config.XSTOCK_PREMARKET_CET
+    if cet.hour * 60 + cet.minute < ph * 60 + pm:
+        return
+    if state.get("last_premarket_date", "") == today:
+        return
+    log("Lancement analyse pré-marché xStocks...", "INFO")
+    try:
+        from live.xstock_advisor import run_premarket_analysis
+        run_premarket_analysis(state)
+    except Exception as e:
+        log(f"Erreur analyse pré-marché: {e}", "WARN")
+    state["last_premarket_date"] = today
+
+
 def run():
     """Boucle principale du bot."""
     mode = "PAPER TRADING" if config.PAPER_TRADING else "LIVE TRADING"
@@ -421,6 +458,7 @@ def run():
             save_state(state)
             print_status(state)
             _check_daily_snapshot(state)
+            _check_premarket(state)
 
             log(f"Prochaine analyse dans {sleep_time // 60} minutes...")
             time.sleep(sleep_time)

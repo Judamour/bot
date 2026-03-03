@@ -10,7 +10,21 @@ API_SECRET = os.getenv("KRAKEN_API_SECRET", "")
 
 # ── Paires tradées ──────────────────────────────────────────────────────────
 # Format Kraken : "BTC/EUR", "ETH/EUR", "SOL/EUR"
-SYMBOLS = ["BTC/EUR", "ETH/EUR", "SOL/EUR", "BNB/EUR", "ADA/EUR", "DOT/EUR"]
+CRYPTO = ["BTC/EUR", "ETH/EUR", "SOL/EUR", "BNB/EUR", "ADA/EUR", "DOT/EUR"]
+
+# xStocks : actions tokenisées sur Kraken, tradées en EUR 24/7
+XSTOCKS = [
+    "NVDA/EUR", "AAPL/EUR", "TSLA/EUR", "MSFT/EUR",
+    "META/EUR", "AMZN/EUR", "GOOG/EUR",
+]
+
+SYMBOLS = CRYPTO + XSTOCKS
+
+# ── Heures marché US (CET heure d'hiver — UTC+1) ────────────────────────────
+# En été (CEST, UTC+2) les marchés ouvrent à 15h30 et ferment à 22h00 CET
+XSTOCK_MARKET_OPEN_CET  = (14, 30)   # NYSE/NASDAQ ouverture
+XSTOCK_MARKET_CLOSE_CET = (21,  0)   # Fermeture
+XSTOCK_PREMARKET_CET    = (14,  0)   # Heure déclenchement analyse pré-marché
 
 # ── Timeframe ───────────────────────────────────────────────────────────────
 # Options : "1m", "5m", "15m", "1h", "4h", "1d"
