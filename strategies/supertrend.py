@@ -30,6 +30,28 @@ def compute_atr(high: pd.Series, low: pd.Series, close: pd.Series, length: int =
     return tr.ewm(alpha=1 / length, adjust=False).mean()
 
 
+def compute_adx(high: pd.Series, low: pd.Series, close: pd.Series, length: int = 14) -> pd.Series:
+    """Calcule l'ADX — mesure la force de la tendance (> 20 = tendance, > 25 = forte)."""
+    high_diff = high.diff()
+    low_diff = -low.diff()
+
+    plus_dm = pd.Series(
+        np.where((high_diff > low_diff) & (high_diff > 0), high_diff, 0.0),
+        index=high.index,
+    )
+    minus_dm = pd.Series(
+        np.where((low_diff > high_diff) & (low_diff > 0), low_diff, 0.0),
+        index=low.index,
+    )
+
+    atr = compute_atr(high, low, close, length)
+    plus_di = 100 * plus_dm.ewm(alpha=1 / length, adjust=False).mean() / atr
+    minus_di = 100 * minus_dm.ewm(alpha=1 / length, adjust=False).mean() / atr
+
+    dx = (abs(plus_di - minus_di) / (plus_di + minus_di + 1e-10)) * 100
+    return dx.ewm(alpha=1 / length, adjust=False).mean()
+
+
 def compute_supertrend(high: pd.Series, low: pd.Series, close: pd.Series,
                        length: int = 14, multiplier: float = 4.5):
     atr = compute_atr(high, low, close, length)
@@ -62,51 +84,74 @@ def compute_supertrend(high: pd.Series, low: pd.Series, close: pd.Series,
 
 def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Calcule les indicateurs pour la stratégie Supertrend + Golden Cross.
+    Calcule tous les indicateurs pour la stratégie.
 
     Indicateurs :
-    - Supertrend (ATR 14, mult 4.5) : signal principal
-    - EMA 50 et EMA 200 : filtre de tendance longue (Golden Cross)
-    - RSI 14 : filtre d'entrée (évite les zones de surachat)
-    - ATR 14 : stop-loss dynamique
+    - Supertrend (ATR 14, mult 4.5) : signal principal de retournement
+    - EMA 9 / EMA 21 : momentum court terme (Golden Cross rapide)
+    - EMA 50 / EMA 200 : filtre de tendance longue (Golden Cross lent)
+    - RSI 14 : filtre surachat/survente
+    - ADX 14 : force de la tendance (filtre marché en range)
+    - ATR 14 : volatilité pour le sizing
+    - Volume MA 20 + ratio : confirmation de volume sur le signal
     """
     df = df.copy()
 
     df["supertrend"], df["supertrend_dir"] = compute_supertrend(
         df["high"], df["low"], df["close"], length=14, multiplier=4.5
     )
+    df["ema9"] = compute_ema(df["close"], span=config.EMA_FAST)
+    df["ema21"] = compute_ema(df["close"], span=config.EMA_SLOW)
     df["ema50"] = compute_ema(df["close"], span=50)
     df["ema200"] = compute_ema(df["close"], span=200)
     df["rsi"] = compute_rsi(df["close"], length=14)
     df["atr"] = compute_atr(df["high"], df["low"], df["close"], length=14)
+    df["adx"] = compute_adx(df["high"], df["low"], df["close"], length=config.ADX_PERIOD)
+    df["volume_ma"] = df["volume"].rolling(window=20).mean()
+    df["volume_ratio"] = df["volume"] / df["volume_ma"]
 
     return df.dropna()
 
 
 def generate_signals(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Génère les signaux avec la stratégie Supertrend + Golden Cross.
+    Génère les signaux avec la stratégie Supertrend + filtres multiples.
 
-    Signal LONG si :
-      1. Supertrend passe en haussier (direction change de -1 à 1)
-      2. Prix au-dessus de l'EMA 200 (tendance longue confirmée)
-      3. EMA 50 > EMA 200 (structure de marché haussière)
-      4. RSI < 75 (pas de surachat extrême)
+    Signal LONG si TOUS ces critères sont réunis :
+      1. Supertrend passe en haussier (direction -1 → 1)
+      2. ADX > seuil (marché en tendance, pas en range)
+      3. Prix > EMA 200 (tendance longue confirmée)
+      4. EMA 50 > EMA 200 (structure de marché haussière)
+      5. EMA 9 > EMA 21 (momentum court terme aligné)
+      6. RSI < 75 (pas de surachat extrême)
+      7. Volume > 110% de la moyenne 20 périodes (confirmation institutionnelle)
 
     Signal EXIT si :
-      1. Supertrend passe en baissier (direction change de 1 à -1)
+      1. Supertrend passe en baissier (direction 1 → -1)
     """
     df = add_indicators(df)
 
-    supertrend_up = (df["supertrend_dir"] == 1) & (df["supertrend_dir"].shift(1) == -1)
+    supertrend_up   = (df["supertrend_dir"] == 1) & (df["supertrend_dir"].shift(1) == -1)
     supertrend_down = (df["supertrend_dir"] == -1) & (df["supertrend_dir"].shift(1) == 1)
 
-    above_ema200 = df["close"] > df["ema200"]
-    bullish_structure = df["ema50"] > df["ema200"]
-    not_overbought = df["rsi"] < 75
+    trending_market  = df["adx"] > config.ADX_THRESHOLD      # Pas de range
+    above_ema200     = df["close"] > df["ema200"]             # Tendance longue
+    bullish_structure = df["ema50"] > df["ema200"]            # Golden Cross lent
+    momentum_up      = df["ema9"] > df["ema21"]               # Golden Cross rapide
+    not_overbought   = df["rsi"] < config.RSI_OVERBOUGHT      # Pas de surachat
+    strong_volume    = df["volume_ratio"] > 1.1               # Volume > 110% moyenne
 
     df["signal"] = 0
-    df.loc[supertrend_up & above_ema200 & bullish_structure & not_overbought, "signal"] = 1
+    df.loc[
+        supertrend_up
+        & trending_market
+        & above_ema200
+        & bullish_structure
+        & momentum_up
+        & not_overbought
+        & strong_volume,
+        "signal",
+    ] = 1
     df.loc[supertrend_down, "signal"] = -1
 
     return df
@@ -123,20 +168,20 @@ def calculate_position_size(capital: float, entry_price: float, atr: float) -> d
 
     return {
         "size": round(size, 6),
-        "stop_loss": round(stop_loss, 2),
-        "take_profit": round(take_profit, 2),
+        "stop_loss": round(stop_loss, 4),
+        "take_profit": round(take_profit, 4),
         "risk_eur": round(risk_eur, 2),
-        "stop_distance": round(stop_distance, 2),
+        "stop_distance": round(stop_distance, 4),
     }
 
 
 if __name__ == "__main__":
     from data.fetcher import fetch_ohlcv
 
-    print("=== Test Supertrend ===")
+    print("=== Test Supertrend + filtres ===")
     df = fetch_ohlcv("BTC/EUR", days=365)
     df = generate_signals(df)
 
     signals = df[df["signal"] != 0]
     print(f"Signaux : {len(signals)} ({len(df[df['signal']==1])} achats, {len(df[df['signal']==-1])} ventes)")
-    print(signals[["close", "supertrend_dir", "rsi", "signal"]].tail(10))
+    print(signals[["close", "supertrend_dir", "adx", "rsi", "volume_ratio", "signal"]].tail(10))

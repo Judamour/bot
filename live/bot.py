@@ -25,19 +25,18 @@ def load_state() -> dict:
             return json.load(f)
     return {
         "capital": config.PAPER_CAPITAL,
-        "positions": {},   # {symbol: {entry, size, stop, tp, date}}
+        "positions": {},
         "trades": [],
         "initial_capital": config.PAPER_CAPITAL,
     }
 
 
 def save_state(state: dict):
-    os.makedirs("logs", exist_ok=True)
     with open(STATE_FILE, "w") as f:
         json.dump(state, f, indent=2, default=str)
 
 
-# ── Logging ─────────────────────────────────────────────────────────────────
+# ── Logging ──────────────────────────────────────────────────────────────────
 
 def log(msg: str, level: str = "INFO"):
     colors = {"INFO": Fore.CYAN, "BUY": Fore.GREEN, "SELL": Fore.RED, "WARN": Fore.YELLOW}
@@ -47,7 +46,45 @@ def log(msg: str, level: str = "INFO"):
         f.write(f"{ts} [{level}] {msg}\n")
 
 
-# ── Logique principale ───────────────────────────────────────────────────────
+# ── Trailing Stop (ratchet) ───────────────────────────────────────────────────
+
+def apply_trailing_stop(position: dict, current_price: float, symbol: str) -> dict:
+    """
+    Ratchet stop : verrouille les profits par paliers de R.
+      +1R atteint → stop monté au breakeven (entrée)
+      +2R atteint → stop monté à +1R
+      +3R atteint → stop monté à +2R
+
+    Le stop ne descend jamais.
+    """
+    entry = position["entry"]
+    initial_stop = position.get("initial_stop", position["stop"])
+    stop_distance = entry - initial_stop
+
+    if stop_distance <= 0 or current_price <= entry:
+        return position
+
+    r = (current_price - entry) / stop_distance
+
+    if r >= 3:
+        new_stop = entry + 2 * stop_distance      # Lock +2R
+    elif r >= 2:
+        new_stop = entry + 1 * stop_distance      # Lock +1R
+    elif r >= 1:
+        new_stop = entry                           # Breakeven
+    else:
+        return position
+
+    new_stop = round(new_stop, 4)
+    if new_stop > position["stop"]:
+        position["stop"] = new_stop
+        label = "breakeven" if new_stop == entry else f"+{r:.1f}R verrouillé"
+        log(f"{symbol} — Trailing stop → {new_stop:.4f}€ ({label})", "INFO")
+
+    return position
+
+
+# ── Logique principale ────────────────────────────────────────────────────────
 
 def process_symbol(symbol: str, state: dict) -> dict:
     """Analyse un symbole et exécute les ordres si nécessaire."""
@@ -55,15 +92,22 @@ def process_symbol(symbol: str, state: dict) -> dict:
         df = fetch_ohlcv(symbol, config.TIMEFRAME, days=45)
         df = generate_signals(df)
         last = df.iloc[-1]
-        current_price = last["close"]
-        signal = last["signal"]
-        atr = last["atr"]
+        current_price = float(last["close"])
+        signal = int(last["signal"])
+        atr = float(last["atr"])
+        adx = float(last["adx"])
+        volume_ratio = float(last["volume_ratio"])
 
     except Exception as e:
         log(f"{symbol} — Erreur récupération données: {e}", "WARN")
         return state
 
     position = state["positions"].get(symbol)
+
+    # ── Trailing stop avant vérification de sortie ──
+    if position:
+        position = apply_trailing_stop(position, current_price, symbol)
+        state["positions"][symbol] = position
 
     # ── Vérifier stop-loss / take-profit ──
     if position:
@@ -81,7 +125,7 @@ def process_symbol(symbol: str, state: dict) -> dict:
 
         if reason:
             pnl = (exit_price - position["entry"]) * position["size"]
-            state["capital"] += (exit_price * position["size"])
+            state["capital"] += exit_price * position["size"]
             state["positions"].pop(symbol)
 
             trade = {
@@ -95,23 +139,25 @@ def process_symbol(symbol: str, state: dict) -> dict:
             }
             state["trades"].append(trade)
 
-            result = "WIN" if pnl > 0 else "LOSS"
-            emoji = "✓" if pnl > 0 else "✗"
+            pnl_r = round(pnl / position.get("risk_eur", 1), 1)
             log(
-                f"{emoji} {symbol} CLOSE [{reason}] | "
-                f"Entrée: {position['entry']:.2f}€ → Sortie: {exit_price:.2f}€ | "
-                f"PnL: {pnl:+.2f}€ | Capital: {state['capital']:.2f}€",
+                f"{'✓' if pnl > 0 else '✗'} {symbol} CLOSE [{reason}] | "
+                f"{position['entry']:.4f}€ → {exit_price:.4f}€ | "
+                f"PnL: {pnl:+.2f}€ ({pnl_r:+.1f}R) | Capital: {state['capital']:.2f}€",
                 "BUY" if pnl > 0 else "SELL",
             )
 
     # ── Ouvrir position sur signal achat ──
     if signal == 1 and symbol not in state["positions"]:
         if len(state["positions"]) >= config.MAX_OPEN_TRADES:
-            log(f"{symbol} — Signal achat ignoré (max {config.MAX_OPEN_TRADES} positions)", "WARN")
+            log(f"{symbol} — Signal ignoré (max {config.MAX_OPEN_TRADES} positions ouvertes)", "WARN")
             return state
 
-        # ── Validation par Claude ──
-        log(f"{symbol} — Signal détecté, consultation Claude AI...", "INFO")
+        log(
+            f"{symbol} — Signal BUY | ADX: {adx:.1f} | Vol×{volume_ratio:.2f} | "
+            f"RSI: {last['rsi']:.1f} — consultation Claude...",
+            "INFO",
+        )
         confirme, raison = ask_claude(
             symbol=symbol,
             price=current_price,
@@ -119,6 +165,8 @@ def process_symbol(symbol: str, state: dict) -> dict:
             ema50=float(last["ema50"]),
             ema200=float(last["ema200"]),
             atr=atr,
+            adx=adx,
+            volume_ratio=volume_ratio,
             capital=state["capital"],
         )
         log(f"{symbol} — Claude: {'✓ CONFIRME' if confirme else '✗ IGNORE'} | {raison}", "INFO")
@@ -138,15 +186,16 @@ def process_symbol(symbol: str, state: dict) -> dict:
             "entry": current_price,
             "size": pos["size"],
             "stop": pos["stop_loss"],
+            "initial_stop": pos["stop_loss"],   # référence pour le trailing stop
             "tp": pos["take_profit"],
             "date": str(datetime.now()),
             "risk_eur": pos["risk_eur"],
         }
 
         log(
-            f"▲ {symbol} BUY | Prix: {current_price:.2f}€ | "
-            f"Taille: {pos['size']} | SL: {pos['stop_loss']:.2f}€ | "
-            f"TP: {pos['take_profit']:.2f}€ | Risque: {pos['risk_eur']:.2f}€",
+            f"▲ {symbol} BUY | Prix: {current_price:.4f}€ | "
+            f"Taille: {pos['size']} | SL: {pos['stop_loss']:.4f}€ | "
+            f"TP: {pos['take_profit']:.4f}€ | Risque: {pos['risk_eur']:.2f}€",
             "BUY",
         )
 
@@ -154,24 +203,21 @@ def process_symbol(symbol: str, state: dict) -> dict:
 
 
 def print_status(state: dict):
-    """Affiche le statut du portefeuille."""
-    total_value = state["capital"]
-    for sym, pos in state["positions"].items():
-        # Valeur approximative (on utiliserait le prix live en production)
-        total_value += pos["entry"] * pos["size"]
-
-    perf = (total_value - state["initial_capital"]) / state["initial_capital"] * 100
     trades = state["trades"]
     wins = [t for t in trades if t["pnl"] > 0]
-
-    log(
-        f"PORTFOLIO | Capital libre: {state['capital']:.2f}€ | "
-        f"Valeur totale: {total_value:.2f}€ | "
-        f"Perf: {perf:+.2f}% | "
-        f"Trades: {len(trades)} | "
-        f"Win rate: {len(wins)/len(trades)*100:.1f}%" if trades else
-        f"PORTFOLIO | Capital: {state['capital']:.2f}€ | Aucun trade encore"
+    total_value = state["capital"] + sum(
+        p["entry"] * p["size"] for p in state["positions"].values()
     )
+    perf = (total_value - state["initial_capital"]) / state["initial_capital"] * 100
+
+    if trades:
+        log(
+            f"PORTFOLIO | Libre: {state['capital']:.2f}€ | Total: {total_value:.2f}€ | "
+            f"Perf: {perf:+.2f}% | Trades: {len(trades)} | "
+            f"Win rate: {len(wins)/len(trades)*100:.1f}%"
+        )
+    else:
+        log(f"PORTFOLIO | Capital: {state['capital']:.2f}€ | Aucun trade encore")
 
     if state["positions"]:
         log(f"Positions ouvertes: {list(state['positions'].keys())}")
@@ -180,10 +226,14 @@ def print_status(state: dict):
 def run():
     """Boucle principale du bot."""
     mode = "PAPER TRADING" if config.PAPER_TRADING else "LIVE TRADING"
+    os.makedirs("logs", exist_ok=True)
+
     log(f"{'='*50}")
     log(f"  BOT DÉMARRÉ — Mode: {mode}")
     log(f"  Symboles: {config.SYMBOLS}")
     log(f"  Timeframe: {config.TIMEFRAME}")
+    log(f"  Filtres: ADX>{config.ADX_THRESHOLD} | Volume>110% MA | EMA9>EMA21 | RSI<{config.RSI_OVERBOUGHT}")
+    log(f"  Trailing stop: breakeven@+1R, lock+1R@+2R, lock+2R@+3R")
     log(f"{'='*50}")
 
     if not config.PAPER_TRADING:
@@ -193,11 +243,9 @@ def run():
             log("Annulé.")
             return
 
-    os.makedirs("logs", exist_ok=True)
     state = load_state()
     log(f"Capital de départ: {state['capital']:.2f}€")
 
-    # Intervalle entre chaque analyse (selon timeframe)
     intervals = {"1m": 60, "5m": 300, "15m": 900, "1h": 3600, "4h": 14400, "1d": 86400}
     sleep_time = intervals.get(config.TIMEFRAME, 3600)
 
