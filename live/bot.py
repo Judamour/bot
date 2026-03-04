@@ -279,6 +279,12 @@ def process_symbol(
         log_signal("BUY_SKIP_QQQ_REGIME", symbol, {"qqq": qqq_description, "price": current_price})
         return state
 
+    if signal == 1 and symbol in config.CRYPTO and symbol != "BTC/EUR":
+        if btc_context and not btc_context.get("btc_above_ema200", True):
+            log(f"{symbol} — Signal ignoré (BTC bear — sous EMA200)", "WARN")
+            log_signal("BUY_SKIP_BTC_REGIME", symbol, {"btc_trend": "bear", "price": current_price})
+            return state
+
     if signal == 1 and symbol not in state["positions"]:
         if len(state["positions"]) >= config.MAX_OPEN_TRADES:
             log(f"{symbol} — Signal ignoré (max {config.MAX_OPEN_TRADES} positions ouvertes)", "WARN")
@@ -628,6 +634,59 @@ def _compute_rotation_factors(trades: list) -> dict:
     }
 
 
+def _compute_momentum_score(symbol: str) -> tuple:
+    """
+    Calcule le momentum 90j (retour sur 90 jours glissants) pour un symbole.
+    Retourne (ok: bool, ret_90d: float).
+    ok=False si ret_90d < 0 (downtrend sur 90j).
+    Permissif (True) si erreur ou données insuffisantes.
+    """
+    try:
+        df = fetch_ohlcv(symbol, "1d", days=95)
+        if df is None or len(df) < 90:
+            return True, 0.0
+        price_now = float(df["close"].iloc[-1])
+        price_90d = float(df["close"].iloc[-90])
+        ret_90d = (price_now - price_90d) / price_90d
+        return ret_90d >= 0, round(ret_90d, 4)
+    except Exception:
+        return True, 0.0
+
+
+def _update_momentum_filter(state: dict) -> dict:
+    """
+    Calcule et met en cache le momentum 90j de tous les symboles.
+    Tourne UNE FOIS PAR SEMAINE (clé 'momentum_filter_week' dans state).
+    Retourne un dict {symbol: bool} (True = ok, False = exclu).
+    """
+    from datetime import date
+    current_week = date.today().isocalendar()[:2]  # (year, week)
+    cached_week = state.get("momentum_filter_week")
+    if cached_week == list(current_week) and "momentum_filter" in state:
+        return state["momentum_filter"]
+
+    log("Calcul du filtre momentum 90j (hebdomadaire)...", "INFO")
+    result = {}
+    excluded = []
+    for symbol in config.SYMBOLS:
+        ok, ret = _compute_momentum_score(symbol)
+        result[symbol] = ok
+        if not ok:
+            excluded.append(f"{symbol} ({ret*100:.1f}%)")
+        time.sleep(1)
+
+    if excluded:
+        msg = f"Momentum filter — Exclus (ret 90j < 0): {', '.join(excluded)}"
+        log(msg, "WARN")
+        notify(f"⚠️ <b>Momentum filter</b>\nExclus cette semaine:\n" + "\n".join(excluded))
+    else:
+        log("Momentum filter — Tous symboles positifs (ret 90j ≥ 0)", "INFO")
+
+    state["momentum_filter"] = result
+    state["momentum_filter_week"] = list(current_week)
+    return result
+
+
 def _confirm_daily_trend(symbol: str) -> tuple:
     """
     Confirmation multi-timeframe : vérifie que la tendance 1d valide le signal 4h.
@@ -792,7 +851,14 @@ def run():
                     "INFO",
                 )
 
+            momentum_filter = _update_momentum_filter(state)
+
             for symbol in config.SYMBOLS:
+                if not momentum_filter.get(symbol, True) and symbol not in state["positions"]:
+                    log(f"{symbol} — Ignoré (momentum 90j négatif)", "INFO")
+                    time.sleep(1)
+                    continue
+
                 category = "xstock" if symbol in config.XSTOCKS else "crypto"
                 combined = round(vix_factor * rotation[category], 2)
                 fr = funding_rates.get(symbol, 0.0)

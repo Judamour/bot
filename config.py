@@ -10,13 +10,14 @@ API_SECRET = os.getenv("KRAKEN_API_SECRET", "")
 
 # ── Paires tradées ──────────────────────────────────────────────────────────
 # Format Kraken : "BTC/EUR", "ETH/EUR", "SOL/EUR"
-CRYPTO = ["BTC/EUR", "ETH/EUR", "SOL/EUR", "BNB/EUR", "ADA/EUR", "DOT/EUR", "LINK/EUR", "AVAX/EUR"]
+CRYPTO = ["BTC/EUR", "ETH/EUR", "SOL/EUR", "BNB/EUR", "TON/EUR", "INJ/EUR", "LINK/EUR", "AVAX/EUR"]
 
 # xStocks : actions tokenisées sur Kraken, tradées en EUR 24/7
 # Symboles Kraken : suffixe "x" (ex: NVDAx/EUR)
 XSTOCKS = [
     "NVDAx/EUR", "AAPLx/EUR", "TSLAx/EUR", "MSFTx/EUR",
     "METAx/EUR", "AMZNx/EUR", "GOOGx/EUR",
+    "PLTRx/EUR", "AMDx/EUR", "AVGOx/EUR", "COINx/EUR",
 ]
 
 SYMBOLS = CRYPTO + XSTOCKS
@@ -31,14 +32,17 @@ MAX_DRAWDOWN = -0.15    # Coupe-circuit si capital chute de -15% depuis le dépa
 
 # ── Secteurs (corrélation positions — max 1 par secteur) ────────────────────
 SECTORS = {
-    "NVDAx/EUR": "tech",     "AAPLx/EUR": "tech",
-    "MSFTx/EUR": "tech",     "METAx/EUR": "tech",
-    "GOOGx/EUR": "tech",     "AMZNx/EUR": "ecommerce",
+    "NVDAx/EUR": "tech",       "AAPLx/EUR": "tech",
+    "MSFTx/EUR": "tech",       "METAx/EUR": "tech",
+    "GOOGx/EUR": "tech",       "AMZNx/EUR": "ecommerce",
     "TSLAx/EUR": "auto",
-    "BTC/EUR":   "crypto",   "ETH/EUR":   "crypto",
-    "SOL/EUR":   "crypto",   "BNB/EUR":   "crypto",
-    "ADA/EUR":   "crypto",   "DOT/EUR":   "crypto",
-    "LINK/EUR":  "crypto",   "AVAX/EUR":  "crypto",
+    "PLTRx/EUR": "ai_data",
+    "AMDx/EUR":  "semis",      "AVGOx/EUR": "semis",
+    "COINx/EUR": "crypto_equity",
+    "BTC/EUR":   "crypto",     "ETH/EUR":   "crypto",
+    "SOL/EUR":   "crypto",     "BNB/EUR":   "crypto",
+    "TON/EUR":   "crypto",     "INJ/EUR":   "crypto",
+    "LINK/EUR":  "crypto",     "AVAX/EUR":  "crypto",
 }
 
 # ── Timeframe ───────────────────────────────────────────────────────────────
@@ -50,10 +54,10 @@ EMA_FAST = 9        # EMA rapide
 EMA_SLOW = 21       # EMA lente
 EMA_TREND = 200     # EMA tendance longue — on achète seulement si prix > EMA200
 RSI_PERIOD = 14     # Période RSI
-RSI_OVERBOUGHT = 75 # RSI > 75 → on n'achète pas
+RSI_OVERBOUGHT = 70 # RSI > 70 → on n'achète pas
 RSI_OVERSOLD = 25   # RSI < 25 → seuil de survente
 ADX_PERIOD = 14     # Période ADX
-ADX_THRESHOLD = 20  # ADX > 20 = tendance suffisante
+ADX_THRESHOLD = 22  # ADX > 22 = tendance suffisante
 
 # ── Gestion du risque ───────────────────────────────────────────────────────
 POSITION_SIZE_EUR = 100  # Montant fixe investi par position (en EUR)
