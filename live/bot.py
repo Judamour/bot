@@ -300,26 +300,6 @@ def process_symbol(symbol: str, state: dict, btc_context: dict = None) -> dict:
             "fee_entry": round(fee_entry, 4),
         }
 
-        # Ordre Alpaca paper si xStock + Alpaca configuré
-        if symbol in config.XSTOCKS:
-            try:
-                from live.alpaca_client import is_configured, place_order, _get_data_client
-                if is_configured():
-                    from data.fetcher import _get_eurusd_rate, _xstock_ticker
-                    eurusd = _get_eurusd_rate()
-                    ticker = _xstock_ticker(symbol)
-                    alpaca_order = place_order(
-                        symbol=ticker,
-                        qty=pos["size"],
-                        side="buy",
-                        stop_loss=round(pos["stop_loss"] * eurusd, 4),
-                        take_profit=round(pos["take_profit"] * eurusd, 4),
-                    )
-                    position_data["alpaca_id"] = alpaca_order["alpaca_id"]
-                    log(f"{symbol} — Ordre Alpaca paper: {alpaca_order['alpaca_id']}", "INFO")
-            except Exception as e:
-                log(f"{symbol} — Alpaca ordre échoué (paper state OK): {e}", "WARN")
-
         state["positions"][symbol] = position_data
         log_signal("BUY_EXECUTED", symbol, {
             "price": effective_buy,

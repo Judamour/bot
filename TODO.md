@@ -11,9 +11,6 @@
 
 - [ ] **Telegram** — Créer bot @BotFather → TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID → ajouter dans .env VPS → tester
 - [ ] **Fix filtre volume xStocks** — Volume = 0 hors heures de marché → filtre bloque toutes les entrées. Utiliser volume de la dernière bougie de session
-- [ ] **Alpaca — Activer les clés** — `live/alpaca_client.py` déjà codé. Récupérer clés sur app.alpaca.markets → Paper Trading → API Keys → ajouter dans .env VPS → tester avec `venv/bin/python live/alpaca_client.py`
-- [ ] **Alpaca Fetcher OHLCV** — Une fois clés OK : décommenter le dispatcher Alpaca dans `data/fetcher.py` (1 ligne) → données temps réel NYSE/NASDAQ
-- [ ] **Alpaca Paper orders** — BUY/SELL déjà codé dans `live/bot.py` → actif automatiquement dès que clés présentes
 - [ ] **Backup paper_state.json** — Copie automatique quotidienne sur GitHub Gist. Si VPS crash → historique perdu
 - [ ] **Log rotation** — `bot.log` grossit indéfiniment. Configurer `logrotate` (max 10MB, 7 fichiers)
 - [ ] **Backtesting xStocks** — Valider la stratégie Supertrend sur données historiques actions avant de trader en réel
@@ -24,7 +21,7 @@
 - [ ] **Dashboard xStocks** — Indicateur "Marché US OUVERT/FERMÉ", section xStocks séparée des cryptos
 - [ ] **Sharpe ratio + max drawdown** dans le dashboard (actuellement seulement win rate + PnL)
 - [ ] **Endpoint /api/health** — Statut bot (up/down), dernière analyse, nb positions ouvertes
-- [ ] **Tests end-to-end** — Signal xStock → ordre paper Alpaca → Telegram → log signals.jsonl
+- [ ] **Tests end-to-end** — Signal xStock → paper state → Telegram → log signals.jsonl
 - [ ] **Dashboard mobile** — Responsive design
 
 ## 🔵 Avancé (plus tard)
@@ -33,7 +30,7 @@
 - [ ] **Régime de marché** — Réduire taille positions en haute volatilité (VIX > 25)
 - [ ] **Rotation capital** — Allouer plus aux cryptos si xStocks sous-performent
 - [ ] **Notifications enrichies** — Image du chart joint au signal BUY sur Telegram
-- [ ] **Alpaca → réel progressif** — Passer `paper=False` + petit capital pour validation en conditions réelles
+- [ ] **Kraken xStocks live** — Passer `PAPER_TRADING=false` + ordres Kraken ccxt pour les NVDAx, AAPLx... via le même client que les cryptos
 
 ## Fait ✓
 

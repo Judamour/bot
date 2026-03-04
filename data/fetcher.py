@@ -10,7 +10,7 @@ import config
 
 
 def _is_xstock(symbol: str) -> bool:
-    """True si le symbole est une action US (données via Alpaca ou yfinance)."""
+    """True si le symbole est une action US (données via yfinance)."""
     return symbol in config.XSTOCKS
 
 
@@ -98,11 +98,11 @@ def fetch_ohlcv(
 ) -> pd.DataFrame:
     """
     Télécharge les données OHLCV.
-    - xStocks → yfinance NYSE/NASDAQ (USD converti en EUR, paper trading)
+    - xStocks → yfinance NYSE/NASDAQ (USD converti en EUR)
     - Crypto   → Binance (API publique, converti en USDT)
 
     Args:
-        symbol: Ex: "BTC/EUR" ou "NVDA/EUR"
+        symbol: Ex: "BTC/EUR" ou "NVDAx/EUR"
         timeframe: Ex: "4h"
         days: Nombre de jours d'historique
 
