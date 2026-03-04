@@ -15,8 +15,9 @@ def _is_xstock(symbol: str) -> bool:
 
 
 def _xstock_ticker(symbol: str) -> str:
-    """Convertit 'NVDA/EUR' → 'NVDA' (format Alpaca)."""
-    return symbol.split("/")[0]
+    """Convertit 'NVDAx/EUR' → 'NVDA' (format yfinance/Alpaca, sans le suffixe x Kraken)."""
+    base = symbol.split("/")[0]
+    return base[:-1] if base.endswith("x") else base
 
 
 def get_exchange(use_auth: bool = False) -> ccxt.kraken:
@@ -52,7 +53,7 @@ def fetch_yfinance_ohlcv(
     """
     import yfinance as yf
 
-    ticker_sym = symbol.split("/")[0]  # "NVDA/EUR" → "NVDA"
+    ticker_sym = _xstock_ticker(symbol)  # "NVDAx/EUR" → "NVDA"
     end = datetime.utcnow()
     start = end - timedelta(days=days)
 

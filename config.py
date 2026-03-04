@@ -13,9 +13,10 @@ API_SECRET = os.getenv("KRAKEN_API_SECRET", "")
 CRYPTO = ["BTC/EUR", "ETH/EUR", "SOL/EUR", "BNB/EUR", "ADA/EUR", "DOT/EUR"]
 
 # xStocks : actions tokenisées sur Kraken, tradées en EUR 24/7
+# Symboles Kraken : suffixe "x" (ex: NVDAx/EUR)
 XSTOCKS = [
-    "NVDA/EUR", "AAPL/EUR", "TSLA/EUR", "MSFT/EUR",
-    "META/EUR", "AMZN/EUR", "GOOG/EUR",
+    "NVDAx/EUR", "AAPLx/EUR", "TSLAx/EUR", "MSFTx/EUR",
+    "METAx/EUR", "AMZNx/EUR", "GOOGx/EUR",
 ]
 
 SYMBOLS = CRYPTO + XSTOCKS
