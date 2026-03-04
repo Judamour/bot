@@ -28,7 +28,7 @@
 
 - [x] **Multi-timeframe** — Confirmation 1d (ST↑ + >EMA200) avant entrée 4h, avant appel Claude
 - [x] **Régime de marché** — VIX > 25 → taille position ×0.5 (yfinance ^VIX, une fois par cycle)
-- [ ] **Rotation capital** — Allouer plus aux cryptos si xStocks sous-performent
+- [x] **Rotation capital** — Bidirectionnel : meilleure catégorie ×1.3, moins bonne ×0.7 (20 derniers trades, combiné VIX)
 - [x] **Notifications enrichies** — Chart matplotlib 60 bougies (prix + ST + EMA200 + SL/TP) joint au BUY Telegram
 - [ ] **Kraken xStocks live** — Passer `PAPER_TRADING=false` + ordres Kraken ccxt pour les NVDAx, AAPLx... via le même client que les cryptos
 

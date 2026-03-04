@@ -306,9 +306,8 @@ def process_symbol(symbol: str, state: dict, btc_context: dict = None, vix_facto
             return state
 
         effective_buy = current_price * (1 + config.SLIPPAGE)
-        # Régime VIX : capital réduit si volatilité élevée
-        if vix_factor < 1.0:
-            log(f"{symbol} — VIX élevé → taille réduite à {vix_factor*100:.0f}% du capital", "WARN")
+        if vix_factor != 1.0:
+            log(f"{symbol} — Capital factor {vix_factor:.2f}x (VIX/rotation)", "WARN" if vix_factor < 1.0 else "INFO")
         pos = calculate_position_size(state["capital"] * vix_factor, effective_buy, atr)
         fee_entry = effective_buy * pos["size"] * config.EXCHANGE_FEE
         total_cost = pos["size"] * effective_buy + fee_entry
@@ -515,6 +514,37 @@ def fetch_vix() -> float:
     return 0.0
 
 
+def _compute_rotation_factors(trades: list) -> dict:
+    """
+    Rotation du capital entre crypto et xStocks selon performance relative.
+    Basé sur les 20 derniers trades fermés de chaque catégorie.
+
+    Retourne {'crypto': factor, 'xstock': factor} avec facteurs entre 0.7 et 1.3.
+    Bidirectionnel : si crypto > xStocks → crypto ×1.3 / xStocks ×0.7, et vice-versa.
+    Neutre (1.0 / 1.0) si moins de 3 trades par catégorie.
+    """
+    recent = sorted(trades, key=lambda x: x.get("exit_date", ""))[-20:]
+
+    crypto_pnl  = [t["pnl"] for t in recent if t.get("symbol") in config.CRYPTO]
+    xstock_pnl  = [t["pnl"] for t in recent if t.get("symbol") in config.XSTOCKS]
+
+    if len(crypto_pnl) < 3 or len(xstock_pnl) < 3:
+        return {"crypto": 1.0, "xstock": 1.0}
+
+    avg_crypto = sum(crypto_pnl) / len(crypto_pnl)
+    avg_xstock = sum(xstock_pnl) / len(xstock_pnl)
+
+    # diff positif → crypto surperforme → boost crypto, réduire xstock
+    # diff négatif → xstock surperforme → boost xstock, réduire crypto
+    diff = avg_crypto - avg_xstock
+    raw = max(-0.3, min(0.3, diff / 20.0))   # ±20€ d'écart → ±0.3x
+
+    return {
+        "crypto": round(1.0 + raw, 2),
+        "xstock": round(1.0 - raw, 2),
+    }
+
+
 def _confirm_daily_trend(symbol: str) -> tuple:
     """
     Confirmation multi-timeframe : vérifie que la tendance 1d valide le signal 4h.
@@ -640,8 +670,18 @@ def run():
                     "WARN" if vix > 25 else "INFO",
                 )
 
+            rotation = _compute_rotation_factors(state.get("trades", []))
+            if rotation["crypto"] != 1.0:
+                log(
+                    f"Rotation capital: crypto ×{rotation['crypto']} | "
+                    f"xStocks ×{rotation['xstock']} (perf relative 20 derniers trades)",
+                    "INFO",
+                )
+
             for symbol in config.SYMBOLS:
-                state = process_symbol(symbol, state, btc_context=btc_context, vix_factor=vix_factor)
+                category = "xstock" if symbol in config.XSTOCKS else "crypto"
+                combined = round(vix_factor * rotation[category], 2)
+                state = process_symbol(symbol, state, btc_context=btc_context, vix_factor=combined)
 
             save_state(state)
             print_status(state)
