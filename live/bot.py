@@ -305,9 +305,12 @@ def process_symbol(
         news = list(macro_news or [])
         if symbol in config.XSTOCKS:
             from data.fetcher import _xstock_ticker
-            sym_ticker = _xstock_ticker(symbol)
+            sym_ticker = _xstock_ticker(symbol)          # NVDAx/EUR → NVDA
             sym_news = fetch_news_yfinance(sym_ticker, limit=3, hours=48)
-            news = sym_news + news  # symbol en priorité
+        else:
+            crypto_ticker = symbol.split("/")[0] + "-USD"  # BTC/EUR → BTC-USD
+            sym_news = fetch_news_yfinance(crypto_ticker, limit=3, hours=48)
+        news = sym_news + news  # symbol en priorité, macro en complément
         news = news[:6]
 
         confirme, raison = ask_claude(

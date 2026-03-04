@@ -196,27 +196,29 @@ def fetch_news_yfinance(ticker: str, limit: int = 4, hours: int = 48) -> list:
         return []
 
 
-def fetch_news_macro_rss(limit: int = 5) -> list:
+def fetch_news_macro_rss(limit: int = 6) -> list:
     """
     Fetch les headlines macro depuis Yahoo Finance RSS (public, aucune clé).
-    Utilise ^GSPC (S&P 500) comme proxy pour les news de marché global.
+    Combine S&P 500 (^GSPC) + Nasdaq (^NDX) pour une couverture macro + tech.
     Retourne [{"title": str, "source": str}]
     """
-    try:
-        import urllib.request
-        import xml.etree.ElementTree as ET
+    import urllib.request
+    import xml.etree.ElementTree as ET
 
-        url = "https://finance.yahoo.com/rss/2.0/headline?s=%5EGSPC&region=US&lang=en-US"
-        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-        with urllib.request.urlopen(req, timeout=5) as r:
-            root = ET.fromstring(r.read())
-        return [
-            {"title": item.findtext("title", "").strip(), "source": "Yahoo Finance"}
-            for item in root.findall(".//item")[:limit]
-            if item.findtext("title", "").strip()
-        ]
-    except Exception:
-        return []
+    results = []
+    for index in ["%5EGSPC", "%5ENDX"]:   # S&P 500 + Nasdaq 100
+        try:
+            url = f"https://finance.yahoo.com/rss/2.0/headline?s={index}&region=US&lang=en-US"
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=5) as r:
+                root = ET.fromstring(r.read())
+            for item in root.findall(".//item"):
+                title = item.findtext("title", "").strip()
+                if title and title not in {n["title"] for n in results}:
+                    results.append({"title": title, "source": "Yahoo Finance"})
+        except Exception:
+            continue
+    return results[:limit]
 
 
 def fetch_fear_greed() -> dict:
