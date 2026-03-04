@@ -8,7 +8,7 @@ import anthropic
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
-from data.fetcher import fetch_ohlcv
+from data.fetcher import fetch_ohlcv, fetch_news_yfinance, fetch_news_macro_rss, _xstock_ticker
 from strategies.supertrend import generate_signals
 from live.notifier import notify
 
@@ -39,6 +39,8 @@ def run_premarket_analysis(
             df = fetch_ohlcv(symbol, config.TIMEFRAME, days=45)
             df = generate_signals(df)
             last = df.iloc[-1]
+            ticker = _xstock_ticker(symbol)
+            sym_news = fetch_news_yfinance(ticker, limit=2, hours=48)
             summaries.append({
                 "symbol": symbol,
                 "price": round(float(last["close"]), 2),
@@ -58,6 +60,7 @@ def run_premarket_analysis(
                     bool(last["f_rsi"]),
                     bool(last["f_volume"]),
                 ]),
+                "news": sym_news,
             })
         except Exception as e:
             summaries.append({"symbol": symbol, "error": str(e)})
@@ -89,6 +92,10 @@ def _build_prompt(
     vix: float = 0.0,
     fear_greed: dict = None,
 ) -> str:
+    # ── News macro (S&P 500 headlines) ──
+    macro_news = fetch_news_macro_rss(limit=3)
+    macro_str_lines = [f"  • [{n.get('source','')}] {n['title']}" for n in macro_news if n.get("title")]
+
     # ── Lignes techniques par symbole ──
     lines = []
     for s in summaries:
@@ -96,11 +103,16 @@ def _build_prompt(
             lines.append(f"- {s['symbol']} : erreur données ({s['error']})")
             continue
         sig_str = "🟢 BUY" if s["signal"] == 1 else "🔴 SELL" if s["signal"] == -1 else "⚪ neutre"
-        lines.append(
+        line = (
             f"- {s['symbol']} | {s['price']}€ | ST:{s['supertrend']} | ADX:{s['adx']} | "
             f"RSI:{s['rsi']} | {s['ema_cross']} | >EMA200:{s['above_ema200']} | "
             f"Vol×{s['volume_ratio']} | {s['filters_ok']}/6 filtres | {sig_str}"
         )
+        sym_news = s.get("news", [])
+        if sym_news:
+            news_parts = " | ".join(f'"{n["title"][:80]}" ({n.get("age_h","?")}h)' for n in sym_news)
+            line += f"\n  News: {news_parts}"
+        lines.append(line)
 
     # ── Contexte BTC ──
     btc_str = "Non disponible"
@@ -147,6 +159,7 @@ MACRO & SENTIMENT DU JOUR :
 - Capital disponible: {capital:.0f}€ | Max 3 positions simultanées
 - Performance bot récente: win rate {wr} | Moyenne {avg_pnl} (20 derniers trades)
 Note: les actions avec rapport trimestriel dans <24h sont automatiquement exclues.
+{("ACTUALITÉS MARCHÉ (S&P 500) :\n" + chr(10).join(macro_str_lines)) if macro_str_lines else ""}
 
 DONNÉES TECHNIQUES xStocks (timeframe {config.TIMEFRAME}) :
 {chr(10).join(lines)}

@@ -24,6 +24,7 @@ def ask_claude(
     recent_win_rate: float = None,
     rotation_factor: float = 1.0,
     daily_trend_reason: str = "",
+    news: list = None,
 ) -> tuple[bool, str]:
     """
     Demande à Claude de valider un signal d'achat.
@@ -87,6 +88,17 @@ def ask_claude(
 
     daily_str = f"✓ {daily_trend_reason}" if daily_trend_reason else "✓ confirmé"
 
+    # ── Actualités récentes ──
+    news_str = ""
+    if news:
+        lines = []
+        for n in news[:6]:
+            age = f"{n['age_h']}h" if n.get("age_h") else ""
+            src = n.get("source", "")
+            title = n.get("title", "")
+            lines.append(f"• [{src}] {title}" + (f" ({age})" if age else ""))
+        news_str = "\nACTUALITÉS RÉCENTES (24-48h) :\n" + "\n".join(lines) + "\n"
+
     prompt = f"""Tu es un trader algorithmique. Signal BUY technique validé sur {symbol} ({category}).
 
 INDICATEURS 4H (7/7 filtres passés) :
@@ -100,10 +112,10 @@ CONTEXTE MACRO & SENTIMENT :
 • Fear & Greed: {fg_str}{fg_alert}{funding_str}
 • Portfolio: {slots_left}/{max_positions} slots libres | Capital: {capital:.0f}€
 • Win rate récent: {wr_str} | Facteur taille: {rot_str}
-
+{news_str}
 TRADE : Risk 2% | SL=3×ATR | TP=2.5×ATR (R:R 1:2.5)
 
-Confirme si les indicateurs sont alignés. Ignore uniquement si tu identifies un risque macro spécifique et sérieux (funding extrême, peur extrême + tendance baissière, VIX > 30 sans catalyseur haussier).
+Confirme si les indicateurs sont alignés. Les actualités peuvent faire pencher la balance si elles révèlent un risque sectoriel direct (annonce tarifaire, résultat décevant, crise macro) — sinon, les indicateurs techniques priment.
 
 Réponds EXACTEMENT :
 DÉCISION: CONFIRME ou IGNORE

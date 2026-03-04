@@ -166,6 +166,59 @@ def _timeframe_to_ms(timeframe: str) -> int:
     return int(timeframe[:-1]) * units[timeframe[-1]]
 
 
+def fetch_news_yfinance(ticker: str, limit: int = 4, hours: int = 48) -> list:
+    """
+    Fetch les dernières news via yfinance (Yahoo Finance) — aucune clé requise.
+    ticker : symbole Yahoo ex: "NVDA", "^GSPC" (S&P), "^NDX" (Nasdaq), "BTC-USD"
+    Retourne [{"title": str, "source": str, "age_h": float}]
+    """
+    try:
+        import yfinance as yf
+        from datetime import timezone
+
+        now = datetime.utcnow().replace(tzinfo=timezone.utc).timestamp()
+        cutoff = now - hours * 3600
+        raw = yf.Ticker(ticker).news or []
+        result = []
+        for n in raw:
+            pub = n.get("providerPublishTime", 0)
+            if pub < cutoff:
+                continue
+            result.append({
+                "title": n.get("title", ""),
+                "source": n.get("publisher", ""),
+                "age_h": round((now - pub) / 3600, 1),
+            })
+            if len(result) >= limit:
+                break
+        return result
+    except Exception:
+        return []
+
+
+def fetch_news_macro_rss(limit: int = 5) -> list:
+    """
+    Fetch les headlines macro depuis Yahoo Finance RSS (public, aucune clé).
+    Utilise ^GSPC (S&P 500) comme proxy pour les news de marché global.
+    Retourne [{"title": str, "source": str}]
+    """
+    try:
+        import urllib.request
+        import xml.etree.ElementTree as ET
+
+        url = "https://finance.yahoo.com/rss/2.0/headline?s=%5EGSPC&region=US&lang=en-US"
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=5) as r:
+            root = ET.fromstring(r.read())
+        return [
+            {"title": item.findtext("title", "").strip(), "source": "Yahoo Finance"}
+            for item in root.findall(".//item")[:limit]
+            if item.findtext("title", "").strip()
+        ]
+    except Exception:
+        return []
+
+
 def fetch_fear_greed() -> dict:
     """
     Fetch le Crypto Fear & Greed Index (alternative.me, API publique).

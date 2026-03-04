@@ -8,7 +8,7 @@ from colorama import Fore, Style, init
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
-from data.fetcher import fetch_ohlcv, get_exchange, fetch_fear_greed, fetch_funding_rates
+from data.fetcher import fetch_ohlcv, get_exchange, fetch_fear_greed, fetch_funding_rates, fetch_news_yfinance, fetch_news_macro_rss
 from strategies.supertrend import generate_signals, calculate_position_size, add_indicators
 from live.claude_filter import ask_claude
 from live.notifier import notify, notify_file
@@ -139,6 +139,7 @@ def process_symbol(
     vix: float = 0.0,
     fear_greed: dict = None,
     funding_rate: float = 0.0,
+    macro_news: list = None,
 ) -> dict:
     """Analyse un symbole et exécute les ordres si nécessaire."""
     try:
@@ -299,6 +300,16 @@ def process_symbol(
             sum(1 for t in recent_trades if t.get("pnl", 0) > 0) / len(recent_trades) * 100
             if recent_trades else None
         )
+
+        # ── News : symbol-specific (lazy, seulement si BUY) + macro du cycle ──
+        news = list(macro_news or [])
+        if symbol in config.XSTOCKS:
+            from data.fetcher import _xstock_ticker
+            sym_ticker = _xstock_ticker(symbol)
+            sym_news = fetch_news_yfinance(sym_ticker, limit=3, hours=48)
+            news = sym_news + news  # symbol en priorité
+        news = news[:6]
+
         confirme, raison = ask_claude(
             symbol=symbol,
             price=current_price,
@@ -318,6 +329,7 @@ def process_symbol(
             recent_win_rate=recent_wr,
             rotation_factor=vix_factor,
             daily_trend_reason=reason_1d,
+            news=news if news else None,
         )
         log(f"{symbol} — Claude: {'✓ CONFIRME' if confirme else '✗ IGNORE'} | {raison}", "INFO")
         log_signal("CLAUDE_FILTER", symbol, {
@@ -689,6 +701,7 @@ def run():
             # Valeurs par défaut en cas d'erreur de fetch
             fear_greed = {"score": 50, "label": "Neutral"}
             funding_rates = {}
+            macro_news = []
 
             btc_context = fetch_btc_context()
             if btc_context:
@@ -723,6 +736,10 @@ def run():
                 if high_fr:
                     log(f"⚠ Funding rates élevés: {high_fr}", "WARN")
 
+            macro_news = fetch_news_macro_rss(limit=4)
+            if macro_news:
+                log(f"News macro: {len(macro_news)} headlines chargés", "INFO")
+
             rotation = _compute_rotation_factors(state.get("trades", []))
             if rotation["crypto"] != 1.0:
                 log(
@@ -742,6 +759,7 @@ def run():
                     vix=vix,
                     fear_greed=fear_greed,
                     funding_rate=fr,
+                    macro_news=macro_news,
                 )
 
             save_state(state)
