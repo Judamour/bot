@@ -11,7 +11,7 @@ import config
 from data.fetcher import fetch_ohlcv, get_exchange
 from strategies.supertrend import generate_signals, calculate_position_size, add_indicators
 from live.claude_filter import ask_claude
-from live.notifier import notify
+from live.notifier import notify, notify_file
 
 init(autoreset=True)
 
@@ -398,6 +398,21 @@ def _check_daily_snapshot(state: dict):
         f"Trades: {len(trades)} | Win rate: {win_rate}%"
     )
     state["last_snapshot_date"] = today
+
+    # Backup paper_state.json — local + Telegram
+    try:
+        import shutil
+        backup_dir = "logs/backups"
+        os.makedirs(backup_dir, exist_ok=True)
+        backup_path = f"{backup_dir}/paper_state_{today}.json"
+        shutil.copy2(STATE_FILE, backup_path)
+        # Garder 30 jours de backups locaux
+        backups = sorted(os.listdir(backup_dir))
+        for old in backups[:-30]:
+            os.remove(os.path.join(backup_dir, old))
+        notify_file(STATE_FILE, f"📦 Backup {today} — {total_value:.2f}€ ({pnl_pct:+.2f}%)")
+    except Exception as e:
+        log(f"Backup paper_state échoué: {e}", "WARN")
 
 
 def _is_us_market_open() -> bool:

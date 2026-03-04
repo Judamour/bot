@@ -10,10 +10,10 @@
 ## 🟡 Important (performance et fiabilité)
 
 - [ ] **Telegram** — Créer bot @BotFather → TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID → ajouter dans .env VPS → tester
-- [ ] **Fix filtre volume xStocks** — Volume = 0 hors heures de marché → filtre bloque toutes les entrées. Utiliser volume de la dernière bougie de session
-- [ ] **Backup paper_state.json** — Copie automatique quotidienne sur GitHub Gist. Si VPS crash → historique perdu
-- [ ] **Log rotation** — `bot.log` grossit indéfiniment. Configurer `logrotate` (max 10MB, 7 fichiers)
-- [ ] **Backtesting xStocks** — Valider la stratégie Supertrend sur données historiques actions avant de trader en réel
+- [x] **Fix filtre volume xStocks** — Volume 0 → NaN + ffill dans supertrend.py
+- [x] **Backup paper_state.json** — Backup local `logs/backups/` (30j) + envoi Telegram quotidien
+- [x] **Log rotation** — logrotate configuré VPS (daily, 7 fichiers, 10MB max, copytruncate)
+- [x] **Backtesting xStocks** — Fonctionne via yfinance (1d pour >60j, 1h→4h pour ≤60j)
 
 ## 🟢 Confort et monitoring
 

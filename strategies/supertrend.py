@@ -107,8 +107,10 @@ def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     df["rsi"] = compute_rsi(df["close"], length=14)
     df["atr"] = compute_atr(df["high"], df["low"], df["close"], length=14)
     df["adx"] = compute_adx(df["high"], df["low"], df["close"], length=config.ADX_PERIOD)
-    df["volume_ma"] = df["volume"].rolling(window=20).mean()
-    df["volume_ratio"] = df["volume"] / df["volume_ma"]
+    # Volume : remplacer 0 (hors heures marché xStocks) par NaN puis ffill
+    vol = df["volume"].replace(0, float("nan"))
+    df["volume_ma"] = vol.rolling(window=20, min_periods=5).mean()
+    df["volume_ratio"] = (vol / df["volume_ma"]).ffill().fillna(1.0)
 
     return df.dropna()
 
