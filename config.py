@@ -56,7 +56,7 @@ ADX_PERIOD = 14     # Période ADX
 ADX_THRESHOLD = 20  # ADX > 20 = tendance suffisante
 
 # ── Gestion du risque ───────────────────────────────────────────────────────
-RISK_PER_TRADE = 0.02    # 2% du capital max par trade
+POSITION_SIZE_EUR = 100  # Montant fixe investi par position (en EUR)
 ATR_MULTIPLIER = 3.0     # Stop-loss = 3x ATR sous le prix d'entrée (adapté au 4h)
 TAKE_PROFIT_RATIO = 2.5  # Take-profit = 2.5x le stop-loss (ratio R:R = 1:2.5)
 MAX_OPEN_TRADES = 3      # Maximum de trades ouverts simultanément

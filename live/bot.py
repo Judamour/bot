@@ -361,9 +361,10 @@ def process_symbol(
             return state
 
         effective_buy = current_price * (1 + config.SLIPPAGE)
+        position_eur = config.POSITION_SIZE_EUR * vix_factor
         if vix_factor != 1.0:
-            log(f"{symbol} — Capital factor {vix_factor:.2f}x (VIX/rotation)", "WARN" if vix_factor < 1.0 else "INFO")
-        pos = calculate_position_size(state["capital"] * vix_factor, effective_buy, atr)
+            log(f"{symbol} — Position {position_eur:.0f}€ (facteur VIX/rotation ×{vix_factor:.2f})", "WARN" if vix_factor < 1.0 else "INFO")
+        pos = calculate_position_size(position_eur, effective_buy, atr)
         fee_entry = effective_buy * pos["size"] * config.EXCHANGE_FEE
         total_cost = pos["size"] * effective_buy + fee_entry
 

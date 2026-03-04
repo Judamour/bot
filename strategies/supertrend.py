@@ -153,14 +153,14 @@ def generate_signals(df: pd.DataFrame) -> pd.DataFrame:
     df["f_volume"]        = strong_volume
 
     df["signal"] = 0
+    # ── 3 conditions hard (non négociables) ──────────────────────────────────
+    # Supertrend flip + pas de surachat RSI + prix au-dessus EMA200
+    # Les 4 autres filtres (ADX, volume, structure, momentum) sont passés à
+    # Claude comme contexte — il est le décideur final.
     df.loc[
         supertrend_up
-        & trending_market
-        & above_ema200
-        & bullish_structure
-        & momentum_up
         & not_overbought
-        & strong_volume,
+        & above_ema200,
         "signal",
     ] = 1
     df.loc[supertrend_down, "signal"] = -1
@@ -168,14 +168,14 @@ def generate_signals(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def calculate_position_size(capital: float, entry_price: float, atr: float) -> dict:
-    """Calcule la taille de position avec gestion du risque."""
-    risk_eur = capital * config.RISK_PER_TRADE
+def calculate_position_size(position_eur: float, entry_price: float, atr: float) -> dict:
+    """Calcule la taille de position avec montant fixe en EUR."""
+    size = position_eur / entry_price
     stop_distance = atr * config.ATR_MULTIPLIER
-    size = risk_eur / stop_distance
 
     stop_loss = entry_price - stop_distance
     take_profit = entry_price + (stop_distance * config.TAKE_PROFIT_RATIO)
+    risk_eur = size * stop_distance  # risque réel selon ATR
 
     return {
         "size": round(size, 6),
