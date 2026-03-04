@@ -120,7 +120,7 @@ def generate_signals(df: pd.DataFrame) -> pd.DataFrame:
     Génère les signaux avec la stratégie Supertrend + filtres multiples.
 
     Signal LONG si TOUS ces critères sont réunis :
-      1. Supertrend passe en haussier (direction -1 → 1)
+      1. Supertrend haussier (direction = 1)
       2. ADX > seuil (marché en tendance, pas en range)
       3. Prix > EMA 200 (tendance longue confirmée)
       4. EMA 50 > EMA 200 (structure de marché haussière)
@@ -133,7 +133,7 @@ def generate_signals(df: pd.DataFrame) -> pd.DataFrame:
     """
     df = add_indicators(df)
 
-    supertrend_up   = (df["supertrend_dir"] == 1) & (df["supertrend_dir"].shift(1) == -1)
+    supertrend_up   = df["supertrend_dir"] == 1   # Supertrend haussier (pas seulement le flip)
     supertrend_down = (df["supertrend_dir"] == -1) & (df["supertrend_dir"].shift(1) == 1)
 
     trending_market  = df["adx"] > config.ADX_THRESHOLD      # Pas de range
