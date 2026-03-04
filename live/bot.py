@@ -131,7 +131,7 @@ def apply_trailing_stop(position: dict, current_price: float, symbol: str) -> di
 
 # ── Logique principale ────────────────────────────────────────────────────────
 
-def process_symbol(symbol: str, state: dict, btc_context: dict = None) -> dict:
+def process_symbol(symbol: str, state: dict, btc_context: dict = None, vix_factor: float = 1.0) -> dict:
     """Analyse un symbole et exécute les ordres si nécessaire."""
     try:
         df = fetch_ohlcv(symbol, config.TIMEFRAME, days=45)
@@ -267,6 +267,14 @@ def process_symbol(symbol: str, state: dict, btc_context: dict = None) -> dict:
                 log_signal("BUY_SKIP_EARNINGS", symbol, {"ticker": ticker, "price": current_price})
                 return state
 
+        # Confirmation multi-timeframe (1d) — avant Claude pour économiser les appels API
+        ok_1d, reason_1d = _confirm_daily_trend(symbol)
+        log(f"{symbol} — MTF 1d: {'✓' if ok_1d else '✗'} {reason_1d}", "INFO")
+        log_signal("MTF_FILTER", symbol, {"ok_1d": ok_1d, "reason": reason_1d, "price": current_price})
+        if not ok_1d:
+            log_signal("BUY_SKIP_MTF", symbol, {"reason": reason_1d, "price": current_price})
+            return state
+
         log(
             f"{symbol} — Signal BUY | ADX: {adx:.1f} | Vol×{volume_ratio:.2f} | "
             f"RSI: {last['rsi']:.1f} — consultation Claude...",
@@ -298,7 +306,10 @@ def process_symbol(symbol: str, state: dict, btc_context: dict = None) -> dict:
             return state
 
         effective_buy = current_price * (1 + config.SLIPPAGE)
-        pos = calculate_position_size(state["capital"], effective_buy, atr)
+        # Régime VIX : capital réduit si volatilité élevée
+        if vix_factor < 1.0:
+            log(f"{symbol} — VIX élevé → taille réduite à {vix_factor*100:.0f}% du capital", "WARN")
+        pos = calculate_position_size(state["capital"] * vix_factor, effective_buy, atr)
         fee_entry = effective_buy * pos["size"] * config.EXCHANGE_FEE
         total_cost = pos["size"] * effective_buy + fee_entry
 
@@ -344,6 +355,7 @@ def process_symbol(symbol: str, state: dict, btc_context: dict = None) -> dict:
             f"▲ <b>{symbol}</b> BUY | {effective_buy:.2f}€ | "
             f"SL {pos['stop_loss']:.2f}€ | TP {pos['take_profit']:.2f}€"
         )
+        _send_trade_chart(symbol, df, effective_buy, pos["stop_loss"], pos["take_profit"])
 
     return state
 
@@ -491,6 +503,96 @@ def _has_earnings_soon(ticker: str) -> bool:
         return False
 
 
+def fetch_vix() -> float:
+    """Retourne le VIX actuel (indice de peur US). Retourne 0 si indisponible."""
+    try:
+        import yfinance as yf
+        df = yf.Ticker("^VIX").history(period="2d", interval="1h")
+        if not df.empty:
+            return round(float(df["Close"].iloc[-1]), 2)
+    except Exception:
+        pass
+    return 0.0
+
+
+def _confirm_daily_trend(symbol: str) -> tuple:
+    """
+    Confirmation multi-timeframe : vérifie que la tendance 1d valide le signal 4h.
+    Retourne (ok: bool, raison: str). Permissif si données indisponibles.
+    """
+    try:
+        df = fetch_ohlcv(symbol, "1d", days=250)
+        df = add_indicators(df)
+        last = df.iloc[-1]
+        st_up = int(last["supertrend_dir"]) == 1
+        above_200 = float(last["close"]) > float(last["ema200"])
+        if st_up and above_200:
+            return True, "1d ✓ (ST↑ + >EMA200)"
+        parts = []
+        if not st_up:
+            parts.append("ST 1d baissier")
+        if not above_200:
+            parts.append("sous EMA200 1d")
+        return False, ", ".join(parts)
+    except Exception as e:
+        return True, f"1d non vérifié ({e})"  # permissif si erreur
+
+
+def _send_trade_chart(symbol: str, df, entry: float, stop: float, tp: float):
+    """Génère un chart 4h (60 dernières bougies) et l'envoie via Telegram."""
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        import tempfile
+
+        plot_df = df.tail(60).copy()
+        n = len(plot_df)
+        xs = list(range(n))
+
+        fig, ax = plt.subplots(figsize=(10, 4))
+        fig.patch.set_facecolor("#0d1117")
+        ax.set_facecolor("#161b22")
+
+        ax.plot(xs, plot_df["close"], color="#e6edf3", linewidth=1.2)
+
+        if "supertrend" in plot_df.columns and "supertrend_dir" in plot_df.columns:
+            for i in range(1, n):
+                c = "#3fb950" if plot_df["supertrend_dir"].iloc[i] == 1 else "#f85149"
+                ax.plot([i-1, i],
+                        [plot_df["supertrend"].iloc[i-1], plot_df["supertrend"].iloc[i]],
+                        color=c, linewidth=1.5)
+
+        if "ema200" in plot_df.columns:
+            ax.plot(xs, plot_df["ema200"], color="#ffa657", linewidth=0.8, alpha=0.8)
+
+        ax.axhline(entry, color="#58a6ff", linewidth=1.5, linestyle="--")
+        ax.axhline(stop,  color="#f85149", linewidth=1,   linestyle=":")
+        ax.axhline(tp,    color="#3fb950", linewidth=1,   linestyle=":")
+        ax.fill_between(xs, stop, tp, alpha=0.04, color="#58a6ff")
+        ax.scatter([n - 1], [entry], color="#3fb950", s=80, zorder=5)
+
+        ax.set_title(
+            f"{symbol} — BUY {entry:.2f}€  SL {stop:.2f}€  TP {tp:.2f}€",
+            color="#e6edf3", fontsize=10, pad=6,
+        )
+        ax.tick_params(colors="#8b949e", labelsize=7)
+        for spine in ax.spines.values():
+            spine.set_color("#30363d")
+        ax.set_xticks([])
+        ax.grid(alpha=0.15, color="#30363d")
+        plt.tight_layout(pad=0.5)
+
+        tmp = tempfile.mktemp(suffix=".png")
+        plt.savefig(tmp, dpi=120, bbox_inches="tight", facecolor="#0d1117")
+        plt.close(fig)
+
+        notify_file(tmp, f"▲ {symbol}  Entrée {entry:.2f}€  SL {stop:.2f}€  TP {tp:.2f}€")
+        os.unlink(tmp)
+    except Exception as e:
+        log(f"{symbol} — Chart Telegram échoué: {e}", "WARN")
+
+
 def run():
     """Boucle principale du bot."""
     mode = "PAPER TRADING" if config.PAPER_TRADING else "LIVE TRADING"
@@ -530,8 +632,16 @@ def run():
                     "INFO",
                 )
 
+            vix = fetch_vix()
+            vix_factor = 0.5 if vix > 25 else 1.0
+            if vix > 0:
+                log(
+                    f"VIX: {vix:.1f} {'⚠ VOLATILITÉ ÉLEVÉE — taille ×0.5' if vix > 25 else '(normal)'}",
+                    "WARN" if vix > 25 else "INFO",
+                )
+
             for symbol in config.SYMBOLS:
-                state = process_symbol(symbol, state, btc_context=btc_context)
+                state = process_symbol(symbol, state, btc_context=btc_context, vix_factor=vix_factor)
 
             save_state(state)
             print_status(state)
