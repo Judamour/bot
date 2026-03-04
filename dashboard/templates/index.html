@@ -338,6 +338,58 @@
       .claude-premarket { border-left: none; border-top: 1px solid var(--border); }
     }
 
+    /* ── Portfolio Curve (Trade Republic) ── */
+    .portfolio-section {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 22px 22px 0;
+      overflow: hidden;
+    }
+
+    .portfolio-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      margin-bottom: 4px;
+    }
+
+    .portfolio-value {
+      font-size: 34px;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+      letter-spacing: -0.5px;
+      line-height: 1;
+    }
+
+    .portfolio-delta {
+      font-size: 13px;
+      margin-top: 6px;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .period-buttons { display: flex; gap: 4px; align-items: center; }
+
+    .period-btn {
+      padding: 4px 10px;
+      border-radius: 5px;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--muted);
+      font-size: 11px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .period-btn.active, .period-btn:hover {
+      background: var(--surface2);
+      color: var(--text);
+      border-color: var(--muted);
+    }
+
+    .portfolio-chart-wrapper { height: 160px; margin-top: 10px; position: relative; }
+    #portfolioChart { width: 100% !important; height: 100% !important; }
+
     /* ── Log ── */
     .log-section {
       background: var(--surface);
@@ -432,6 +484,25 @@
     </div>
   </div>
 
+  <!-- Portfolio Curve (Trade Republic style) -->
+  <div class="portfolio-section">
+    <div class="portfolio-header">
+      <div>
+        <div class="portfolio-value neutral" id="portfolioValue">— €</div>
+        <div class="portfolio-delta neutral" id="portfolioDelta">—</div>
+      </div>
+      <div class="period-buttons">
+        <button class="period-btn" onclick="setPeriod('1w',this)">1S</button>
+        <button class="period-btn" onclick="setPeriod('1m',this)">1M</button>
+        <button class="period-btn" onclick="setPeriod('3m',this)">3M</button>
+        <button class="period-btn active" onclick="setPeriod('all',this)">Tout</button>
+      </div>
+    </div>
+    <div class="portfolio-chart-wrapper">
+      <canvas id="portfolioChart"></canvas>
+    </div>
+  </div>
+
   <!-- Graphique prix -->
   <div class="chart-section">
     <div class="chart-toolbar">
@@ -461,23 +532,14 @@
     <div id="priceChart"></div>
   </div>
 
-  <!-- Positions + Equity -->
-  <div class="bottom-row">
-    <div class="panel">
-      <div class="panel-header">
-        Positions Ouvertes
-        <span class="panel-count" id="posCount">0</span>
-      </div>
-      <div id="positionsBody">
-        <div class="empty-state">Aucune position ouverte</div>
-      </div>
+  <!-- Positions -->
+  <div class="panel">
+    <div class="panel-header">
+      Positions Ouvertes
+      <span class="panel-count" id="posCount">0</span>
     </div>
-
-    <div class="panel">
-      <div class="panel-header">Courbe d'Equity</div>
-      <div class="equity-wrapper">
-        <canvas id="equityChart"></canvas>
-      </div>
+    <div id="positionsBody">
+      <div class="empty-state">Aucune position ouverte</div>
     </div>
   </div>
 
@@ -589,7 +651,7 @@ socket.on('state_update', data => {
   updateMetrics(data);
   updatePositions(data.positions || []);
   if (data.trades) updateTrades(data.trades);
-  if (data.equity_curve) updateEquityChart(data.equity_curve);
+  if (data.equity_curve) updatePortfolioChart(data.equity_curve, data.total_value);
   if (data.us_market_open !== undefined) updateMarketBadge(data.us_market_open);
   updateLastUpdate();
 });
@@ -747,44 +809,122 @@ function updateTrades(trades) {
   }).join('');
 }
 
-// ── Equity Chart ──────────────────────────────────────────────────────────────
-let equityChart = null;
+// ── Portfolio Chart (Trade Republic style) ───────────────────────────────────
+let portfolioChart = null;
+let fullEquityCurve = [];
+let portfolioCurrentValue = 1000;
+let portfolioInitialValue = 1000;
+let activePeriod = 'all';
 
-function initEquityChart() {
-  const ctx = document.getElementById('equityChart').getContext('2d');
-  equityChart = new Chart(ctx, {
+function initPortfolioChart() {
+  const ctx = document.getElementById('portfolioChart').getContext('2d');
+  portfolioChart = new Chart(ctx, {
     type: 'line',
     data: { labels: [], datasets: [{
       data: [],
-      borderColor: '#58a6ff',
-      backgroundColor: 'rgba(88,166,255,0.08)',
-      borderWidth: 2,
-      pointRadius: 3,
+      borderColor: '#3fb950',
+      backgroundColor: 'transparent',
+      borderWidth: 2.5,
+      pointRadius: 0,
+      pointHoverRadius: 5,
+      pointHoverBackgroundColor: '#3fb950',
       fill: true,
-      tension: 0.3,
+      tension: 0.4,
     }]},
     options: {
       responsive: true,
       maintainAspectRatio: false,
-      animation: { duration: 300 },
-      plugins: { legend: { display: false },
-        tooltip: { callbacks: { label: c => `${c.parsed.y.toFixed(2)} €` } }
+      animation: { duration: 400 },
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          displayColors: false,
+          backgroundColor: 'rgba(22,27,34,0.95)',
+          borderColor: '#30363d',
+          borderWidth: 1,
+          titleColor: '#8b949e',
+          bodyColor: '#e6edf3',
+          bodyFont: { size: 13, weight: '600' },
+          callbacks: {
+            title: items => items[0].label || '',
+            label: item => fmt2(item.parsed.y) + ' €',
+          }
+        }
       },
       scales: {
-        x: { ticks: { color: '#8b949e', font: { size: 10 }, maxTicksLimit: 5, maxRotation: 0 },
-             grid: { color: 'rgba(48,54,61,0.5)' } },
-        y: { ticks: { color: '#8b949e', font: { size: 10 }, callback: v => v.toFixed(0) + ' €' },
-             grid: { color: 'rgba(48,54,61,0.5)' } }
+        x: { display: false },
+        y: { display: false }
+      },
+      onHover: (_, elements) => {
+        if (elements.length) {
+          const v = portfolioChart.data.datasets[0].data[elements[0].index];
+          setPortfolioDisplay(v, portfolioInitialValue);
+        } else {
+          setPortfolioDisplay(portfolioCurrentValue, portfolioInitialValue);
+        }
       }
     }
   });
 }
 
-function updateEquityChart(curve) {
-  if (!equityChart) return;
-  equityChart.data.labels = curve.map(p => p.date ? fmtDate(p.date) : 'Début');
-  equityChart.data.datasets[0].data = curve.map(p => p.value);
-  equityChart.update('none');
+function setPortfolioDisplay(current, initial) {
+  const delta = current - initial;
+  const pct = initial ? (delta / initial) * 100 : 0;
+  const sign = delta >= 0 ? '+' : '';
+  const cls = delta >= 0 ? 'positive' : 'negative';
+  setText('portfolioValue', fmt2(current) + ' €');
+  document.getElementById('portfolioValue').className = 'portfolio-value ' + cls;
+  setText('portfolioDelta', `${sign}${fmt2(delta)} € (${sign}${pct.toFixed(2)}%)`);
+  document.getElementById('portfolioDelta').className = 'portfolio-delta ' + cls;
+}
+
+function renderPortfolioChart(curve) {
+  if (!portfolioChart) return;
+  const color = (portfolioCurrentValue >= portfolioInitialValue) ? '#3fb950' : '#f85149';
+  const rgbPos = '63,185,80', rgbNeg = '248,81,73';
+  const rgb = portfolioCurrentValue >= portfolioInitialValue ? rgbPos : rgbNeg;
+
+  const ctx = portfolioChart.canvas.getContext('2d');
+  const grad = ctx.createLinearGradient(0, 0, 0, 160);
+  grad.addColorStop(0, `rgba(${rgb},0.22)`);
+  grad.addColorStop(1, `rgba(${rgb},0.0)`);
+
+  portfolioChart.data.labels = curve.map(p => p.date ? fmtDate(p.date) : 'Début');
+  portfolioChart.data.datasets[0].data = curve.map(p => p.value);
+  portfolioChart.data.datasets[0].borderColor = color;
+  portfolioChart.data.datasets[0].pointHoverBackgroundColor = color;
+  portfolioChart.data.datasets[0].backgroundColor = grad;
+  portfolioChart.update('none');
+}
+
+function updatePortfolioChart(curve, totalValue) {
+  portfolioInitialValue = curve.length ? curve[0].value : portfolioCurrentValue;
+  portfolioCurrentValue = totalValue || portfolioCurrentValue;
+
+  // Ajouter le point actuel (inclut positions ouvertes)
+  fullEquityCurve = [...curve, { date: new Date().toISOString(), value: portfolioCurrentValue }];
+
+  setPortfolioDisplay(portfolioCurrentValue, portfolioInitialValue);
+  setPeriod(activePeriod, null);
+}
+
+function setPeriod(period, btn) {
+  activePeriod = period;
+  if (btn) {
+    document.querySelectorAll('.period-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+  }
+  let filtered = [...fullEquityCurve];
+  if (period !== 'all' && filtered.length > 0) {
+    const cutoff = new Date();
+    if (period === '1w') cutoff.setDate(cutoff.getDate() - 7);
+    if (period === '1m') cutoff.setMonth(cutoff.getMonth() - 1);
+    if (period === '3m') cutoff.setMonth(cutoff.getMonth() - 3);
+    const f = filtered.filter(p => p.date && new Date(p.date) >= cutoff);
+    filtered = f.length > 1 ? f : filtered;
+  }
+  renderPortfolioChart(filtered);
 }
 
 // ── Price Chart ───────────────────────────────────────────────────────────────
@@ -944,13 +1084,13 @@ function init() {
   });
 
   initPriceChart();
-  initEquityChart();
+  initPortfolioChart();
 
   fetch('/api/state').then(r => r.json()).then(data => {
     updateMetrics(data);
     updatePositions(data.positions || []);
     updateTrades(data.trades || []);
-    if (data.equity_curve) updateEquityChart(data.equity_curve);
+    if (data.equity_curve) updatePortfolioChart(data.equity_curve, data.total_value);
     if (data.us_market_open !== undefined) updateMarketBadge(data.us_market_open);
   });
 
