@@ -25,6 +25,7 @@ def ask_claude(
     rotation_factor: float = 1.0,
     daily_trend_reason: str = "",
     news: list = None,
+    soft_filters: dict = None,
 ) -> tuple[bool, str]:
     """
     Demande à Claude de valider un signal d'achat.
@@ -39,8 +40,6 @@ def ask_claude(
     # ── Indicateurs techniques ──
     trend = "HAUSSIER (Golden Cross)" if ema50 > ema200 else "BAISSIER (Death Cross)"
     dist_ema200 = ((price - ema200) / ema200) * 100
-    adx_label = "forte tendance ✓" if adx > 25 else "tendance modérée" if adx > 20 else "range ⚠"
-    vol_label = "fort ✓" if volume_ratio > 1.3 else "normal" if volume_ratio > 1.1 else "faible ⚠"
     category = "xStock US (actions tokenisées)" if symbol.endswith("x/EUR") else "Crypto 24/7"
 
     # ── Contexte macro BTC + VIX ──
@@ -86,7 +85,25 @@ def ask_claude(
     wr_str = f"{recent_win_rate:.0f}%" if recent_win_rate is not None else "N/A"
     rot_str = f"×{rotation_factor:.2f} ({'surpondéré' if rotation_factor > 1.0 else 'souspondéré' if rotation_factor < 1.0 else 'neutre'})"
 
-    daily_str = f"✓ {daily_trend_reason}" if daily_trend_reason else "✓ confirmé"
+    # ── Filtres doux (contexte pour la décision Claude) ──
+    soft_str = ""
+    if soft_filters is not None:
+        sf_items = [
+            ("adx_trending", "ADX>20 (tendance)"),
+            ("volume_strong", "Volume>110% MA"),
+            ("structure",     "EMA50>EMA200 (structure haussière)"),
+            ("momentum",      "EMA9>EMA21 (momentum court terme)"),
+            ("mtf_1d",        "Tendance 1d (ST↑ + >EMA200)"),
+        ]
+        ok_count = sum(1 for k, _ in sf_items if soft_filters.get(k, True))
+        sf_lines = []
+        for k, label in sf_items:
+            ok = soft_filters.get(k, True)
+            line = f"  {'✓' if ok else '⚠'} {label}"
+            if k == "mtf_1d" and not ok and daily_trend_reason:
+                line += f" ({daily_trend_reason})"
+            sf_lines.append(line)
+        soft_str = f"\nFILTRES DOUX ({ok_count}/5 validés — tu es le décideur) :\n" + "\n".join(sf_lines) + "\n"
 
     # ── Actualités récentes ──
     news_str = ""
@@ -99,14 +116,14 @@ def ask_claude(
             lines.append(f"• [{src}] {title}" + (f" ({age})" if age else ""))
         news_str = "\nACTUALITÉS RÉCENTES (24-48h) :\n" + "\n".join(lines) + "\n"
 
-    prompt = f"""Tu es un trader algorithmique. Signal BUY technique validé sur {symbol} ({category}).
+    prompt = f"""Tu es un trader algorithmique. Signal BUY technique sur {symbol} ({category}).
 
-INDICATEURS 4H (7/7 filtres passés) :
-• Prix: {price:.4f}€ | ATR: {atr:.4f}€ | Distance EMA200: {dist_ema200:+.1f}%
-• Supertrend: HAUSSIER ✓ | Tendance 1d: {daily_str}
-• ADX: {adx:.1f} ({adx_label}) | RSI: {rsi:.1f} (<75 ✓) | Volume: ×{volume_ratio:.2f} ({vol_label})
-• EMA9>EMA21 ✓ | EMA50/EMA200: {trend}
-
+HARD FILTERS ✓ (3/3 validés automatiquement) :
+• Supertrend flip ▲ (retournement haussier) ✓
+• RSI {rsi:.1f} < 75 (pas de surachat extrême) ✓
+• Prix {price:.4f}€ > EMA200 {ema200:.4f}€ ({dist_ema200:+.1f}%) ✓
+• ATR: {atr:.4f}€ | EMA50/EMA200: {trend} | ADX: {adx:.1f} | Volume: ×{volume_ratio:.2f}
+{soft_str}
 CONTEXTE MACRO & SENTIMENT :
 • Macro: {macro_str}
 • Fear & Greed: {fg_str}{fg_alert}{funding_str}
@@ -115,11 +132,13 @@ CONTEXTE MACRO & SENTIMENT :
 {news_str}
 TRADE : Risk 2% | SL=3×ATR | TP=2.5×ATR (R:R 1:2.5)
 
-Confirme si les indicateurs sont alignés. Les actualités peuvent faire pencher la balance si elles révèlent un risque sectoriel direct (annonce tarifaire, résultat décevant, crise macro) — sinon, les indicateurs techniques priment.
+Les 3 hard filters sont validés. Analyse les filtres doux et le contexte macro pour décider.
+Accepte si le contexte est globalement favorable, même avec 2-3 filtres doux en ⚠.
+Les actualités peuvent faire pencher la balance si elles révèlent un risque sectoriel direct (tarifs, résultats décevants, crise macro).
 
 Réponds EXACTEMENT :
 DÉCISION: CONFIRME ou IGNORE
-RAISON: [1-2 phrases : facteur décisif + impact du sentiment/macro]"""
+RAISON: [1-2 phrases : facteur décisif + filtres doux les plus significatifs]"""
 
     try:
         message = client.messages.create(

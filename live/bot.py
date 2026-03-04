@@ -282,13 +282,11 @@ def process_symbol(
                 log_signal("BUY_SKIP_EARNINGS", symbol, {"ticker": ticker, "price": current_price})
                 return state
 
-        # Confirmation multi-timeframe (1d) — avant Claude pour économiser les appels API
+        # Confirmation multi-timeframe (1d) — informatif pour Claude, non bloquant
         ok_1d, reason_1d = _confirm_daily_trend(symbol)
-        log(f"{symbol} — MTF 1d: {'✓' if ok_1d else '✗'} {reason_1d}", "INFO")
+        log(f"{symbol} — MTF 1d: {'✓' if ok_1d else '⚠'} {reason_1d}", "INFO")
         log_signal("MTF_FILTER", symbol, {"ok_1d": ok_1d, "reason": reason_1d, "price": current_price})
-        if not ok_1d:
-            log_signal("BUY_SKIP_MTF", symbol, {"reason": reason_1d, "price": current_price})
-            return state
+        # Claude décide — pas de blocage hard sur le MTF
 
         log(
             f"{symbol} — Signal BUY | ADX: {adx:.1f} | Vol×{volume_ratio:.2f} | "
@@ -313,6 +311,14 @@ def process_symbol(
         news = sym_news + news  # symbol en priorité, macro en complément
         news = news[:6]
 
+        soft_filters = {
+            "adx_trending": bool(last["f_trending"]),    # ADX > seuil
+            "volume_strong": bool(last["f_volume"]),     # Volume > 110% MA
+            "structure":     bool(last["f_structure"]),  # EMA50 > EMA200
+            "momentum":      bool(last["f_momentum"]),   # EMA9 > EMA21
+            "mtf_1d":        ok_1d,                      # Tendance 1d
+        }
+
         confirme, raison = ask_claude(
             symbol=symbol,
             price=current_price,
@@ -333,6 +339,7 @@ def process_symbol(
             rotation_factor=vix_factor,
             daily_trend_reason=reason_1d,
             news=news if news else None,
+            soft_filters=soft_filters,
         )
         log(f"{symbol} — Claude: {'✓ CONFIRME' if confirme else '✗ IGNORE'} | {raison}", "INFO")
         log_signal("CLAUDE_FILTER", symbol, {
