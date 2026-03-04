@@ -9,7 +9,7 @@
 
 ## 🟡 Important (performance et fiabilité)
 
-- [ ] **Telegram** — Créer bot @BotFather → TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID → ajouter dans .env VPS → tester
+- [x] **Telegram** — @Damortrading_bot configuré et opérationnel (TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID dans .env VPS)
 - [x] **Fix filtre volume xStocks** — Volume 0 → NaN + ffill dans supertrend.py
 - [x] **Backup paper_state.json** — Backup local `logs/backups/` (30j) + envoi Telegram quotidien
 - [x] **Log rotation** — logrotate configuré VPS (daily, 7 fichiers, 10MB max, copytruncate)
@@ -17,12 +17,12 @@
 
 ## 🟢 Confort et monitoring
 
-- [ ] **Alerte bot planté** — Healthcheck toutes les 5 min via cron + Telegram si le service `bot` est down
-- [ ] **Dashboard xStocks** — Indicateur "Marché US OUVERT/FERMÉ", section xStocks séparée des cryptos
-- [ ] **Sharpe ratio + max drawdown** dans le dashboard (actuellement seulement win rate + PnL)
-- [ ] **Endpoint /api/health** — Statut bot (up/down), dernière analyse, nb positions ouvertes
+- [x] **Alerte bot planté** — cron root toutes les 5 min → redémarre + Telegram si bot down
+- [x] **Dashboard xStocks** — Badge "US OUVERT/FERMÉ" + section xStocks séparée dans ticker + chart yfinance
+- [x] **Sharpe ratio + max drawdown** — Sharpe annualisé dans dashboard (7e metric card)
+- [x] **Endpoint /api/health** — bot_running, last_analysis, open_positions, timestamp
 - [ ] **Tests end-to-end** — Signal xStock → paper state → Telegram → log signals.jsonl
-- [ ] **Dashboard mobile** — Responsive design
+- [x] **Dashboard mobile** — CSS auto-fill + responsive (stack panels, chart 260px)
 
 ## 🔵 Avancé (plus tard)
 

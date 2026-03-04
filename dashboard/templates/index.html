@@ -87,9 +87,17 @@
     .main { padding: 14px 20px; display: flex; flex-direction: column; gap: 14px; }
 
     /* ── Metrics ── */
-    .metrics-row { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; }
-    @media (max-width: 900px) { .metrics-row { grid-template-columns: repeat(3, 1fr); } }
-    @media (max-width: 600px) { .metrics-row { grid-template-columns: repeat(2, 1fr); } }
+    .metrics-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(148px, 1fr)); gap: 10px; }
+
+    /* ── Mobile ── */
+    @media (max-width: 768px) {
+      .bottom-row { grid-template-columns: 1fr; }
+      .main { padding: 8px 10px; gap: 10px; }
+      .header { padding: 8px 12px; }
+      .price-ticker { max-width: 100%; overflow-x: auto; flex-wrap: nowrap; }
+      .sys-stats { display: none; }
+      #priceChart { height: 260px; }
+    }
 
     .metric-card {
       background: var(--surface);
@@ -302,6 +310,7 @@
   <div class="header-left">
     <div class="logo">BOT TRADING</div>
     <span class="badge" id="modeLabel">PAPER</span>
+    <span class="badge" id="marketBadge" style="background:var(--muted);color:#fff">US —</span>
     <div class="status-indicator">
       <div class="dot" id="statusDot"></div>
       <span id="statusText">Connexion...</span>
@@ -345,6 +354,11 @@
       <div class="metric-label">Avg Trade</div>
       <div class="metric-value" id="metAvg">—</div>
       <div class="metric-sub">P&amp;L moyen par trade</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">Sharpe Ratio</div>
+      <div class="metric-value neutral" id="metSharpe">—</div>
+      <div class="metric-sub">Rendement / risque annualisé</div>
     </div>
   </div>
 
@@ -432,6 +446,7 @@
 
 <script>
 const SYMBOLS = {{ symbols | tojson }};
+const XSTOCKS = {{ xstocks | tojson }};
 const DEFAULT_TF = {{ timeframe | tojson }};
 const MAX_LOG_LINES = 80;
 
@@ -491,6 +506,7 @@ socket.on('state_update', data => {
   updatePositions(data.positions || []);
   if (data.trades) updateTrades(data.trades);
   if (data.equity_curve) updateEquityChart(data.equity_curve);
+  if (data.us_market_open !== undefined) updateMarketBadge(data.us_market_open);
   updateLastUpdate();
 });
 
@@ -499,20 +515,35 @@ socket.on('log_update', data => { if (data.lines) appendLogs(data.lines); });
 // ── Ticker ────────────────────────────────────────────────────────────────────
 const prevPrices = {};
 
+function renderTickerItem(sym, price) {
+  const prev = prevPrices[sym];
+  const dir = prev ? (price > prev ? 'up' : price < prev ? 'down' : '') : '';
+  prevPrices[sym] = price;
+  return `<div class="ticker-item">
+    <span class="ticker-symbol">${sym.split('/')[0]}</span>
+    <span class="ticker-price ${dir}" data-sym="${sym}">${fmtPrice(price)}</span>
+  </div>`;
+}
+
 function updateTicker(prices) {
   const ticker = document.getElementById('priceTicker');
-  ticker.innerHTML = Object.entries(prices).map(([sym, price]) => {
-    const prev = prevPrices[sym];
-    const dir = prev ? (price > prev ? 'up' : price < prev ? 'down' : '') : '';
-    prevPrices[sym] = price;
-    return `<div class="ticker-item">
-      <span class="ticker-symbol">${sym.split('/')[0]}</span>
-      <span class="ticker-price ${dir}" data-sym="${sym}">${fmtPrice(price)}</span>
-    </div>`;
-  }).join('');
+  const cryptoEntries = Object.entries(prices).filter(([s]) => !XSTOCKS.includes(s));
+  const xstockEntries = Object.entries(prices).filter(([s]) => XSTOCKS.includes(s));
+  let html = cryptoEntries.map(([s, p]) => renderTickerItem(s, p)).join('');
+  if (xstockEntries.length) {
+    html += '<span style="color:var(--border);margin:0 6px;align-self:center">│</span>';
+    html += xstockEntries.map(([s, p]) => renderTickerItem(s, p)).join('');
+  }
+  ticker.innerHTML = html;
   setTimeout(() => {
     document.querySelectorAll('.ticker-price').forEach(el => el.className = 'ticker-price');
   }, 800);
+}
+
+function updateMarketBadge(open) {
+  const b = document.getElementById('marketBadge');
+  b.textContent = open ? 'US OUVERT' : 'US FERMÉ';
+  b.style.background = open ? 'var(--green)' : 'var(--muted)';
 }
 
 // ── Métriques ─────────────────────────────────────────────────────────────────
@@ -536,8 +567,16 @@ function updateMetrics(d) {
   const avg = d.avg_trade;
   setHtml('metAvg', `<span class="${avg >= 0 ? 'positive' : 'negative'}">${avg >= 0 ? '+' : ''}${fmt2(avg)} €</span>`);
 
+  if (d.sharpe_ratio !== undefined) {
+    const sr = d.sharpe_ratio;
+    setText('metSharpe', typeof sr === 'number' ? sr.toFixed(2) : '—');
+    document.getElementById('metSharpe').className = 'metric-value ' + (sr >= 1.5 ? 'positive' : sr >= 0.5 ? 'neutral' : 'negative');
+  }
+
   if (d.paper_mode !== undefined)
     document.getElementById('modeLabel').textContent = d.paper_mode ? 'PAPER' : 'LIVE';
+
+  if (d.us_market_open !== undefined) updateMarketBadge(d.us_market_open);
 }
 
 // ── Positions ─────────────────────────────────────────────────────────────────
@@ -763,6 +802,7 @@ function init() {
     updatePositions(data.positions || []);
     updateTrades(data.trades || []);
     if (data.equity_curve) updateEquityChart(data.equity_curve);
+    if (data.us_market_open !== undefined) updateMarketBadge(data.us_market_open);
   });
 
   fetch('/api/log').then(r => r.json()).then(data => {

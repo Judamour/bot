@@ -100,6 +100,15 @@ def compute_metrics(state: dict, live_prices: dict) -> dict:
     # Avg trade
     avg_trade = round(sum(t.get("pnl", 0) for t in trades) / len(trades), 2) if trades else 0.0
 
+    # Sharpe ratio (annualisé, approximatif sur les PnL des trades)
+    pnls = [t.get("pnl", 0) for t in trades]
+    if len(pnls) > 1:
+        avg_pnl = sum(pnls) / len(pnls)
+        std_pnl = (sum((p - avg_pnl) ** 2 for p in pnls) / (len(pnls) - 1)) ** 0.5
+        sharpe = round(avg_pnl / std_pnl * (252 ** 0.5), 2) if std_pnl > 0 else 0.0
+    else:
+        sharpe = 0.0
+
     return {
         "capital": round(capital, 2),
         "total_value": round(total_value, 2),
@@ -114,6 +123,7 @@ def compute_metrics(state: dict, live_prices: dict) -> dict:
         "total_trades": len(trades),
         "positions": positions_detail,
         "paper_mode": config.PAPER_TRADING,
+        "sharpe_ratio": sharpe,
     }
 
 
@@ -133,7 +143,7 @@ def compute_equity_curve(state: dict) -> list:
 
 @app.route("/")
 def index():
-    return render_template("index.html", symbols=config.SYMBOLS, timeframe=config.TIMEFRAME)
+    return render_template("index.html", symbols=config.SYMBOLS, xstocks=config.XSTOCKS, timeframe=config.TIMEFRAME)
 
 
 @app.route("/api/state")
@@ -142,37 +152,71 @@ def api_state():
     metrics = compute_metrics(state, _live_prices)
     metrics["equity_curve"] = compute_equity_curve(state)
     metrics["trades"] = list(reversed(state.get("trades", [])))[:50]
+    from zoneinfo import ZoneInfo
+    et = datetime.now(ZoneInfo("America/New_York"))
+    metrics["us_market_open"] = et.weekday() < 5 and 9 * 60 + 30 <= et.hour * 60 + et.minute <= 16 * 60
     return jsonify(metrics)
+
+
+@app.route("/api/health")
+def api_health():
+    import subprocess
+    try:
+        bot_active = subprocess.run(
+            ["systemctl", "is-active", "bot"], capture_output=True, text=True
+        ).returncode == 0
+    except Exception:
+        bot_active = os.path.exists(LOG_FILE)
+    last_analysis = None
+    if os.path.exists(LOG_FILE):
+        try:
+            with open(LOG_FILE) as f:
+                for line in reversed(f.readlines()):
+                    if "Analyse en cours" in line:
+                        last_analysis = line.strip()[:19]
+                        break
+        except Exception:
+            pass
+    state = load_state()
+    return jsonify({
+        "bot_running": bot_active,
+        "last_analysis": last_analysis,
+        "open_positions": len(state.get("positions", {})),
+        "timestamp": datetime.now().isoformat(),
+    })
 
 
 @app.route("/api/prices/<path:symbol>")
 def api_prices(symbol):
     """Retourne les données OHLCV + indicateurs pour le graphique (cache 5 min)."""
     try:
-        import ccxt
+        import pandas as pd
         from strategies.supertrend import generate_signals
 
         symbol_decoded = symbol.replace("-", "/")
 
-        # Servir depuis le cache si encore frais
         cached = _chart_cache.get(symbol_decoded)
         if cached and (time.time() - cached[0]) < CHART_CACHE_TTL:
             return jsonify(cached[1])
 
-        binance_symbol = symbol_decoded.split("/")[0] + "/USDT"
-
-        exchange = ccxt.binance({"enableRateLimit": True})
-        since = exchange.parse8601(
-            (datetime.utcnow() - timedelta(days=60)).strftime("%Y-%m-%dT%H:%M:%SZ")
-        )
-        candles = exchange.fetch_ohlcv(binance_symbol, config.TIMEFRAME, since=since, limit=500)
-
-        import pandas as pd
-        df = pd.DataFrame(candles, columns=["timestamp", "open", "high", "low", "close", "volume"])
-        df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms", utc=True)
-        df.set_index("timestamp", inplace=True)
-
-        df = generate_signals(df)
+        if symbol_decoded in config.XSTOCKS:
+            # xStocks via yfinance
+            from data.fetcher import fetch_yfinance_ohlcv
+            df = fetch_yfinance_ohlcv(symbol_decoded, config.TIMEFRAME, days=60)
+            df = generate_signals(df)
+        else:
+            # Crypto via Binance
+            import ccxt
+            exchange = ccxt.binance({"enableRateLimit": True})
+            binance_symbol = symbol_decoded.split("/")[0] + "/USDT"
+            since = exchange.parse8601(
+                (datetime.utcnow() - timedelta(days=60)).strftime("%Y-%m-%dT%H:%M:%SZ")
+            )
+            candles = exchange.fetch_ohlcv(binance_symbol, config.TIMEFRAME, since=since, limit=500)
+            df = pd.DataFrame(candles, columns=["timestamp", "open", "high", "low", "close", "volume"])
+            df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms", utc=True)
+            df.set_index("timestamp", inplace=True)
+            df = generate_signals(df)
 
         result = []
         for ts, row in df.iterrows():
@@ -262,16 +306,24 @@ def background_thread():
     global _state_mtime, _log_size, _live_prices
 
     import ccxt
-    exchange = ccxt.binance({"enableRateLimit": True})
+    binance = ccxt.binance({"enableRateLimit": True})
+    kraken  = ccxt.kraken({"enableRateLimit": True})
 
     while True:
         try:
             # ── Prix live (toutes les 30s) ──
             prices = {}
-            for symbol in config.SYMBOLS:
-                binance_sym = symbol.split("/")[0] + "/USDT"
+            # Crypto via Binance
+            for symbol in config.CRYPTO:
                 try:
-                    ticker = exchange.fetch_ticker(binance_sym)
+                    ticker = binance.fetch_ticker(symbol.split("/")[0] + "/USDT")
+                    prices[symbol] = ticker["last"]
+                except Exception:
+                    pass
+            # xStocks via Kraken (NVDAx/EUR...)
+            for symbol in config.XSTOCKS:
+                try:
+                    ticker = kraken.fetch_ticker(symbol)
                     prices[symbol] = ticker["last"]
                 except Exception:
                     pass
