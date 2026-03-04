@@ -166,6 +166,45 @@ def _timeframe_to_ms(timeframe: str) -> int:
     return int(timeframe[:-1]) * units[timeframe[-1]]
 
 
+def fetch_fear_greed() -> dict:
+    """
+    Fetch le Crypto Fear & Greed Index (alternative.me, API publique).
+    Retourne {'score': int 0-100, 'label': str}
+    Scores : 0-24 Peur extrême | 25-49 Peur | 50-74 Avidité | 75-100 Avidité extrême
+    """
+    try:
+        import requests
+        r = requests.get("https://api.alternative.me/fng/?limit=1", timeout=5)
+        data = r.json()["data"][0]
+        return {"score": int(data["value"]), "label": data["value_classification"]}
+    except Exception:
+        return {"score": 50, "label": "Neutral"}
+
+
+def fetch_funding_rates(symbols: list) -> dict:
+    """
+    Fetch les taux de financement des futures perpétuels Binance (API publique).
+    Retourne {symbol: rate} ex: {"BTC/EUR": 0.0001}  (rate par 8h)
+    Interprétation :
+      < -0.01% : shorts surexposés (signal haussier contrarian)
+       0-0.03% : neutre
+       0.03-0.10% : longs surexposés, risque de squeeze
+      > 0.10% : danger — liquidation de masse probable
+    """
+    try:
+        import requests
+        url = "https://fapi.binance.com/fapi/v1/premiumIndex"
+        data = requests.get(url, timeout=5).json()
+        ticker_map = {s.split("/")[0] + "USDT": s for s in symbols if "/" in s}
+        return {
+            ticker_map[item["symbol"]]: float(item.get("lastFundingRate", 0))
+            for item in data
+            if item.get("symbol") in ticker_map
+        }
+    except Exception:
+        return {}
+
+
 def save_data(df: pd.DataFrame, symbol: str, timeframe: str) -> str:
     """Sauvegarde les données en CSV."""
     os.makedirs("data/cache", exist_ok=True)

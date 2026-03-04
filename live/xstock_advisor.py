@@ -26,7 +26,12 @@ def _log_signal(event: str, symbol: str, data: dict):
         f.write(json.dumps(record, default=str) + "\n")
 
 
-def run_premarket_analysis(state: dict, btc_context: dict = None, vix: float = 0.0):
+def run_premarket_analysis(
+    state: dict,
+    btc_context: dict = None,
+    vix: float = 0.0,
+    fear_greed: dict = None,
+):
     """Analyse technique de toutes les xStocks + recommandations Claude → Telegram."""
     summaries = []
     for symbol in config.XSTOCKS:
@@ -57,7 +62,7 @@ def run_premarket_analysis(state: dict, btc_context: dict = None, vix: float = 0
         except Exception as e:
             summaries.append({"symbol": symbol, "error": str(e)})
 
-    prompt = _build_prompt(summaries, state["capital"], state.get("trades", []), btc_context, vix)
+    prompt = _build_prompt(summaries, state["capital"], state.get("trades", []), btc_context, vix, fear_greed)
     client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
     response = client.messages.create(
         model="claude-haiku-4-5-20251001",
@@ -66,7 +71,13 @@ def run_premarket_analysis(state: dict, btc_context: dict = None, vix: float = 0
     )
     analysis = response.content[0].text
 
-    _log_signal("PREMARKET_ANALYSIS", "ALL", {"summaries": summaries, "analysis": analysis})
+    _log_signal("PREMARKET_ANALYSIS", "ALL", {
+        "summaries": summaries,
+        "analysis": analysis,
+        "btc_trend": btc_context.get("btc_trend") if btc_context else None,
+        "vix": vix,
+        "fear_greed_score": fear_greed.get("score") if fear_greed else None,
+    })
     notify(f"📈 <b>Analyse pré-marché US</b>\n{analysis}")
 
 
@@ -76,6 +87,7 @@ def _build_prompt(
     trades: list,
     btc_context: dict = None,
     vix: float = 0.0,
+    fear_greed: dict = None,
 ) -> str:
     # ── Lignes techniques par symbole ──
     lines = []
@@ -100,9 +112,21 @@ def _build_prompt(
 
     # ── VIX ──
     if vix > 0:
-        vix_str = f"{vix:.1f} ({'⚠ PEUR ÉLEVÉE — positions réduites ×0.5' if vix > 25 else 'normal'})"
+        vix_label = "⚠ PEUR ÉLEVÉE — positions réduites automatiquement" if vix > 25 else "élevé" if vix > 20 else "normal"
+        vix_str = f"{vix:.1f} ({vix_label})"
     else:
         vix_str = "N/A"
+
+    # ── Fear & Greed ──
+    fg_str = "N/A"
+    if fear_greed:
+        score = fear_greed.get("score", 50)
+        label = fear_greed.get("label", "Neutral")
+        fg_str = f"{score}/100 — {label}"
+        if score <= 20:
+            fg_str += " ⚠ (peur extrême : surveiller les rebonds techniques)"
+        elif score >= 80:
+            fg_str += " ⚠ (avidité extrême : risque de retournement)"
 
     # ── Performance récente ──
     recent = trades[-20:] if trades else []
@@ -111,30 +135,31 @@ def _build_prompt(
         wr = f"{wins/len(recent)*100:.0f}% ({wins}/{len(recent)})"
         avg_pnl = f"{sum(t.get('pnl',0) for t in recent)/len(recent):+.2f}€/trade"
     else:
-        wr = "N/A (aucun trade)"
+        wr = "N/A (aucun trade fermé)"
         avg_pnl = "N/A"
 
-    return f"""Tu es un analyste technique senior couvrant les actions US (xStocks). Le marché US ouvre dans 30 minutes.
+    return f"""Tu es un analyste technique senior couvrant les actions US (xStocks Kraken). Le marché US ouvre dans ~30 minutes.
 
-MACRO DU JOUR :
+MACRO & SENTIMENT DU JOUR :
 - {btc_str}
 - VIX: {vix_str}
+- Fear & Greed crypto: {fg_str}
 - Capital disponible: {capital:.0f}€ | Max 3 positions simultanées
-- Performance récente: win rate {wr} | Moyenne {avg_pnl} (20 derniers trades)
-Note: les actions avec rapport trimestriel dans <24h sont automatiquement exclues par le bot.
+- Performance bot récente: win rate {wr} | Moyenne {avg_pnl} (20 derniers trades)
+Note: les actions avec rapport trimestriel dans <24h sont automatiquement exclues.
 
 DONNÉES TECHNIQUES xStocks (timeframe {config.TIMEFRAME}) :
 {chr(10).join(lines)}
 
 Réponds en français avec cette structure précise :
 
-TOP OPPORTUNITÉS (max 3, uniquement si ≥4/6 filtres et ST▲) :
+TOP OPPORTUNITÉS (max 3, uniquement si ≥4/6 filtres ET ST▲) :
 SYMBOLE | Entrée: X.XX€ | SL: X.XX€ (-X%) | TP: X.XX€ (+X%) | Confiance: haute/moyenne/faible
-→ Raison (catalyst technique + contexte macro, 1-2 phrases)
+→ Raison (catalyst technique + contexte macro/sentiment, 1-2 phrases)
 
 À ÉVITER aujourd'hui :
-SYMBOLE — raison courte (surachat/range/volume faible/ST▼)
+SYMBOLE — raison courte (surachat RSI/ST▼/volume faible/fear extrême)
 
 CONTEXTE MARCHÉ :
-Analyse le momentum global tech/IA aujourd'hui en tenant compte du contexte BTC et VIX. Mentionne tout catalyseur sectoriel pertinent (semi-conducteurs, IA, cloud, véhicules électriques) que ton entraînement te permet d'identifier. 2-3 phrases.
+Analyse le momentum global tech/IA en tenant compte du VIX, Fear & Greed, et BTC trend. Mentionne tout catalyseur sectoriel pertinent (semi-conducteurs, IA générative, cloud, EV) que ton entraînement te permet d'identifier. Mentionne si le contexte macro actuel (taux Fed, cycle économique) favorise ou pénalise les tech US. 2-3 phrases.
 """

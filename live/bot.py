@@ -8,7 +8,7 @@ from colorama import Fore, Style, init
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
-from data.fetcher import fetch_ohlcv, get_exchange
+from data.fetcher import fetch_ohlcv, get_exchange, fetch_fear_greed, fetch_funding_rates
 from strategies.supertrend import generate_signals, calculate_position_size, add_indicators
 from live.claude_filter import ask_claude
 from live.notifier import notify, notify_file
@@ -131,7 +131,15 @@ def apply_trailing_stop(position: dict, current_price: float, symbol: str) -> di
 
 # ── Logique principale ────────────────────────────────────────────────────────
 
-def process_symbol(symbol: str, state: dict, btc_context: dict = None, vix_factor: float = 1.0, vix: float = 0.0) -> dict:
+def process_symbol(
+    symbol: str,
+    state: dict,
+    btc_context: dict = None,
+    vix_factor: float = 1.0,
+    vix: float = 0.0,
+    fear_greed: dict = None,
+    funding_rate: float = 0.0,
+) -> dict:
     """Analyse un symbole et exécute les ordres si nécessaire."""
     try:
         df = fetch_ohlcv(symbol, config.TIMEFRAME, days=45)
@@ -172,6 +180,12 @@ def process_symbol(symbol: str, state: dict, btc_context: dict = None, vix_facto
     }
     if btc_context:
         scan_data.update(btc_context)
+    if fear_greed:
+        scan_data["fear_greed_score"] = fear_greed.get("score")
+        scan_data["fear_greed_label"] = fear_greed.get("label")
+    if funding_rate != 0.0:
+        scan_data["funding_rate"] = round(funding_rate, 6)
+    scan_data["vix"] = round(vix, 1) if vix else None
     log_signal("SCAN", symbol, scan_data)
 
     position = state["positions"].get(symbol)
@@ -297,6 +311,8 @@ def process_symbol(symbol: str, state: dict, btc_context: dict = None, vix_facto
             capital=state["capital"],
             btc_context=btc_context,
             vix=vix,
+            fear_greed=fear_greed,
+            funding_rate=funding_rate,
             open_positions=len(state["positions"]),
             max_positions=config.MAX_OPEN_TRADES,
             recent_win_rate=recent_wr,
@@ -311,6 +327,11 @@ def process_symbol(symbol: str, state: dict, btc_context: dict = None, vix_facto
             "rsi": round(float(last["rsi"]), 2),
             "volume_ratio": round(volume_ratio, 3),
             "price": current_price,
+            "vix": round(vix, 1) if vix else None,
+            "fear_greed_score": fear_greed.get("score") if fear_greed else None,
+            "funding_rate": round(funding_rate, 6) if funding_rate else None,
+            "btc_trend": btc_context.get("btc_trend") if btc_context else None,
+            "rotation_factor": vix_factor,
         })
 
         if not confirme:
@@ -450,7 +471,7 @@ def _is_us_market_open() -> bool:
     return open_t <= t <= close_t
 
 
-def _check_premarket(state: dict, btc_context: dict = None, vix: float = 0.0):
+def _check_premarket(state: dict, btc_context: dict = None, vix: float = 0.0, fear_greed: dict = None):
     """Déclenche l'analyse pré-marché Claude à 8h00 ET (= 14h CET hiver / 15h CEST été)."""
     from zoneinfo import ZoneInfo
     et = datetime.now(ZoneInfo("America/New_York"))
@@ -465,7 +486,7 @@ def _check_premarket(state: dict, btc_context: dict = None, vix: float = 0.0):
     log("Lancement analyse pré-marché xStocks...", "INFO")
     try:
         from live.xstock_advisor import run_premarket_analysis
-        run_premarket_analysis(state, btc_context=btc_context, vix=vix)
+        run_premarket_analysis(state, btc_context=btc_context, vix=vix, fear_greed=fear_greed)
     except Exception as e:
         log(f"Erreur analyse pré-marché: {e}", "WARN")
     state["last_premarket_date"] = today
@@ -665,6 +686,10 @@ def run():
         try:
             log(f"--- Analyse en cours ({datetime.now().strftime('%H:%M:%S')}) ---")
 
+            # Valeurs par défaut en cas d'erreur de fetch
+            fear_greed = {"score": 50, "label": "Neutral"}
+            funding_rates = {}
+
             btc_context = fetch_btc_context()
             if btc_context:
                 log(
@@ -675,12 +700,28 @@ def run():
                 )
 
             vix = fetch_vix()
-            vix_factor = 0.5 if vix > 25 else 1.0
+            # Scaling linéaire : VIX 15 → ×1.0, VIX 25 → ×0.625, VIX 35+ → ×0.25
+            vix_factor = round(max(0.25, 1.0 - max(0.0, vix - 15) * 0.0375), 2) if vix > 0 else 1.0
             if vix > 0:
                 log(
-                    f"VIX: {vix:.1f} {'⚠ VOLATILITÉ ÉLEVÉE — taille ×0.5' if vix > 25 else '(normal)'}",
+                    f"VIX: {vix:.1f} → facteur taille ×{vix_factor} "
+                    f"{'⚠ VOLATILITÉ ÉLEVÉE' if vix > 25 else '(normal)'}",
                     "WARN" if vix > 25 else "INFO",
                 )
+
+            fear_greed = fetch_fear_greed()
+            fg_score = fear_greed.get("score", 50)
+            log(
+                f"Fear & Greed: {fg_score}/100 ({fear_greed.get('label', '?')}) "
+                f"{'⚠ PEUR EXTRÊME' if fg_score <= 20 else '⚠ AVIDITÉ EXTRÊME' if fg_score >= 80 else ''}",
+                "WARN" if fg_score <= 20 or fg_score >= 80 else "INFO",
+            )
+
+            funding_rates = fetch_funding_rates(config.CRYPTO)
+            if funding_rates:
+                high_fr = {s: r for s, r in funding_rates.items() if r > 0.001}
+                if high_fr:
+                    log(f"⚠ Funding rates élevés: {high_fr}", "WARN")
 
             rotation = _compute_rotation_factors(state.get("trades", []))
             if rotation["crypto"] != 1.0:
@@ -693,7 +734,15 @@ def run():
             for symbol in config.SYMBOLS:
                 category = "xstock" if symbol in config.XSTOCKS else "crypto"
                 combined = round(vix_factor * rotation[category], 2)
-                state = process_symbol(symbol, state, btc_context=btc_context, vix_factor=combined, vix=vix)
+                fr = funding_rates.get(symbol, 0.0)
+                state = process_symbol(
+                    symbol, state,
+                    btc_context=btc_context,
+                    vix_factor=combined,
+                    vix=vix,
+                    fear_greed=fear_greed,
+                    funding_rate=fr,
+                )
 
             save_state(state)
             print_status(state)
@@ -701,7 +750,7 @@ def run():
                 save_state(state)
                 break
             _check_daily_snapshot(state)
-            _check_premarket(state, btc_context=btc_context, vix=vix)
+            _check_premarket(state, btc_context=btc_context, vix=vix, fear_greed=fear_greed)
 
             log(f"Prochaine analyse dans {sleep_time // 60} minutes...")
             time.sleep(sleep_time)

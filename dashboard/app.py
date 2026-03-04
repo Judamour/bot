@@ -155,6 +155,8 @@ def api_state():
     from zoneinfo import ZoneInfo
     et = datetime.now(ZoneInfo("America/New_York"))
     metrics["us_market_open"] = et.weekday() < 5 and 9 * 60 + 30 <= et.hour * 60 + et.minute <= 16 * 60
+    metrics["fear_greed"] = _fear_greed_cache
+    metrics["vix"] = _vix_cache
     return jsonify(metrics)
 
 
@@ -279,6 +281,26 @@ def api_signals():
     return jsonify({"signals": records})
 
 
+@app.route("/api/claude")
+def api_claude():
+    """Retourne les derniers événements Claude (filtres BUY + analyses pré-marché)."""
+    events = []
+    if os.path.exists(SIGNALS_FILE):
+        try:
+            with open(SIGNALS_FILE) as f:
+                lines = f.readlines()[-500:]
+            for line in lines:
+                try:
+                    rec = json.loads(line)
+                    if rec.get("event") in ("CLAUDE_FILTER", "PREMARKET_ANALYSIS"):
+                        events.append(rec)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+    return jsonify({"events": list(reversed(events))[:50]})
+
+
 @app.route("/api/log")
 def api_log():
     lines = []
@@ -297,13 +319,17 @@ _live_prices: dict = {}
 _state_mtime: float = 0.0
 _log_size: int = 0
 _chart_cache: dict = {}          # {symbol: (timestamp, payload)}
+_fear_greed_cache: dict = {"score": None, "label": "—"}
+_vix_cache: float = 0.0
 CHART_CACHE_TTL = 300            # 5 minutes
 POLL_INTERVAL = 30               # secondes entre chaque poll prix/état
+FG_POLL_INTERVAL = 300           # Fear & Greed toutes les 5 min
 
 
 def background_thread():
     """Surveille les fichiers et émet les mises à jour WebSocket."""
-    global _state_mtime, _log_size, _live_prices
+    global _state_mtime, _log_size, _live_prices, _fear_greed_cache, _vix_cache
+    _fg_last_poll = 0
 
     import ccxt
     binance = ccxt.binance({"enableRateLimit": True})
@@ -331,6 +357,26 @@ def background_thread():
             if prices:
                 _live_prices.update(prices)
                 socketio.emit("price_update", prices)
+
+            # ── Fear & Greed + VIX (toutes les 5 min) ──
+            now = time.time()
+            if now - _fg_last_poll >= FG_POLL_INTERVAL:
+                _fg_last_poll = now
+                try:
+                    import requests as _req
+                    r = _req.get("https://api.alternative.me/fng/?limit=1", timeout=5)
+                    d = r.json()["data"][0]
+                    _fear_greed_cache.update({"score": int(d["value"]), "label": d["value_classification"]})
+                except Exception:
+                    pass
+                try:
+                    import yfinance as _yf
+                    vix_df = _yf.Ticker("^VIX").history(period="2d", interval="1h")
+                    if not vix_df.empty:
+                        _vix_cache = round(float(vix_df["Close"].iloc[-1]), 1)
+                except Exception:
+                    pass
+                socketio.emit("sentiment_update", {"fear_greed": _fear_greed_cache, "vix": _vix_cache})
 
             # ── État du portfolio ──
             if os.path.exists(STATE_FILE):

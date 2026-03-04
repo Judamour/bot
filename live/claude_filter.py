@@ -12,9 +12,13 @@ def ask_claude(
     adx: float,
     volume_ratio: float,
     capital: float,
-    # Contexte macro et portfolio
+    # Contexte macro
     btc_context: dict = None,
     vix: float = 0.0,
+    # Sentiment et dérivés
+    fear_greed: dict = None,
+    funding_rate: float = 0.0,
+    # Contexte portfolio
     open_positions: int = 0,
     max_positions: int = 3,
     recent_win_rate: float = None,
@@ -38,7 +42,7 @@ def ask_claude(
     vol_label = "fort ✓" if volume_ratio > 1.3 else "normal" if volume_ratio > 1.1 else "faible ⚠"
     category = "xStock US (actions tokenisées)" if symbol.endswith("x/EUR") else "Crypto 24/7"
 
-    # ── Contexte macro ──
+    # ── Contexte macro BTC + VIX ──
     macro_parts = []
     if btc_context:
         bt = btc_context.get("btc_trend", "?").upper()
@@ -46,39 +50,64 @@ def ask_claude(
         be = btc_context.get("btc_above_ema200", False)
         macro_parts.append(f"BTC {bt} ({bp:.0f}€ {'>' if be else '<'} EMA200)")
     if vix > 0:
-        vix_label = "PEUR ÉLEVÉE ⚠ taille ×0.5" if vix > 25 else "volatilité normale"
+        vix_label = "PEUR ÉLEVÉE ⚠" if vix > 25 else "élevé" if vix > 20 else "normal"
         macro_parts.append(f"VIX {vix:.1f} ({vix_label})")
     macro_str = " | ".join(macro_parts) if macro_parts else "Non disponible"
 
-    # ── Contexte portfolio ──
+    # ── Sentiment Fear & Greed ──
+    fg_str = "N/A"
+    fg_alert = ""
+    if fear_greed:
+        score = fear_greed.get("score", 50)
+        label = fear_greed.get("label", "Neutral")
+        fg_str = f"{score}/100 ({label})"
+        if score <= 20:
+            fg_alert = " ⚠ PEUR EXTRÊME — possible capitulation ou achat contrarian"
+        elif score >= 80:
+            fg_alert = " ⚠ AVIDITÉ EXTRÊME — risque de retournement imminent"
+
+    # ── Funding rate (crypto uniquement) ──
+    funding_str = ""
+    if funding_rate != 0.0:
+        pct = funding_rate * 100
+        if funding_rate > 0.001:
+            funding_label = "DANGER squeeze" if funding_rate > 0.001 else "longs surexposés ⚠"
+            # 0.001 = 0.1%, 0.0003 = 0.03%
+            funding_label = "DANGER squeeze ⚠" if funding_rate > 0.001 else "longs surexposés" if funding_rate > 0.0003 else "neutre"
+        elif funding_rate < -0.0001:
+            funding_label = "shorts surexposés (signal haussier contrarian)"
+        else:
+            funding_label = "neutre"
+        funding_str = f"\n• Funding rate: {pct:+.4f}%/8h ({funding_label})"
+
+    # ── Portfolio ──
     slots_left = max_positions - open_positions
     wr_str = f"{recent_win_rate:.0f}%" if recent_win_rate is not None else "N/A"
     rot_str = f"×{rotation_factor:.2f} ({'surpondéré' if rotation_factor > 1.0 else 'souspondéré' if rotation_factor < 1.0 else 'neutre'})"
 
-    # ── Confirmation daily ──
     daily_str = f"✓ {daily_trend_reason}" if daily_trend_reason else "✓ confirmé"
 
     prompt = f"""Tu es un trader algorithmique. Signal BUY technique validé sur {symbol} ({category}).
 
-INDICATEURS 4H (tous les 7 filtres ont passé) :
+INDICATEURS 4H (7/7 filtres passés) :
 • Prix: {price:.4f}€ | ATR: {atr:.4f}€ | Distance EMA200: {dist_ema200:+.1f}%
-• Supertrend: retournement HAUSSIER ✓ | Tendance 1d: {daily_str}
+• Supertrend: HAUSSIER ✓ | Tendance 1d: {daily_str}
 • ADX: {adx:.1f} ({adx_label}) | RSI: {rsi:.1f} (<75 ✓) | Volume: ×{volume_ratio:.2f} ({vol_label})
 • EMA9>EMA21 ✓ | EMA50/EMA200: {trend}
 
-CONTEXTE MACRO :
-• {macro_str}
+CONTEXTE MACRO & SENTIMENT :
+• Macro: {macro_str}
+• Fear & Greed: {fg_str}{fg_alert}{funding_str}
 • Portfolio: {slots_left}/{max_positions} slots libres | Capital: {capital:.0f}€
 • Win rate récent: {wr_str} | Facteur taille: {rot_str}
 
-TRADE : Risk 2% du capital | SL=3×ATR | TP=2.5×ATR (R:R 1:2.5)
+TRADE : Risk 2% | SL=3×ATR | TP=2.5×ATR (R:R 1:2.5)
 
-Confirme si les indicateurs sont alignés et le contexte macro ne s'y oppose pas.
-Ignore uniquement si tu identifies un risque macro sérieux et spécifique, ou une divergence technique claire.
+Confirme si les indicateurs sont alignés. Ignore uniquement si tu identifies un risque macro spécifique et sérieux (funding extrême, peur extrême + tendance baissière, VIX > 30 sans catalyseur haussier).
 
-Réponds EXACTEMENT (2 lignes) :
+Réponds EXACTEMENT :
 DÉCISION: CONFIRME ou IGNORE
-RAISON: [1-2 phrases : facteur décisif + impact du contexte macro]"""
+RAISON: [1-2 phrases : facteur décisif + impact du sentiment/macro]"""
 
     try:
         message = client.messages.create(

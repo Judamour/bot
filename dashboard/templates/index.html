@@ -420,6 +420,16 @@
       <div class="metric-value neutral" id="metSharpe">—</div>
       <div class="metric-sub">Rendement / risque annualisé</div>
     </div>
+    <div class="metric-card">
+      <div class="metric-label">Fear &amp; Greed</div>
+      <div class="metric-value neutral" id="metFG">—</div>
+      <div class="metric-sub" id="metFGSub">Sentiment crypto</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">VIX</div>
+      <div class="metric-value neutral" id="metVix">—</div>
+      <div class="metric-sub">Volatilité S&amp;P 500</div>
+    </div>
   </div>
 
   <!-- Graphique prix -->
@@ -585,6 +595,7 @@ socket.on('state_update', data => {
 });
 
 socket.on('log_update', data => { if (data.lines) appendLogs(data.lines); });
+socket.on('sentiment_update', data => { if (data.fear_greed) updateSentiment(data.fear_greed, data.vix); });
 
 // ── Ticker ────────────────────────────────────────────────────────────────────
 const prevPrices = {};
@@ -612,6 +623,22 @@ function updateTicker(prices) {
   setTimeout(() => {
     document.querySelectorAll('.ticker-price').forEach(el => el.className = 'ticker-price');
   }, 800);
+}
+
+function updateSentiment(fg, vix) {
+  if (fg && fg.score != null) {
+    const score = fg.score;
+    const label = fg.label || '';
+    const cls = score <= 25 ? 'negative' : score >= 75 ? 'positive' : 'neutral';
+    setText('metFG', score + '/100');
+    setText('metFGSub', label);
+    document.getElementById('metFG').className = 'metric-value ' + cls;
+  }
+  if (vix != null && vix > 0) {
+    const cls = vix > 30 ? 'negative' : vix > 20 ? 'neutral' : 'positive';
+    setText('metVix', vix.toFixed(1));
+    document.getElementById('metVix').className = 'metric-value ' + cls;
+  }
 }
 
 function updateMarketBadge(open) {
@@ -646,6 +673,8 @@ function updateMetrics(d) {
     setText('metSharpe', typeof sr === 'number' ? sr.toFixed(2) : '—');
     document.getElementById('metSharpe').className = 'metric-value ' + (sr >= 1.5 ? 'positive' : sr >= 0.5 ? 'neutral' : 'negative');
   }
+
+  if (d.fear_greed) updateSentiment(d.fear_greed, d.vix);
 
   if (d.paper_mode !== undefined)
     document.getElementById('modeLabel').textContent = d.paper_mode ? 'PAPER' : 'LIVE';
