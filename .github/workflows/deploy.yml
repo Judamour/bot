@@ -22,5 +22,6 @@ jobs:
             sudo cp /home/botuser/bot-trading/deploy/bot.service /etc/systemd/system/bot.service
             sudo cp /home/botuser/bot-trading/deploy/dashboard.service /etc/systemd/system/dashboard.service
             sudo systemctl daemon-reload
+            sudo systemctl enable bot dashboard
             sudo systemctl restart bot dashboard
             echo "✓ Déployé à $(date)"
