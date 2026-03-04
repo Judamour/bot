@@ -771,6 +771,7 @@ def run():
                     funding_rate=fr,
                     macro_news=macro_news,
                 )
+                time.sleep(3)  # Évite saturation RAM (1GB VPS) entre chaque symbole
 
             save_state(state)
             print_status(state)
