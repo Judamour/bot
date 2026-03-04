@@ -17,5 +17,10 @@ jobs:
           script: |
             sudo chown -R botuser:botuser /home/botuser/bot-trading
             sudo -u botuser bash -c "cd /home/botuser/bot-trading && git pull"
+            sudo cp /home/botuser/bot-trading/deploy/nginx.conf /etc/nginx/sites-available/bot-trading
+            sudo nginx -t && sudo systemctl reload nginx
+            sudo cp /home/botuser/bot-trading/deploy/bot.service /etc/systemd/system/bot.service
+            sudo cp /home/botuser/bot-trading/deploy/dashboard.service /etc/systemd/system/dashboard.service
+            sudo systemctl daemon-reload
             sudo systemctl restart bot dashboard
             echo "✓ Déployé à $(date)"
