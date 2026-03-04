@@ -278,6 +278,66 @@
     .reason-sl { background: rgba(248,81,73,0.15); color: var(--red); }
     .reason-exit { background: rgba(88,166,255,0.15); color: var(--blue); }
 
+    /* ── Claude AI ── */
+    .claude-section {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    .claude-body { display: flex; gap: 0; }
+
+    .claude-filters {
+      flex: 1;
+      overflow-x: auto;
+    }
+
+    .claude-premarket {
+      flex: 1.2;
+      border-left: 1px solid var(--border);
+      padding: 12px 14px;
+      font-size: 12px;
+      line-height: 1.6;
+      color: var(--text);
+      max-height: 260px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    }
+
+    .claude-premarket::-webkit-scrollbar { width: 5px; }
+    .claude-premarket::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+    .claude-empty { padding: 20px; text-align: center; color: var(--muted); font-size: 12px; }
+
+    .claude-table { width: 100%; border-collapse: collapse; }
+    .claude-table th {
+      padding: 7px 12px;
+      text-align: left;
+      font-size: 10px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      border-bottom: 1px solid var(--border);
+    }
+    .claude-table td {
+      padding: 7px 12px;
+      border-bottom: 1px solid var(--border);
+      font-size: 11px;
+      vertical-align: top;
+    }
+    .claude-table tr:last-child td { border-bottom: none; }
+    .claude-table tr:hover td { background: var(--surface2); }
+
+    .decision-ok  { padding: 1px 6px; border-radius: 3px; font-size: 10px; font-weight: 600; background: rgba(63,185,80,0.15); color: var(--green); }
+    .decision-no  { padding: 1px 6px; border-radius: 3px; font-size: 10px; font-weight: 600; background: rgba(248,81,73,0.15); color: var(--red); }
+
+    @media (max-width: 768px) {
+      .claude-body { flex-direction: column; }
+      .claude-premarket { border-left: none; border-top: 1px solid var(--border); }
+    }
+
     /* ── Log ── */
     .log-section {
       background: var(--surface);
@@ -433,6 +493,20 @@
           <tr><td colspan="6" class="empty-state">Aucun trade fermé</td></tr>
         </tbody>
       </table>
+    </div>
+  </div>
+
+  <!-- Claude AI -->
+  <div class="claude-section">
+    <div class="panel-header">
+      Claude AI
+      <span style="color:var(--muted);font-size:10px;font-weight:400">Filtres BUY &amp; Analyses pré-marché</span>
+    </div>
+    <div class="claude-body">
+      <div class="claude-filters" id="claudeFilters">
+        <div class="claude-empty">Aucun filtre Claude enregistré</div>
+      </div>
+      <div class="claude-premarket" id="claudePremarket">Aucune analyse pré-marché</div>
     </div>
   </div>
 
@@ -765,6 +839,52 @@ function fmtDate(s) {
          d.toLocaleTimeString('fr',{hour:'2-digit',minute:'2-digit'});
 }
 
+// ── Claude AI ─────────────────────────────────────────────────────────────────
+function fetchClaude() {
+  fetch('/api/claude').then(r => r.json()).then(data => {
+    const events = data.events || [];
+
+    // ── Filtres BUY (panel gauche) ──
+    const filterEl = document.getElementById('claudeFilters');
+    const filters = events.filter(e => e.event === 'CLAUDE_FILTER');
+    if (!filters.length) {
+      filterEl.innerHTML = '<div class="claude-empty">Aucun filtre Claude enregistré</div>';
+    } else {
+      filterEl.innerHTML = `<table class="claude-table">
+        <thead><tr>
+          <th>Date</th><th>Symbole</th><th>Décision</th><th>Raison</th><th>RSI</th><th>ADX</th>
+        </tr></thead>
+        <tbody>${filters.map(e => {
+          const ok = e.decision === 'CONFIRME';
+          const dec = ok ? '<span class="decision-ok">CONFIRMÉ</span>' : '<span class="decision-no">IGNORÉ</span>';
+          const reason = escHtml(e.raison || e.reason || '—');
+          const rsi = e.rsi != null ? parseFloat(e.rsi).toFixed(1) : '—';
+          const adx = e.adx != null ? parseFloat(e.adx).toFixed(1) : '—';
+          return `<tr>
+            <td style="color:var(--muted);white-space:nowrap">${fmtDate(e.ts || '')}</td>
+            <td><strong>${escHtml(e.symbol || '—')}</strong></td>
+            <td>${dec}</td>
+            <td style="max-width:320px;color:var(--muted)">${reason}</td>
+            <td>${rsi}</td>
+            <td>${adx}</td>
+          </tr>`;
+        }).join('')}</tbody>
+      </table>`;
+    }
+
+    // ── Analyse pré-marché (panel droit) ──
+    const premarketEl = document.getElementById('claudePremarket');
+    const premarket = events.find(e => e.event === 'PREMARKET_ANALYSIS');
+    if (!premarket) {
+      premarketEl.textContent = 'Aucune analyse pré-marché';
+    } else {
+      const ts = fmtDate(premarket.ts || '');
+      const text = escHtml(premarket.analysis || premarket.content || premarket.text || JSON.stringify(premarket, null, 2));
+      premarketEl.innerHTML = `<div style="color:var(--muted);font-size:10px;margin-bottom:8px">${ts}</div>${text}`;
+    }
+  }).catch(() => {});
+}
+
 // ── System stats ──────────────────────────────────────────────────────────────
 function updateSysStats() {
   fetch('/api/system').then(r => r.json()).then(d => {
@@ -812,6 +932,8 @@ function init() {
   loadChart();
   updateSysStats();
   setInterval(updateSysStats, 30000);
+  fetchClaude();
+  setInterval(fetchClaude, 60000);
 }
 
 document.addEventListener('DOMContentLoaded', init);
