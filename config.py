@@ -60,6 +60,8 @@ POSITION_SIZE_EUR = 100  # Montant fixe investi par position (en EUR)
 ATR_MULTIPLIER = 3.0     # Stop-loss = 3x ATR sous le prix d'entrée (adapté au 4h)
 TAKE_PROFIT_RATIO = 2.5  # Take-profit = 2.5x le stop-loss (ratio R:R = 1:2.5)
 MAX_OPEN_TRADES = 3      # Maximum de trades ouverts simultanément
+TARGET_VOL   = 0.15     # Volatilité annualisée cible (15%) pour le vol targeting
+MAX_LEVERAGE = 1.3      # Exposition max (×1.3 position de base)
 
 # ── Coûts de transaction ────────────────────────────────────────────────────
 EXCHANGE_FEE = 0.0026   # 0.26% taker Kraken (pire cas)

@@ -8,7 +8,7 @@ from colorama import Fore, Style, init
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
-from data.fetcher import fetch_ohlcv, get_exchange, fetch_fear_greed, fetch_funding_rates, fetch_news_yfinance, fetch_news_macro_rss
+from data.fetcher import fetch_ohlcv, get_exchange, fetch_fear_greed, fetch_funding_rates, fetch_news_yfinance, fetch_news_macro_rss, fetch_qqq_regime
 from strategies.supertrend import generate_signals, calculate_position_size, add_indicators
 from live.claude_filter import ask_claude
 from live.notifier import notify, notify_file
@@ -140,6 +140,8 @@ def process_symbol(
     fear_greed: dict = None,
     funding_rate: float = 0.0,
     macro_news: list = None,
+    qqq_regime_ok: bool = True,
+    qqq_description: str = "N/A",
 ) -> dict:
     """Analyse un symbole et exécute les ordres si nécessaire."""
     try:
@@ -155,6 +157,20 @@ def process_symbol(
     except Exception as e:
         log(f"{symbol} — Erreur récupération données: {e}", "WARN")
         return state
+
+    # ── Volatility targeting : exposure = clamp(TARGET_VOL / realized_vol, 0.2, MAX_LEVERAGE) ──
+    try:
+        daily_close = df["close"].resample("1D").last().dropna()
+        if len(daily_close) >= 21:
+            returns = daily_close.pct_change().dropna()
+            realized_vol = float(returns.tail(20).std() * (252 ** 0.5))
+            vol_exposure = round(max(0.2, min(config.MAX_LEVERAGE, config.TARGET_VOL / realized_vol)), 2) if realized_vol > 0 else 1.0
+        else:
+            realized_vol = 0.0
+            vol_exposure = 1.0
+    except Exception:
+        realized_vol = 0.0
+        vol_exposure = 1.0
 
     # ── Enregistrement scan complet avec breakdown des filtres ──
     scan_data = {
@@ -258,6 +274,11 @@ def process_symbol(
         log(f"{symbol} — Marché US fermé, entrée ignorée", "INFO")
         return state
 
+    if signal == 1 and symbol in config.XSTOCKS and not qqq_regime_ok:
+        log(f"{symbol} — Signal ignoré (régime baissier : {qqq_description})", "WARN")
+        log_signal("BUY_SKIP_QQQ_REGIME", symbol, {"qqq": qqq_description, "price": current_price})
+        return state
+
     if signal == 1 and symbol not in state["positions"]:
         if len(state["positions"]) >= config.MAX_OPEN_TRADES:
             log(f"{symbol} — Signal ignoré (max {config.MAX_OPEN_TRADES} positions ouvertes)", "WARN")
@@ -317,6 +338,7 @@ def process_symbol(
             "structure":     bool(last["f_structure"]),  # EMA50 > EMA200
             "momentum":      bool(last["f_momentum"]),   # EMA9 > EMA21
             "mtf_1d":        ok_1d,                      # Tendance 1d
+            "qqq_regime":    qqq_regime_ok,              # QQQ > SMA200
         }
 
         confirme, raison = ask_claude(
@@ -361,9 +383,14 @@ def process_symbol(
             return state
 
         effective_buy = current_price * (1 + config.SLIPPAGE)
-        position_eur = config.POSITION_SIZE_EUR * vix_factor
-        if vix_factor != 1.0:
-            log(f"{symbol} — Position {position_eur:.0f}€ (facteur VIX/rotation ×{vix_factor:.2f})", "WARN" if vix_factor < 1.0 else "INFO")
+        position_eur = config.POSITION_SIZE_EUR * vix_factor * vol_exposure
+        if vix_factor != 1.0 or vol_exposure != 1.0:
+            log(
+                f"{symbol} — Position {position_eur:.0f}€ "
+                f"(VIX/rotation ×{vix_factor:.2f} | vol targeting ×{vol_exposure:.2f}"
+                f"{f' | σ annualisée {realized_vol*100:.1f}%' if realized_vol > 0 else ''})",
+                "WARN" if vix_factor < 1.0 or vol_exposure < 0.5 else "INFO",
+            )
         pos = calculate_position_size(position_eur, effective_buy, atr)
         fee_entry = effective_buy * pos["size"] * config.EXCHANGE_FEE
         total_cost = pos["size"] * effective_buy + fee_entry
@@ -751,6 +778,12 @@ def run():
             if macro_news:
                 log(f"News macro: {len(macro_news)} headlines chargés", "INFO")
 
+            qqq_ok, qqq_desc = fetch_qqq_regime()
+            log(
+                f"Régime QQQ: {qqq_desc} {'✓ Risk-ON' if qqq_ok else '⚠ Risk-OFF — xStocks bloqués'}",
+                "INFO" if qqq_ok else "WARN",
+            )
+
             rotation = _compute_rotation_factors(state.get("trades", []))
             if rotation["crypto"] != 1.0:
                 log(
@@ -771,6 +804,8 @@ def run():
                     fear_greed=fear_greed,
                     funding_rate=fr,
                     macro_news=macro_news,
+                    qqq_regime_ok=qqq_ok,
+                    qqq_description=qqq_desc,
                 )
                 time.sleep(3)  # Évite saturation RAM (1GB VPS) entre chaque symbole
 

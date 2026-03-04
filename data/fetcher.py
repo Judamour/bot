@@ -221,6 +221,26 @@ def fetch_news_macro_rss(limit: int = 6) -> list:
     return results[:limit]
 
 
+def fetch_qqq_regime() -> tuple:
+    """
+    Régime de marché actions US : QQQ > SMA200 = Risk-ON, sinon Risk-OFF.
+    Retourne (ok: bool, description: str).
+    Permissif (True) si données indisponibles.
+    """
+    try:
+        import yfinance as yf
+        df = yf.Ticker("QQQ").history(period="1y", interval="1d")
+        if df.empty or len(df) < 200:
+            return True, "N/A (historique insuffisant)"
+        price = float(df["Close"].iloc[-1])
+        sma200 = float(df["Close"].rolling(200).mean().iloc[-1])
+        ok = price > sma200
+        pct = (price - sma200) / sma200 * 100
+        return ok, f"QQQ {'>' if ok else '<'} SMA200 ({pct:+.1f}%)"
+    except Exception as e:
+        return True, f"N/A ({e})"
+
+
 def fetch_fear_greed() -> dict:
     """
     Fetch le Crypto Fear & Greed Index (alternative.me, API publique).

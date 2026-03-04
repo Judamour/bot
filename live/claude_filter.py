@@ -94,6 +94,7 @@ def ask_claude(
             ("structure",     "EMA50>EMA200 (structure haussière)"),
             ("momentum",      "EMA9>EMA21 (momentum court terme)"),
             ("mtf_1d",        "Tendance 1d (ST↑ + >EMA200)"),
+            ("qqq_regime",    "QQQ > SMA200 (régime Risk-ON)"),
         ]
         ok_count = sum(1 for k, _ in sf_items if soft_filters.get(k, True))
         sf_lines = []
@@ -103,7 +104,7 @@ def ask_claude(
             if k == "mtf_1d" and not ok and daily_trend_reason:
                 line += f" ({daily_trend_reason})"
             sf_lines.append(line)
-        soft_str = f"\nFILTRES DOUX ({ok_count}/5 validés — tu es le décideur) :\n" + "\n".join(sf_lines) + "\n"
+        soft_str = f"\nFILTRES DOUX ({ok_count}/6 validés — tu es le décideur) :\n" + "\n".join(sf_lines) + "\n"
 
     # ── Actualités récentes ──
     news_str = ""
@@ -133,7 +134,7 @@ CONTEXTE MACRO & SENTIMENT :
 TRADE : Risk 2% | SL=3×ATR | TP=2.5×ATR (R:R 1:2.5)
 
 Les 3 hard filters sont validés. Analyse les filtres doux et le contexte macro pour décider.
-Accepte si le contexte est globalement favorable, même avec 2-3 filtres doux en ⚠.
+Accepte si le contexte est globalement favorable, même avec 2-4 filtres doux en ⚠.
 Les actualités peuvent faire pencher la balance si elles révèlent un risque sectoriel direct (tarifs, résultats décevants, crise macro).
 
 Réponds EXACTEMENT :
