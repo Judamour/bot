@@ -9,8 +9,6 @@ WorkingDirectory=/home/botuser/bot-trading
 ExecStart=/home/botuser/bot-trading/venv/bin/python main.py live
 Restart=on-failure
 RestartSec=30
-StandardOutput=append:/home/botuser/bot-trading/logs/bot.log
-StandardError=append:/home/botuser/bot-trading/logs/bot.log
 
 [Install]
 WantedBy=multi-user.target

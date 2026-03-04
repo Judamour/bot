@@ -95,6 +95,7 @@ def _build_prompt(
     # ── News macro (S&P 500 headlines) ──
     macro_news = fetch_news_macro_rss(limit=3)
     macro_str_lines = [f"  • [{n.get('source','')}] {n['title']}" for n in macro_news if n.get("title")]
+    macro_section = ("ACTUALITÉS MARCHÉ (S&P 500) :\n" + "\n".join(macro_str_lines)) if macro_str_lines else ""
 
     # ── Lignes techniques par symbole ──
     lines = []
@@ -159,7 +160,7 @@ MACRO & SENTIMENT DU JOUR :
 - Capital disponible: {capital:.0f}€ | Max 3 positions simultanées
 - Performance bot récente: win rate {wr} | Moyenne {avg_pnl} (20 derniers trades)
 Note: les actions avec rapport trimestriel dans <24h sont automatiquement exclues.
-{("ACTUALITÉS MARCHÉ (S&P 500) :\n" + chr(10).join(macro_str_lines)) if macro_str_lines else ""}
+{macro_section}
 
 DONNÉES TECHNIQUES xStocks (timeframe {config.TIMEFRAME}) :
 {chr(10).join(lines)}
