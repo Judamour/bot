@@ -131,7 +131,7 @@ def apply_trailing_stop(position: dict, current_price: float, symbol: str) -> di
 
 # ── Logique principale ────────────────────────────────────────────────────────
 
-def process_symbol(symbol: str, state: dict, btc_context: dict = None, vix_factor: float = 1.0) -> dict:
+def process_symbol(symbol: str, state: dict, btc_context: dict = None, vix_factor: float = 1.0, vix: float = 0.0) -> dict:
     """Analyse un symbole et exécute les ordres si nécessaire."""
     try:
         df = fetch_ohlcv(symbol, config.TIMEFRAME, days=45)
@@ -280,6 +280,11 @@ def process_symbol(symbol: str, state: dict, btc_context: dict = None, vix_facto
             f"RSI: {last['rsi']:.1f} — consultation Claude...",
             "INFO",
         )
+        recent_trades = state.get("trades", [])[-20:]
+        recent_wr = (
+            sum(1 for t in recent_trades if t.get("pnl", 0) > 0) / len(recent_trades) * 100
+            if recent_trades else None
+        )
         confirme, raison = ask_claude(
             symbol=symbol,
             price=current_price,
@@ -290,6 +295,13 @@ def process_symbol(symbol: str, state: dict, btc_context: dict = None, vix_facto
             adx=adx,
             volume_ratio=volume_ratio,
             capital=state["capital"],
+            btc_context=btc_context,
+            vix=vix,
+            open_positions=len(state["positions"]),
+            max_positions=config.MAX_OPEN_TRADES,
+            recent_win_rate=recent_wr,
+            rotation_factor=vix_factor,
+            daily_trend_reason=reason_1d,
         )
         log(f"{symbol} — Claude: {'✓ CONFIRME' if confirme else '✗ IGNORE'} | {raison}", "INFO")
         log_signal("CLAUDE_FILTER", symbol, {
@@ -438,7 +450,7 @@ def _is_us_market_open() -> bool:
     return open_t <= t <= close_t
 
 
-def _check_premarket(state: dict):
+def _check_premarket(state: dict, btc_context: dict = None, vix: float = 0.0):
     """Déclenche l'analyse pré-marché Claude à 8h00 ET (= 14h CET hiver / 15h CEST été)."""
     from zoneinfo import ZoneInfo
     et = datetime.now(ZoneInfo("America/New_York"))
@@ -453,7 +465,7 @@ def _check_premarket(state: dict):
     log("Lancement analyse pré-marché xStocks...", "INFO")
     try:
         from live.xstock_advisor import run_premarket_analysis
-        run_premarket_analysis(state)
+        run_premarket_analysis(state, btc_context=btc_context, vix=vix)
     except Exception as e:
         log(f"Erreur analyse pré-marché: {e}", "WARN")
     state["last_premarket_date"] = today
@@ -681,7 +693,7 @@ def run():
             for symbol in config.SYMBOLS:
                 category = "xstock" if symbol in config.XSTOCKS else "crypto"
                 combined = round(vix_factor * rotation[category], 2)
-                state = process_symbol(symbol, state, btc_context=btc_context, vix_factor=combined)
+                state = process_symbol(symbol, state, btc_context=btc_context, vix_factor=combined, vix=vix)
 
             save_state(state)
             print_status(state)
@@ -689,7 +701,7 @@ def run():
                 save_state(state)
                 break
             _check_daily_snapshot(state)
-            _check_premarket(state)
+            _check_premarket(state, btc_context=btc_context, vix=vix)
 
             log(f"Prochaine analyse dans {sleep_time // 60} minutes...")
             time.sleep(sleep_time)

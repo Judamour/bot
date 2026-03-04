@@ -26,7 +26,7 @@ def _log_signal(event: str, symbol: str, data: dict):
         f.write(json.dumps(record, default=str) + "\n")
 
 
-def run_premarket_analysis(state: dict):
+def run_premarket_analysis(state: dict, btc_context: dict = None, vix: float = 0.0):
     """Analyse technique de toutes les xStocks + recommandations Claude → Telegram."""
     summaries = []
     for symbol in config.XSTOCKS:
@@ -57,11 +57,11 @@ def run_premarket_analysis(state: dict):
         except Exception as e:
             summaries.append({"symbol": symbol, "error": str(e)})
 
-    prompt = _build_prompt(summaries, state["capital"])
+    prompt = _build_prompt(summaries, state["capital"], state.get("trades", []), btc_context, vix)
     client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
     response = client.messages.create(
         model="claude-haiku-4-5-20251001",
-        max_tokens=600,
+        max_tokens=1200,
         messages=[{"role": "user", "content": prompt}],
     )
     analysis = response.content[0].text
@@ -70,33 +70,71 @@ def run_premarket_analysis(state: dict):
     notify(f"📈 <b>Analyse pré-marché US</b>\n{analysis}")
 
 
-def _build_prompt(summaries: list, capital: float) -> str:
+def _build_prompt(
+    summaries: list,
+    capital: float,
+    trades: list,
+    btc_context: dict = None,
+    vix: float = 0.0,
+) -> str:
+    # ── Lignes techniques par symbole ──
     lines = []
     for s in summaries:
         if "error" in s:
             lines.append(f"- {s['symbol']} : erreur données ({s['error']})")
             continue
+        sig_str = "🟢 BUY" if s["signal"] == 1 else "🔴 SELL" if s["signal"] == -1 else "⚪ neutre"
         lines.append(
-            f"- {s['symbol']} | {s['price']}€ | Supertrend {s['supertrend']} | "
-            f"ADX {s['adx']} | RSI {s['rsi']} | {s['ema_cross']} | "
-            f">EMA200:{s['above_ema200']} | Structure:{s['structure']} | "
-            f"Vol×{s['volume_ratio']} | {s['filters_ok']}/6 filtres OK"
+            f"- {s['symbol']} | {s['price']}€ | ST:{s['supertrend']} | ADX:{s['adx']} | "
+            f"RSI:{s['rsi']} | {s['ema_cross']} | >EMA200:{s['above_ema200']} | "
+            f"Vol×{s['volume_ratio']} | {s['filters_ok']}/6 filtres | {sig_str}"
         )
 
-    return f"""Tu es un analyste technique senior. Le marché US ouvre dans 30 minutes.
-Capital disponible : {capital:.0f}€ | Max 3 positions simultanées.
+    # ── Contexte BTC ──
+    btc_str = "Non disponible"
+    if btc_context:
+        bt = btc_context.get("btc_trend", "?").upper()
+        bp = btc_context.get("btc_price", 0)
+        be = btc_context.get("btc_above_ema200", False)
+        btc_str = f"BTC {bt} ({bp:.0f}€, {'>' if be else '<'} EMA200)"
 
-DONNÉES TECHNIQUES xStocks (timeframe 4h, indicateurs Supertrend + EMA + ADX) :
+    # ── VIX ──
+    if vix > 0:
+        vix_str = f"{vix:.1f} ({'⚠ PEUR ÉLEVÉE — positions réduites ×0.5' if vix > 25 else 'normal'})"
+    else:
+        vix_str = "N/A"
+
+    # ── Performance récente ──
+    recent = trades[-20:] if trades else []
+    if recent:
+        wins = sum(1 for t in recent if t.get("pnl", 0) > 0)
+        wr = f"{wins/len(recent)*100:.0f}% ({wins}/{len(recent)})"
+        avg_pnl = f"{sum(t.get('pnl',0) for t in recent)/len(recent):+.2f}€/trade"
+    else:
+        wr = "N/A (aucun trade)"
+        avg_pnl = "N/A"
+
+    return f"""Tu es un analyste technique senior couvrant les actions US (xStocks). Le marché US ouvre dans 30 minutes.
+
+MACRO DU JOUR :
+- {btc_str}
+- VIX: {vix_str}
+- Capital disponible: {capital:.0f}€ | Max 3 positions simultanées
+- Performance récente: win rate {wr} | Moyenne {avg_pnl} (20 derniers trades)
+Note: les actions avec rapport trimestriel dans <24h sont automatiquement exclues par le bot.
+
+DONNÉES TECHNIQUES xStocks (timeframe {config.TIMEFRAME}) :
 {chr(10).join(lines)}
 
-Réponds en français, structure ta réponse ainsi :
+Réponds en français avec cette structure précise :
 
-TOP OPPORTUNITÉS (max 3) :
-Pour chaque action retenue : niveau d'entrée, SL suggéré, TP, raison principale, confiance (haute/moyenne/faible)
+TOP OPPORTUNITÉS (max 3, uniquement si ≥4/6 filtres et ST▲) :
+SYMBOLE | Entrée: X.XX€ | SL: X.XX€ (-X%) | TP: X.XX€ (+X%) | Confiance: haute/moyenne/faible
+→ Raison (catalyst technique + contexte macro, 1-2 phrases)
 
 À ÉVITER aujourd'hui :
-Actions avec signal faible/range/surachat — raison courte
+SYMBOLE — raison courte (surachat/range/volume faible/ST▼)
 
-CONTEXTE GÉNÉRAL :
-1-2 phrases sur le momentum global des actions tech/IA aujourd'hui.
+CONTEXTE MARCHÉ :
+Analyse le momentum global tech/IA aujourd'hui en tenant compte du contexte BTC et VIX. Mentionne tout catalyseur sectoriel pertinent (semi-conducteurs, IA, cloud, véhicules électriques) que ton entraînement te permet d'identifier. 2-3 phrases.
 """
