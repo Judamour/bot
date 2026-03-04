@@ -21,11 +21,24 @@ XSTOCKS = [
 
 SYMBOLS = CRYPTO + XSTOCKS
 
-# ── Heures marché US (CET heure d'hiver — UTC+1) ────────────────────────────
-# En été (CEST, UTC+2) les marchés ouvrent à 15h30 et ferment à 22h00 CET
-XSTOCK_MARKET_OPEN_CET  = (14, 30)   # NYSE/NASDAQ ouverture
-XSTOCK_MARKET_CLOSE_CET = (21,  0)   # Fermeture
-XSTOCK_PREMARKET_CET    = (14,  0)   # Heure déclenchement analyse pré-marché
+# ── Heures marché US (Eastern Time — gère automatiquement EST/EDT) ──────────
+XSTOCK_MARKET_OPEN_ET  = (9, 30)    # NYSE/NASDAQ ouverture (9h30 ET)
+XSTOCK_MARKET_CLOSE_ET = (16,  0)   # Fermeture (16h00 ET)
+XSTOCK_PREMARKET_ET    = (8,   0)   # Analyse pré-marché (8h00 ET = 14h CET = 15h CEST)
+
+# ── Gestion du risque portefeuille ──────────────────────────────────────────
+MAX_DRAWDOWN = -0.15    # Coupe-circuit si capital chute de -15% depuis le départ
+
+# ── Secteurs (corrélation positions — max 1 par secteur) ────────────────────
+SECTORS = {
+    "NVDAx/EUR": "tech",     "AAPLx/EUR": "tech",
+    "MSFTx/EUR": "tech",     "METAx/EUR": "tech",
+    "GOOGx/EUR": "tech",     "AMZNx/EUR": "ecommerce",
+    "TSLAx/EUR": "auto",
+    "BTC/EUR":   "crypto",   "ETH/EUR":   "crypto",
+    "SOL/EUR":   "crypto",   "BNB/EUR":   "crypto",
+    "ADA/EUR":   "crypto",   "DOT/EUR":   "crypto",
+}
 
 # ── Timeframe ───────────────────────────────────────────────────────────────
 # Options : "1m", "5m", "15m", "1h", "4h", "1d"

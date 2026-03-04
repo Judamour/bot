@@ -249,6 +249,24 @@ def process_symbol(symbol: str, state: dict, btc_context: dict = None) -> dict:
             log_signal("BUY_SKIP_MAX_POS", symbol, {"price": current_price, "open_positions": len(state["positions"])})
             return state
 
+        # Corrélation secteur — max 1 position par secteur
+        sector = config.SECTORS.get(symbol)
+        if sector:
+            occupied = [s for s in state["positions"] if config.SECTORS.get(s) == sector]
+            if occupied:
+                log(f"{symbol} — Signal ignoré (secteur '{sector}' déjà occupé par {occupied[0]})", "INFO")
+                log_signal("BUY_SKIP_SECTOR", symbol, {"sector": sector, "occupied_by": occupied[0], "price": current_price})
+                return state
+
+        # Filtre earnings xStocks
+        if symbol in config.XSTOCKS:
+            from data.fetcher import _xstock_ticker
+            ticker = _xstock_ticker(symbol)
+            if _has_earnings_soon(ticker):
+                log(f"{symbol} — Signal ignoré (rapport trimestriel dans <24h)", "WARN")
+                log_signal("BUY_SKIP_EARNINGS", symbol, {"ticker": ticker, "price": current_price})
+                return state
+
         log(
             f"{symbol} — Signal BUY | ADX: {adx:.1f} | Vol×{volume_ratio:.2f} | "
             f"RSI: {last['rsi']:.1f} — consultation Claude...",
@@ -383,26 +401,26 @@ def _check_daily_snapshot(state: dict):
 
 
 def _is_us_market_open() -> bool:
-    """Marché US ouvert : lun-ven, 14h30-21h00 CET (heure d'hiver, UTC+1)."""
-    from datetime import timezone, timedelta as td
-    cet = datetime.now(timezone(td(hours=1)))
-    if cet.weekday() >= 5:   # samedi=5, dimanche=6
+    """Marché US ouvert : lun-ven, 9h30-16h00 ET (gère automatiquement EST/EDT)."""
+    from zoneinfo import ZoneInfo
+    et = datetime.now(ZoneInfo("America/New_York"))
+    if et.weekday() >= 5:
         return False
-    t = cet.hour * 60 + cet.minute
-    open_t  = config.XSTOCK_MARKET_OPEN_CET[0]  * 60 + config.XSTOCK_MARKET_OPEN_CET[1]
-    close_t = config.XSTOCK_MARKET_CLOSE_CET[0] * 60 + config.XSTOCK_MARKET_CLOSE_CET[1]
+    t = et.hour * 60 + et.minute
+    open_t  = config.XSTOCK_MARKET_OPEN_ET[0]  * 60 + config.XSTOCK_MARKET_OPEN_ET[1]
+    close_t = config.XSTOCK_MARKET_CLOSE_ET[0] * 60 + config.XSTOCK_MARKET_CLOSE_ET[1]
     return open_t <= t <= close_t
 
 
 def _check_premarket(state: dict):
-    """Déclenche l'analyse pré-marché Claude une fois par jour ouvré à 14h00 CET."""
-    from datetime import timezone, timedelta as td
-    cet = datetime.now(timezone(td(hours=1)))
-    today = cet.strftime("%Y-%m-%d")
-    if cet.weekday() >= 5:
+    """Déclenche l'analyse pré-marché Claude à 8h00 ET (= 14h CET hiver / 15h CEST été)."""
+    from zoneinfo import ZoneInfo
+    et = datetime.now(ZoneInfo("America/New_York"))
+    today = et.strftime("%Y-%m-%d")
+    if et.weekday() >= 5:
         return
-    ph, pm = config.XSTOCK_PREMARKET_CET
-    if cet.hour * 60 + cet.minute < ph * 60 + pm:
+    ph, pm = config.XSTOCK_PREMARKET_ET
+    if et.hour * 60 + et.minute < ph * 60 + pm:
         return
     if state.get("last_premarket_date", "") == today:
         return
@@ -413,6 +431,49 @@ def _check_premarket(state: dict):
     except Exception as e:
         log(f"Erreur analyse pré-marché: {e}", "WARN")
     state["last_premarket_date"] = today
+
+
+def _check_max_drawdown(state: dict) -> bool:
+    """Retourne True si le drawdown depuis le capital initial dépasse MAX_DRAWDOWN (-15%)."""
+    total_value = state["capital"] + sum(
+        p["entry"] * p["size"] for p in state["positions"].values()
+    )
+    drawdown = (total_value - state["initial_capital"]) / state["initial_capital"]
+    if drawdown <= config.MAX_DRAWDOWN:
+        msg = f"MAX DRAWDOWN {drawdown*100:.1f}% — Bot arrêté (seuil {config.MAX_DRAWDOWN*100:.0f}%)"
+        log(f"⛔ {msg}", "WARN")
+        notify(f"⛔ <b>{msg}</b>\nReprise manuelle uniquement.")
+        return True
+    return False
+
+
+def _has_earnings_soon(ticker: str) -> bool:
+    """True si rapport trimestriel dans les 24h (avant ou après). Permissif si données indispo."""
+    try:
+        import yfinance as yf
+        from datetime import timezone as tz
+        cal = yf.Ticker(ticker).calendar
+        if cal is None:
+            return False
+        dates = []
+        if isinstance(cal, dict):
+            dates = cal.get("Earnings Date", []) or []
+        elif hasattr(cal, "loc") and "Earnings Date" in cal.index:
+            val = cal.loc["Earnings Date"]
+            dates = val if hasattr(val, "__iter__") else [val]
+        now = datetime.now(tz.utc)
+        for d in dates:
+            if d is None:
+                continue
+            if hasattr(d, "to_pydatetime"):
+                d = d.to_pydatetime()
+            if hasattr(d, "tzinfo") and d.tzinfo is None:
+                d = d.replace(tzinfo=tz.utc)
+            if abs((d - now).total_seconds()) < 24 * 3600:
+                return True
+        return False
+    except Exception:
+        return False
 
 
 def run():
@@ -459,6 +520,9 @@ def run():
 
             save_state(state)
             print_status(state)
+            if _check_max_drawdown(state):
+                save_state(state)
+                break
             _check_daily_snapshot(state)
             _check_premarket(state)
 

@@ -2,10 +2,10 @@
 
 ## 🔴 Critique (peut faire perdre de l'argent)
 
-- [ ] **Max drawdown coupe-circuit** — Arrêter le bot si capital chute de -15% (configurable). Notification Telegram + log. Reprise manuelle uniquement
-- [ ] **Filtre earnings/actualités** — Bloquer les entrées xStock dans les 24h avant/après un rapport trimestriel (yfinance `calendar`)
-- [ ] **Summer time CEST** — Détecter automatiquement heure d'été (UTC+2) : marchés US à 15h30-22h00 au lieu de 14h30-21h00
-- [ ] **Corrélation positions** — Limiter à 1 position par secteur (tech, finance, conso…) pour éviter concentration de risque
+- [x] **Max drawdown coupe-circuit** — Arrêter le bot si capital chute de -15% (configurable). Notification Telegram + log. Reprise manuelle uniquement
+- [x] **Filtre earnings/actualités** — Bloquer les entrées xStock dans les 24h avant/après un rapport trimestriel (yfinance `calendar`)
+- [x] **Summer time CEST** — Timezone America/New_York (ZoneInfo) → gère automatiquement EST/EDT
+- [x] **Corrélation positions** — Max 1 position par secteur (tech/auto/ecommerce/crypto) — `config.SECTORS`
 
 ## 🟡 Important (performance et fiabilité)
 
