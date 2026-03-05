@@ -52,6 +52,9 @@ from strategies.llm_strategy import (
 from strategies.claude_llm_strategy import (
     run_claude_cycle, load_state as load_cla, save_state as save_cla,
 )
+from strategies.haiku_llm_strategy import (
+    run_haiku_cycle, load_state as load_hai, save_state as save_hai,
+)
 import live.bot as bot_a
 
 init(autoreset=True)
@@ -107,13 +110,15 @@ def _portfolio_value(state: dict, price_cache: dict = None) -> float:
 
 
 def print_contest_status(state_a: dict, state_b: dict, state_c: dict,
-                          state_d: dict, state_e: dict, daily_cache: dict = None):
+                          state_d: dict, state_e: dict, state_f: dict,
+                          daily_cache: dict = None):
     bots = [
         ("A — Supertrend+MR",  state_a),
         ("B — Momentum",       state_b),
         ("C — Breakout",       state_c),
         ("D — DeepSeek LLM",   state_d),
         ("E — Claude Sonnet",  state_e),
+        ("F — Claude Haiku",   state_f),
     ]
 
     print(f"\n{Fore.CYAN}{'='*72}")
@@ -138,16 +143,16 @@ def print_contest_status(state_a: dict, state_b: dict, state_c: dict,
 
     # Combined
     total_all = sum(
-        _portfolio_value(s, daily_cache) for s in [state_a, state_b, state_c, state_d, state_e]
+        _portfolio_value(s, daily_cache) for s in [state_a, state_b, state_c, state_d, state_e, state_f]
     )
     total_init = sum(
         s.get("initial_capital", INITIAL_CAPITAL_PER_BOT)
-        for s in [state_a, state_b, state_c, state_d, state_e]
+        for s in [state_a, state_b, state_c, state_d, state_e, state_f]
     )
     combined_perf = (total_all - total_init) / total_init * 100 if total_init > 0 else 0
     color = Fore.GREEN if combined_perf > 0 else Fore.RED
     print("-" * 72)
-    print(f"{'TOTAL (5000€ base)':<24} {'':>10} {total_all:>8.2f}€  "
+    print(f"{'TOTAL (6000€ base)':<24} {'':>10} {total_all:>8.2f}€  "
           f"{'':>10} {'':>8}  {color}{combined_perf:>+6.1f}%{Style.RESET_ALL}")
     print(f"{Fore.CYAN}{'='*72}{Style.RESET_ALL}\n")
 
@@ -174,6 +179,7 @@ def run():
     os.makedirs("logs/breakout",   exist_ok=True)
     os.makedirs("logs/llm",        exist_ok=True)
     os.makedirs("logs/claude_llm", exist_ok=True)
+    os.makedirs("logs/haiku_llm",  exist_ok=True)
 
     log(f"{'='*60}", "INFO")
     log("  MULTI-BOT CONTEST STARTED", "INFO")
@@ -182,7 +188,8 @@ def run():
     log(f"  Bot C: Donchian Breakout → logs/breakout/state.json", "INFO")
     log(f"  Bot D: DeepSeek Reasoner → logs/llm/state.json", "INFO")
     log(f"  Bot E: Claude Sonnet    → logs/claude_llm/state.json", "INFO")
-    log(f"  Capital initial: {INITIAL_CAPITAL_PER_BOT:.0f}€ × 5 = {INITIAL_CAPITAL_PER_BOT*5:.0f}€", "INFO")
+    log(f"  Bot F: Claude Haiku     → logs/haiku_llm/state.json", "INFO")
+    log(f"  Capital initial: {INITIAL_CAPITAL_PER_BOT:.0f}€ × 6 = {INITIAL_CAPITAL_PER_BOT*6:.0f}€", "INFO")
     log(f"{'='*60}", "INFO")
 
     state_a = load_state_a()
@@ -190,12 +197,14 @@ def run():
     state_c = load_brk()
     state_d = load_llm()
     state_e = load_cla()
+    state_f = load_hai()
 
     log(f"Bot A capital: {state_a['capital']:.2f}€ | Positions: {list(state_a['positions'].keys())}")
     log(f"Bot B capital: {state_b['capital']:.2f}€ | Positions: {list(state_b['positions'].keys())}")
     log(f"Bot C capital: {state_c['capital']:.2f}€ | Positions: {list(state_c['positions'].keys())}")
     log(f"Bot D capital: {state_d['capital']:.2f}€ | Positions: {list(state_d['positions'].keys())}")
     log(f"Bot E capital: {state_e['capital']:.2f}€ | Positions: {list(state_e['positions'].keys())}")
+    log(f"Bot F capital: {state_f['capital']:.2f}€ | Positions: {list(state_f['positions'].keys())}")
 
     while True:
         try:
@@ -313,11 +322,21 @@ def run():
                 f"Trades: {len(state_e['trades'])}"
             )
 
-            # ── 9. Contest summary ────────────────────────────────────────────
-            print_contest_status(state_a, state_b, state_c, state_d, state_e, ohlcv_daily)
+            # ── 9. Bot F: Claude Haiku ────────────────────────────────────────
+            log(f"\n{Fore.YELLOW}--- Bot F: Claude Haiku ---{Style.RESET_ALL}")
+            state_f = run_haiku_cycle(state_f, ohlcv_4h, macro)
+            save_hai(state_f)
+            log(
+                f"[F] Capital: {state_f['capital']:.2f}€ | "
+                f"Positions: {list(state_f['positions'].keys())} | "
+                f"Trades: {len(state_f['trades'])}"
+            )
 
-            # ── 10. Drawdown checks ───────────────────────────────────────────
-            for name, state in [("A", state_a), ("B", state_b), ("C", state_c), ("D", state_d), ("E", state_e)]:
+            # ── 10. Contest summary ───────────────────────────────────────────
+            print_contest_status(state_a, state_b, state_c, state_d, state_e, state_f, ohlcv_daily)
+
+            # ── 11. Drawdown checks ───────────────────────────────────────────
+            for name, state in [("A", state_a), ("B", state_b), ("C", state_c), ("D", state_d), ("E", state_e), ("F", state_f)]:
                 total = _portfolio_value(state, ohlcv_daily)
                 init = state.get("initial_capital", INITIAL_CAPITAL_PER_BOT)
                 dd = (total - init) / init
@@ -329,10 +348,10 @@ def run():
                         f"Seuil: {config.MAX_DRAWDOWN*100:.0f}%"
                     )
 
-            # ── 11. Snapshot journalier pour Bot A ────────────────────────────
+            # ── 12. Snapshot journalier pour Bot A ────────────────────────────
             bot_a._check_daily_snapshot(state_a)
 
-            # ── 12. Wait for next cycle ───────────────────────────────────────
+            # ── 13. Wait for next cycle ───────────────────────────────────────
             next_run = _next_cycle_utc()
             wait_sec = max(0, (next_run - datetime.now(timezone.utc).replace(tzinfo=None)).total_seconds())
             log(
@@ -348,6 +367,7 @@ def run():
             save_brk(state_c)
             save_llm(state_d)
             save_cla(state_e)
+            save_hai(state_f)
             break
         except Exception as e:
             log(f"Erreur inattendue: {e}", "WARN")

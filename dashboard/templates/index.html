@@ -508,6 +508,9 @@
   <button class="tab-btn" data-tab="e" style="--tab-color:#ff7b72" onclick="switchTab('e')">
     <span class="tab-dot" style="background:#ff7b72"></span>Bot E — Claude
   </button>
+  <button class="tab-btn" data-tab="f" style="--tab-color:#f7c948" onclick="switchTab('f')">
+    <span class="tab-dot" style="background:#f7c948"></span>Bot F — Haiku
+  </button>
   <button class="tab-btn" data-tab="contest" style="--tab-color:#d29922" onclick="switchTab('contest')">
     🏆 Contest
   </button>
@@ -1306,7 +1309,7 @@ function renderContest(data) {
 
   // ── Ranking table ──
   const sorted = [...bots].sort((a, b) => b.pnl_pct - a.pnl_pct);
-  const medals = ['🥇', '🥈', '🥉', '4️⃣', '5️⃣'];
+  const medals = ['🥇', '🥈', '🥉', '4️⃣', '5️⃣', '6️⃣'];
   document.getElementById('contestRanking').innerHTML = `<table class="contest-table">
     <thead><tr>
       <th></th><th>Bot</th><th>Capital libre</th><th>Total</th><th>P&L</th><th>Win rate</th><th>Trades</th>
