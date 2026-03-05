@@ -22,8 +22,7 @@ INITIAL_CAPITAL = 1000.0
 POSITION_SIZE = 100.0
 MAX_POSITIONS = 6
 CLAUDE_MODEL = os.getenv("CLAUDE_LLM_MODEL", "claude-sonnet-4-6")
-THINKING_BUDGET = 5000   # tokens de raisonnement par appel
-# Pricing Claude Sonnet 4.6 (les tokens thinking comptent comme output)
+# Pricing Claude Sonnet 4.6
 _INPUT_PRICE_PER_M  = 3.0   # $3 / 1M tokens
 _OUTPUT_PRICE_PER_M = 15.0  # $15 / 1M tokens
 
@@ -149,20 +148,14 @@ def _call_claude(prompt: str) -> tuple:
         client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
         response = client.messages.create(
             model=CLAUDE_MODEL,
-            max_tokens=THINKING_BUDGET + 1000,  # budget + marge pour le JSON
-            thinking={"type": "enabled", "budget_tokens": THINKING_BUDGET},
+            max_tokens=120,
             messages=[{"role": "user", "content": prompt}]
         )
-        # Extraire uniquement le bloc texte (ignorer les blocs thinking)
-        raw = ""
-        for block in response.content:
-            if block.type == "text":
-                raw = block.text.strip()
-                break
+        raw = response.content[0].text.strip()
         raw = re.sub(r"```(?:json)?\s*", "", raw).strip("`").strip()
         usage = {
             "input":  response.usage.input_tokens,
-            "output": response.usage.output_tokens,  # inclut les tokens thinking
+            "output": response.usage.output_tokens,
         }
         return json.loads(raw), usage
     except Exception as e:
