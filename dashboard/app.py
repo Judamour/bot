@@ -506,6 +506,7 @@ def background_thread():
                         bot_metrics["equity_curve"] = compute_equity_curve(bot_state)
                         bot_metrics["trades"] = list(reversed(bot_state.get("trades", [])))[:50]
                         bot_metrics["bot_id"] = bot_id
+                        bot_metrics["token_stats"] = bot_state.get("token_stats", None)
                         socketio.emit("bot_update", bot_metrics)
 
         except Exception:

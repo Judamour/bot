@@ -772,6 +772,7 @@ socket.on('bot_update', data => {
   updatePositions(data.positions || []);
   if (data.trades) updateTrades(data.trades);
   if (data.equity_curve) updatePortfolioChart(data.equity_curve, data.total_value);
+  updateTokenStats(data.token_stats || null);
   updateLastUpdate();
 });
 
