@@ -71,7 +71,7 @@ def run_backtest(symbol: str, timeframe: str = config.TIMEFRAME, days: int = con
         # Ouvrir position sur signal achat (si pas déjà en position)
         if row["signal"] == 1 and position is None and capital > 0:
             entry_price = row["close"] * (1 + config.SLIPPAGE)
-            pos = calculate_position_size(capital, entry_price, row["atr"])
+            pos = calculate_position_size(config.POSITION_SIZE_EUR, entry_price, row["atr"])
             fee_entry = entry_price * pos["size"] * config.EXCHANGE_FEE
             cost = pos["size"] * entry_price + fee_entry
             if cost <= capital:
@@ -233,11 +233,11 @@ def _plot_results(df, trades, equity_curve, equity_dates, symbol, timeframe):
     ax2.grid(alpha=0.3)
 
     plt.tight_layout()
-    os.makedirs("logs", exist_ok=True)
-    filename = f"logs/backtest_{symbol.replace('/', '_')}_{timeframe}.png"
+    os.makedirs("backtest/results", exist_ok=True)
+    filename = f"backtest/results/backtest_{symbol.replace('/', '_')}_{timeframe}.png"
     plt.savefig(filename, dpi=150, bbox_inches="tight")
     print(f"\n  Graphique sauvegardé : {filename}")
-    plt.show()
+    plt.close(fig)
 
 
 if __name__ == "__main__":
