@@ -29,7 +29,7 @@ _BOT_PATHS = {
 _BOT_NAMES = {"a": "Supertrend+MR", "b": "Momentum", "c": "Breakout"}
 _BOT_COLORS = {"a": "#58a6ff", "b": "#3fb950", "c": "#ffa657"}
 MULTI_LOG   = os.path.join(BASE_DIR, "logs", "multi_runner.log")
-MULTI_INITIAL_CAPITAL = 500.0
+MULTI_INITIAL_CAPITAL = 1000.0
 
 
 def load_bot_state(bot_id: str) -> dict:

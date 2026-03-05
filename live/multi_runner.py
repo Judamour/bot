@@ -46,7 +46,7 @@ init(autoreset=True)
 
 STATE_A_FILE = "logs/supertrend/state.json"
 CYCLE_HOURS_UTC = [3, 7, 11, 15, 19, 23]
-INITIAL_CAPITAL_PER_BOT = 500.0
+INITIAL_CAPITAL_PER_BOT = 1000.0
 
 
 # ── State A management ───────────────────────────────────────────────────────

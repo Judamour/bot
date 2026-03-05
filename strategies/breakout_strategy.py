@@ -21,7 +21,7 @@ import config
 from strategies.supertrend import compute_atr, compute_adx
 
 STATE_FILE = "logs/breakout/state.json"
-INITIAL_CAPITAL = 500.0
+INITIAL_CAPITAL = 1000.0
 
 # Assets — crypto only (strongest Donchian trends)
 BREAKOUT_SYMBOLS = [s for s in config.CRYPTO if s in ("BTC/EUR", "ETH/EUR", "SOL/EUR")]

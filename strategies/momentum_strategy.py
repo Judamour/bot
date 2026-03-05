@@ -20,7 +20,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
 
 STATE_FILE = "logs/momentum/state.json"
-INITIAL_CAPITAL = 500.0
+INITIAL_CAPITAL = 1000.0
 TOP_N = 4                     # Hold top N assets
 REBALANCE_MIN_DAYS = 6        # Minimum days between rebalances
 POSITION_WEIGHT = 1.0 / TOP_N  # 25% per position if TOP_N=4
