@@ -18,6 +18,7 @@ XSTOCKS = [
     "NVDAx/EUR", "AAPLx/EUR", "TSLAx/EUR", "MSFTx/EUR",
     "METAx/EUR", "AMZNx/EUR", "GOOGx/EUR",
     "PLTRx/EUR", "AMDx/EUR", "AVGOx/EUR",
+    "GLDx/EUR", "NFLXx/EUR", "CRWDx/EUR",
 ]
 
 SYMBOLS = CRYPTO + XSTOCKS
@@ -38,6 +39,8 @@ SECTORS = {
     "TSLAx/EUR": "auto",
     "PLTRx/EUR": "ai_data",
     "AMDx/EUR":  "semis",      "AVGOx/EUR": "semis",
+    "GLDx/EUR":  "gold",       "NFLXx/EUR": "media",
+    "CRWDx/EUR": "cybersec",
     "BTC/EUR":   "crypto",     "ETH/EUR":   "crypto",
     "SOL/EUR":   "crypto",     "BNB/EUR":   "crypto",
     "TON/EUR":   "crypto",     "LINK/EUR":  "crypto",
