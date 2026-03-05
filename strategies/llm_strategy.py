@@ -1,8 +1,9 @@
 """
-Bot D: LLM-Driven Strategy — DeepSeek V3
+Bot D: LLM-Driven Strategy — DeepSeek V3.2 Reasoner (R1)
 
 For each symbol at each cycle, sends full market context
 (indicators + macro + portfolio) and receives a BUY/SELL/HOLD decision in JSON.
+Uses deepseek-reasoner (chain-of-thought thinking mode).
 
 Capital: 1000€ | Position size: 100€ fixed | Max positions: 6
 """
@@ -21,7 +22,7 @@ STATE_FILE = "logs/llm/state.json"
 INITIAL_CAPITAL = 1000.0
 POSITION_SIZE = 100.0
 MAX_POSITIONS = 6
-DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
+DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-reasoner")
 
 
 def load_state() -> dict:
@@ -148,8 +149,7 @@ def _call_deepseek(prompt: str) -> dict:
         response = client.chat.completions.create(
             model=DEEPSEEK_MODEL,
             messages=[{"role": "user", "content": prompt}],
-            max_tokens=120,
-            temperature=0.1,
+            max_tokens=2048,  # reasoner needs room for chain-of-thought
         )
         raw = response.choices[0].message.content.strip()
         # Strip markdown code blocks if present

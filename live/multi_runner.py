@@ -11,7 +11,7 @@ Architecture:
          [strategies/momentum_strategy.py]
   Bot C: Donchian Breakout Turtle System 2     — 1000€ capital
          [strategies/breakout_strategy.py]
-  Bot D: LLM-Driven (DeepSeek V3)             — 1000€ capital
+  Bot D: LLM-Driven (DeepSeek V3.2 Reasoner)  — 1000€ capital
          [strategies/llm_strategy.py]
   Bot E: LLM-Driven (Claude Sonnet 4.6)       — 1000€ capital
          [strategies/claude_llm_strategy.py]
@@ -180,7 +180,7 @@ def run():
     log(f"  Bot A: Supertrend+MR    → logs/supertrend/state.json", "INFO")
     log(f"  Bot B: Momentum Rotation → logs/momentum/state.json", "INFO")
     log(f"  Bot C: Donchian Breakout → logs/breakout/state.json", "INFO")
-    log(f"  Bot D: DeepSeek LLM     → logs/llm/state.json", "INFO")
+    log(f"  Bot D: DeepSeek Reasoner → logs/llm/state.json", "INFO")
     log(f"  Bot E: Claude Sonnet    → logs/claude_llm/state.json", "INFO")
     log(f"  Capital initial: {INITIAL_CAPITAL_PER_BOT:.0f}€ × 5 = {INITIAL_CAPITAL_PER_BOT*5:.0f}€", "INFO")
     log(f"{'='*60}", "INFO")

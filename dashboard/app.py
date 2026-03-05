@@ -28,7 +28,7 @@ _BOT_PATHS = {
     "d": os.path.join(BASE_DIR, "logs", "llm",        "state.json"),
     "e": os.path.join(BASE_DIR, "logs", "claude_llm", "state.json"),
 }
-_BOT_NAMES = {"a": "Supertrend+MR", "b": "Momentum", "c": "Breakout", "d": "DeepSeek LLM", "e": "Claude Sonnet"}
+_BOT_NAMES = {"a": "Supertrend+MR", "b": "Momentum", "c": "Breakout", "d": "DeepSeek R1", "e": "Claude Sonnet"}
 _BOT_COLORS = {"a": "#58a6ff", "b": "#3fb950", "c": "#ffa657", "d": "#c792ea", "e": "#ff7b72"}
 MULTI_LOG   = os.path.join(BASE_DIR, "logs", "multi_runner.log")
 MULTI_INITIAL_CAPITAL = 1000.0
