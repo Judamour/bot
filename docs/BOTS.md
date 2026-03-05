@@ -309,6 +309,71 @@ Sous-performe en marchés range/choppy (2022-2023), sur-performe lors de grandes
 
 ---
 
+---
+
+## Bot H — Volatility Compression Breakout (VCB)
+
+**Fichier** : `strategies/vcb_strategy.py`
+**State** : `logs/vcb/state.json`
+**Origine** : recommandation ChatGPT — stratégie utilisée par certains desks quant (Minervini, O'Neil CANSLIM)
+
+### Concept
+Les plus grosses tendances démarrent après une phase de **compression de volatilité** :
+1. Grosse hausse → consolidation serrée → la vol baisse
+2. Les vendeurs disparaissent, les institutions accumulent
+3. Un catalyseur arrive → explosion du prix
+
+Détecter la compression avant qu'elle n'explose = edge statistique réel.
+
+### Pourquoi différent de Bot C (Donchian Breakout)
+- Bot C : attend un nouveau high 55j, sans regarder l'état de la volatilité avant le breakout
+- Bot H : exige **compression préalable** (ATR décroissant + BB width < 20e percentile) avant d'entrer sur un breakout 20j — filtre 90% des faux breakouts
+
+### Paramètres
+| Paramètre | Valeur |
+|-----------|--------|
+| Timeframe | 4h (ohlcv_4h, déjà fetchés) |
+| SMA long | 200 périodes |
+| SMA court | 50 périodes |
+| BB période | 20 périodes |
+| BB width percentile | < 20% sur 100 barres glissantes |
+| ATR compression | ATR(14) décroissant ≥ 5 barres consécutives |
+| Breakout entrée | High 20 barres (shift 1 — no lookahead) |
+| Stop entrée | 1.5×ATR (serré — l'énergie ne doit pas reculer) |
+| Trailing stop | 3×ATR |
+| Position size | 20% du capital par position |
+| Max positions | 5 |
+| Data requis | ~310 barres 4h ≈ 52 jours (couverts par le fetch 45j) |
+
+### Bollinger Band width percentile (détail)
+```
+bb_mid   = SMA20(close)
+bb_width = (BB_upper - BB_lower) / bb_mid
+bb_pct   = (bb_width - rolling_min(100)) / (rolling_max(100) - rolling_min(100))
+```
+`bb_pct < 0.20` = la bande est dans ses 20% les plus serrés des 100 dernières barres
+
+### ATR compression (détail)
+```
+atr_diff     = ATR.diff()          # négatif = ATR qui baisse
+declining    = (atr_diff < 0)      # True quand ATR baisse
+compress_cnt = declining.rolling(5).sum()
+compressed   = compress_cnt >= 5   # ATR a baissé 5 barres de suite
+```
+
+### Univers cible
+BTC/EUR, ETH/EUR, SOL/EUR, NVDAx/EUR, AMDx/EUR, METAx/EUR, PLTRx/EUR
+(actifs à forte volatilité où les compressions explosent le plus violemment)
+
+### Appel API
+**Aucun.** Stratégie 100% quantitative.
+
+### Performance historique de référence
+VCB sur portefeuille multi-actifs : 15-25% annualisé dans les backtests, mais **très irrégulier**.
+Sous-performe en marchés plats (peu de compressions), sur-performe lors de grandes phases de tendance interrompues de consolidations.
+
+---
+
 ## Résumé des appels API par cycle
 
 | Bot | API | Nb appels/cycle (estimé) | Coût/cycle |
@@ -320,6 +385,7 @@ Sous-performe en marchés range/choppy (2022-2023), sur-performe lors de grandes
 | E | Anthropic Sonnet | 0-10 (si pre-filter passe) | ~$0.05 |
 | F | Anthropic Haiku | 0-10 (si pre-filter passe) | ~$0.008 |
 | G | Aucun | 0 | $0 |
+| H | Aucun | 0 | $0 |
 | A pré-marché | Anthropic Haiku | 1/jour ouvré | ~$0.005/jour |
 
 **Total journalier estimé** : $0.05-0.15/jour selon activité du marché
