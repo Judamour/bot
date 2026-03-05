@@ -411,3 +411,7 @@ def run(host: str = "0.0.0.0", port: int = 5000, debug: bool = False):
 
     print(f"\n  Dashboard démarré → http://localhost:{port}\n")
     socketio.run(app, host=host, port=port, debug=debug, allow_unsafe_werkzeug=True)
+
+
+if __name__ == "__main__":
+    run()
