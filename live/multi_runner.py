@@ -27,7 +27,7 @@ import json
 import os
 import sys
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from colorama import Fore, Style, init
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -141,7 +141,7 @@ def print_contest_status(state_a: dict, state_b: dict, state_c: dict,
 # ── Timing ───────────────────────────────────────────────────────────────────
 
 def _next_cycle_utc() -> datetime:
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
     for h in CYCLE_HOURS_UTC:
         candidate = now.replace(hour=h, minute=0, second=0, microsecond=0)
         if candidate > now:
@@ -292,7 +292,7 @@ def run():
 
             # ── 10. Wait for next cycle ───────────────────────────────────────
             next_run = _next_cycle_utc()
-            wait_sec = max(0, (next_run - datetime.utcnow()).total_seconds())
+            wait_sec = max(0, (next_run - datetime.now(timezone.utc).replace(tzinfo=None)).total_seconds())
             log(
                 f"Prochain cycle: {next_run.strftime('%H:%M UTC')} "
                 f"(dans {int(wait_sec // 60)} min)"

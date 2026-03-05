@@ -170,28 +170,29 @@ def run_momentum_cycle(state: dict, daily_cache: dict, macro_context: dict = Non
             )
 
     # ── 5. Open positions for new top_N not already held ──
-    total_value = _portfolio_value(state, daily_cache)
-    target_per_pos = total_value * POSITION_WEIGHT
+    # Distribute available capital equally among positions to buy (includes fees)
+    to_buy = [s for s in top_symbols if s not in state["positions"]]
 
-    for symbol in top_symbols:
-        if symbol in state["positions"]:
-            continue  # Already held
-
+    for symbol in to_buy:
         df = daily_cache.get(symbol)
         if df is None:
             log(f"{symbol} — No data, skipping entry", "WARN")
             continue
 
+        # Remaining positions to buy (recalculate at each step)
+        remaining = len([s for s in to_buy if s not in state["positions"]])
+        target_per_pos = state["capital"] / remaining if remaining > 0 else 0
+
         entry_price = float(df["close"].iloc[-1]) * (1 + config.SLIPPAGE)
         if entry_price <= 0:
             continue
 
-        size = target_per_pos / entry_price
+        size = target_per_pos / (entry_price * (1 + config.EXCHANGE_FEE))
         fee_entry = entry_price * size * config.EXCHANGE_FEE
         total_cost = size * entry_price + fee_entry
 
-        if total_cost > state["capital"]:
-            log(f"{symbol} — Insufficient capital ({state['capital']:.2f}€ < {total_cost:.2f}€)", "WARN")
+        if total_cost > state["capital"] or size <= 0:
+            log(f"{symbol} — Insufficient capital ({state['capital']:.2f}€)", "WARN")
             continue
 
         state["capital"] -= total_cost
