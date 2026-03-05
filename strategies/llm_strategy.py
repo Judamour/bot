@@ -180,6 +180,11 @@ def _call_deepseek(prompt: str) -> tuple:
         return json.loads(raw), usage
     except Exception as e:
         log(f"DeepSeek API error: {e}", "WARN")
+        from live.notifier import is_credit_error, set_api_alert, clear_api_alert
+        if is_credit_error(e):
+            set_api_alert("deepseek", str(e))
+        else:
+            clear_api_alert("deepseek")
         return {"action": "HOLD", "confidence": 0, "reason": f"error: {e}"}, {"input": 0, "output": 0}
 
 

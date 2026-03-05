@@ -158,4 +158,9 @@ RAISON: [1-2 phrases : facteur décisif + filtres doux les plus significatifs]""
         return confirme, raison
 
     except Exception as e:
+        from live.notifier import is_credit_error, set_api_alert, clear_api_alert
+        if is_credit_error(e):
+            set_api_alert("anthropic", str(e))
+        else:
+            clear_api_alert("anthropic")
         return True, f"Erreur API Claude ({e}) — signal accepté"

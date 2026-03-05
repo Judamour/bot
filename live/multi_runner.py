@@ -210,6 +210,10 @@ def run():
         try:
             log(f"\n--- Cycle {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ---")
 
+            # ── 0. Resend pending API credit alerts ───────────────────────────
+            from live.notifier import resend_pending_alerts
+            resend_pending_alerts()
+
             # ── 1. Shared macro data (one fetch for all bots) ─────────────────
             log("Fetching shared macro context...")
             macro = fetch_macro_context()

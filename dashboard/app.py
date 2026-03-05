@@ -347,6 +347,20 @@ def api_claude():
     return jsonify({"events": list(reversed(events))[:50]})
 
 
+@app.route("/api/alerts")
+def api_alerts():
+    """Retourne les alertes API actives (crédits épuisés)."""
+    alerts_file = "logs/api_alerts.json"
+    alerts = {}
+    if os.path.exists(alerts_file):
+        try:
+            with open(alerts_file) as f:
+                alerts = json.load(f)
+        except Exception:
+            pass
+    return jsonify({"alerts": alerts})
+
+
 @app.route("/api/log")
 def api_log():
     log_file = MULTI_LOG if os.path.exists(MULTI_LOG) else LOG_FILE
