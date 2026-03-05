@@ -1,9 +1,12 @@
 """
 Bot D: LLM-Driven Strategy — DeepSeek V3.2 Reasoner (R1)
 
-For each symbol at each cycle, sends full market context
-(indicators + macro + portfolio) and receives a BUY/SELL/HOLD decision in JSON.
-Uses deepseek-reasoner (chain-of-thought thinking mode).
+Améliorations v2:
+- Stop loss ATR (2×ATR) + trailing stop automatique
+- Pre-filter: n'appelle le LLM que si signal potentiel ou position ouverte
+- Filtre heures de marché US pour les xStocks
+- 20 bougies dans le prompt (vs 5 avant)
+- ATR + stop courant dans le contexte du prompt
 
 Capital: 1000€ | Position size: 100€ fixed | Max positions: 6
 """
@@ -22,10 +25,11 @@ STATE_FILE = "logs/llm/state.json"
 INITIAL_CAPITAL = 1000.0
 POSITION_SIZE = 100.0
 MAX_POSITIONS = 6
+ATR_STOP_MULT = 2.0       # Stop = 2×ATR sous l'entrée
 DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-reasoner")
-# Pricing DeepSeek Reasoner V3.2 (cache miss, conservateur)
+# Pricing DeepSeek Reasoner V3.2
 _INPUT_PRICE_PER_M  = 0.28  # $0.28 / 1M tokens
-_OUTPUT_PRICE_PER_M = 0.42  # $0.42 / 1M tokens (inclut les reasoning tokens)
+_OUTPUT_PRICE_PER_M = 0.42  # $0.42 / 1M tokens (inclut reasoning tokens)
 
 
 def load_state() -> dict:
@@ -54,18 +58,28 @@ def log(msg: str, level: str = "INFO"):
         f.write(f"{ts} [{level}] {msg}\n")
 
 
+def _is_us_market_open() -> bool:
+    try:
+        from zoneinfo import ZoneInfo
+        et = datetime.now(ZoneInfo("America/New_York"))
+        return et.weekday() < 5 and 9 * 60 + 30 <= et.hour * 60 + et.minute <= 16 * 60
+    except Exception:
+        return True
+
+
 def _build_prompt(symbol: str, df_signals, state: dict, macro: dict) -> str:
     last = df_signals.iloc[-1]
     current_price = float(last["close"])
     st_dir = "UP" if float(last["supertrend_dir"]) == 1 else "DOWN"
     rsi = round(float(last["rsi"]), 1)
     adx = round(float(last["adx"]), 1)
+    atr = round(float(last["atr"]), 4)
     ema50 = round(float(last["ema50"]), 4)
     ema200 = round(float(last["ema200"]), 4)
     ema_vs = "EMA50>EMA200 (bullish)" if ema50 > ema200 else "EMA50<EMA200 (bearish)"
 
-    # Last 5 candles summary
-    recent = df_signals.tail(5)[["open", "high", "low", "close"]].round(4)
+    # Last 20 candles (vs 5 before — better trend context)
+    recent = df_signals.tail(20)[["open", "high", "low", "close"]].round(4)
     candles_txt = "\n".join(
         f"  {i+1}. O:{row['open']} H:{row['high']} L:{row['low']} C:{row['close']}"
         for i, (_, row) in enumerate(recent.iterrows())
@@ -88,19 +102,19 @@ def _build_prompt(symbol: str, df_signals, state: dict, macro: dict) -> str:
     n_positions = len(positions)
     slots_free = MAX_POSITIONS - n_positions
     has_position = symbol in positions
-    position_txt = ""
     if has_position:
         pos = positions[symbol]
         entry = pos.get("entry", 0)
+        stop = pos.get("stop", 0)
         pnl_pct = (current_price - entry) / entry * 100 if entry > 0 else 0
         position_txt = (
             f"CURRENT POSITION: entry={entry:.4f}€, "
-            f"unrealized PnL={pnl_pct:+.1f}%"
+            f"unrealized PnL={pnl_pct:+.1f}%, "
+            f"ATR stop={stop:.4f}€ (auto-managed)"
         )
     else:
         position_txt = "No open position"
 
-    # Win rate last 20 trades
     trades = state.get("trades", [])
     recent_trades = trades[-20:]
     wins = sum(1 for t in recent_trades if t.get("pnl", 0) > 0)
@@ -115,9 +129,10 @@ TECHNICAL INDICATORS:
 - Supertrend: {st_dir}
 - RSI(14): {rsi}
 - ADX(14): {adx}
+- ATR(14): {atr:.4f}€
 - EMA structure: {ema_vs}
 
-LAST 5 CANDLES (4h):
+LAST 20 CANDLES (4h):
 {candles_txt}
 
 MACRO CONTEXT:
@@ -133,8 +148,9 @@ PORTFOLIO:
 - {position_txt}
 
 RULES:
-- BUY only if: no position for this symbol AND capital >= 100€ AND free slots > 0
-- SELL only if: position exists
+- BUY only if: no position AND capital >= 100€ AND free slots > 0 AND Supertrend=UP AND ADX>18
+- SELL only if: position exists AND conditions deteriorating (Supertrend DOWN or RSI>75 or macro bearish)
+- ATR stop is automatic — do NOT sell just because price dropped slightly
 - HOLD in all other cases
 
 Respond ONLY with valid JSON (no markdown):
@@ -143,7 +159,7 @@ Respond ONLY with valid JSON (no markdown):
 
 
 def _call_deepseek(prompt: str) -> tuple:
-    """Returns (decision_dict, usage_dict). usage = {input, output} tokens."""
+    """Returns (decision_dict, usage_dict)."""
     try:
         from openai import OpenAI
         client = OpenAI(
@@ -153,13 +169,13 @@ def _call_deepseek(prompt: str) -> tuple:
         response = client.chat.completions.create(
             model=DEEPSEEK_MODEL,
             messages=[{"role": "user", "content": prompt}],
-            max_tokens=2048,  # reasoner a besoin d'espace pour le chain-of-thought
+            max_tokens=2048,
         )
         raw = response.choices[0].message.content.strip()
         raw = re.sub(r"```(?:json)?\s*", "", raw).strip("`").strip()
         usage = {
             "input":  response.usage.prompt_tokens,
-            "output": response.usage.completion_tokens,  # inclut reasoning tokens
+            "output": response.usage.completion_tokens,
         }
         return json.loads(raw), usage
     except Exception as e:
@@ -178,14 +194,62 @@ def run_llm_cycle(state: dict, ohlcv_4h: dict, macro: dict) -> dict:
         try:
             df_signals = generate_signals(df)
             if df_signals.empty:
-                log(f"{symbol} — No signals after indicators, skipping", "WARN")
                 continue
         except Exception as e:
             log(f"{symbol} — generate_signals error: {e}", "WARN")
             continue
 
-        current_price = float(df_signals.iloc[-1]["close"])
+        last = df_signals.iloc[-1]
+        current_price = float(last["close"])
+        atr = float(last["atr"])
         position = state["positions"].get(symbol)
+
+        # ── 1. Trailing stop update ──
+        if position and "stop" in position:
+            new_stop = round(current_price - ATR_STOP_MULT * atr, 4)
+            if new_stop > position["stop"]:
+                position["stop"] = new_stop
+                state["positions"][symbol] = position
+
+        # ── 2. Stop loss check (avant d'appeler le LLM) ──
+        if position:
+            stop = position.get("stop", 0)
+            if stop > 0 and current_price <= stop:
+                exit_price = stop * (1 - config.SLIPPAGE)
+                fee = exit_price * position["size"] * config.EXCHANGE_FEE
+                proceeds = exit_price * position["size"] - fee
+                pnl = proceeds - position["cost"]
+                state["capital"] += proceeds
+                state["trades"].append({
+                    "symbol": symbol,
+                    "entry_date": position["date"],
+                    "exit_date": str(datetime.now()),
+                    "entry_price": position["entry"],
+                    "exit_price": round(exit_price, 4),
+                    "pnl": round(pnl, 2),
+                    "reason": "stop_loss_atr",
+                    "result": "win" if pnl > 0 else "loss",
+                })
+                state["positions"].pop(symbol)
+                log(
+                    f"{'✓' if pnl > 0 else '✗'} STOP {symbol} | "
+                    f"{position['entry']:.4f}€ → {exit_price:.4f}€ | PnL: {pnl:+.2f}€",
+                    "SELL",
+                )
+                continue
+
+        # ── 3. Pre-filter: n'appelle le LLM que si pertinent ──
+        supertrend_up = float(last["supertrend_dir"]) == 1
+        adx_ok = float(last["adx"]) > 18
+        has_position = symbol in state["positions"]
+
+        if not has_position and not (supertrend_up and adx_ok):
+            continue  # HOLD implicite — pas d'appel API
+
+        # ── 4. Filtre heures de marché US pour les xStocks ──
+        if not has_position and symbol in config.XSTOCKS and not _is_us_market_open():
+            log(f"{symbol} — Marché US fermé, BUY ignoré")
+            continue
 
         prompt = _build_prompt(symbol, df_signals, state, macro)
         decision, usage = _call_deepseek(prompt)
@@ -214,17 +278,18 @@ def run_llm_cycle(state: dict, ohlcv_4h: dict, macro: dict) -> dict:
         )
 
         # ── SELL ──
-        if action == "SELL" and position:
+        if action == "SELL" and symbol in state["positions"]:
+            pos = state["positions"][symbol]
             exit_price = current_price * (1 - config.SLIPPAGE)
-            fee = exit_price * position["size"] * config.EXCHANGE_FEE
-            proceeds = exit_price * position["size"] - fee
-            pnl = proceeds - position["cost"]
+            fee = exit_price * pos["size"] * config.EXCHANGE_FEE
+            proceeds = exit_price * pos["size"] - fee
+            pnl = proceeds - pos["cost"]
             state["capital"] += proceeds
             state["trades"].append({
                 "symbol": symbol,
-                "entry_date": position["date"],
+                "entry_date": pos["date"],
                 "exit_date": str(datetime.now()),
-                "entry_price": position["entry"],
+                "entry_price": pos["entry"],
                 "exit_price": round(exit_price, 4),
                 "pnl": round(pnl, 2),
                 "reason": f"llm_sell | {reason[:80]}",
@@ -234,14 +299,13 @@ def run_llm_cycle(state: dict, ohlcv_4h: dict, macro: dict) -> dict:
             state["positions"].pop(symbol)
             log(
                 f"{'✓' if pnl > 0 else '✗'} CLOSE {symbol} | "
-                f"{position['entry']:.4f}€ → {exit_price:.4f}€ | PnL: {pnl:+.2f}€",
+                f"{pos['entry']:.4f}€ → {exit_price:.4f}€ | PnL: {pnl:+.2f}€",
                 "SELL",
             )
 
         # ── BUY ──
-        elif action == "BUY" and not position:
-            n_positions = len(state["positions"])
-            if n_positions >= MAX_POSITIONS:
+        elif action == "BUY" and symbol not in state["positions"]:
+            if len(state["positions"]) >= MAX_POSITIONS:
                 log(f"{symbol} — BUY blocked: max positions ({MAX_POSITIONS}) reached")
             elif state["capital"] < POSITION_SIZE:
                 log(f"{symbol} — BUY blocked: insufficient capital ({state['capital']:.2f}€)")
@@ -250,6 +314,7 @@ def run_llm_cycle(state: dict, ohlcv_4h: dict, macro: dict) -> dict:
                 size = POSITION_SIZE / (entry_price * (1 + config.EXCHANGE_FEE))
                 fee = entry_price * size * config.EXCHANGE_FEE
                 total_cost = size * entry_price + fee
+                stop_loss = round(entry_price - ATR_STOP_MULT * atr, 4)
                 state["capital"] -= total_cost
                 state["positions"][symbol] = {
                     "entry": round(entry_price, 4),
@@ -257,10 +322,12 @@ def run_llm_cycle(state: dict, ohlcv_4h: dict, macro: dict) -> dict:
                     "cost": round(total_cost, 4),
                     "date": str(datetime.now()),
                     "confidence": confidence,
+                    "stop": stop_loss,
+                    "atr": round(atr, 4),
                 }
                 log(
                     f"▲ BUY {symbol} | {entry_price:.4f}€ | {size:.6f} units | "
-                    f"Cost: {total_cost:.2f}€ | conf={confidence}",
+                    f"SL: {stop_loss:.4f}€ (2×ATR) | Cost: {total_cost:.2f}€ | conf={confidence}",
                     "BUY",
                 )
 

@@ -24,6 +24,8 @@ INITIAL_CAPITAL = 1000.0
 TOP_N = 4                     # Hold top N assets
 REBALANCE_MIN_DAYS = 6        # Minimum days between rebalances
 POSITION_WEIGHT = 1.0 / TOP_N  # 25% per position if TOP_N=4
+STOP_LOSS_PCT = 0.12          # Stop individuel : -12% depuis l'entrée
+VIX_PAUSE_THRESHOLD = 30      # Pause rebalancement si VIX > 30 (stress marché)
 
 
 def load_state() -> dict:
@@ -112,14 +114,58 @@ def run_momentum_cycle(state: dict, daily_cache: dict, macro_context: dict = Non
     Run one cycle of the momentum rotation strategy.
     Only rebalances weekly; otherwise tracks positions passively.
     """
-    # ── 1. Compute scores for all symbols ──
+    # ── 0. Stop loss individuel (-12%) — vérifié à chaque cycle ──
+    for symbol in list(state["positions"].keys()):
+        pos = state["positions"][symbol]
+        df = daily_cache.get(symbol)
+        if df is None:
+            continue
+        current_price = float(df["close"].iloc[-1])
+        entry = pos.get("entry", current_price)
+        loss_pct = (current_price - entry) / entry if entry > 0 else 0
+        if loss_pct <= -STOP_LOSS_PCT:
+            exit_price = current_price * (1 - config.SLIPPAGE)
+            fee_exit = exit_price * pos["size"] * config.EXCHANGE_FEE
+            proceeds = exit_price * pos["size"] - fee_exit
+            pnl = proceeds - pos["cost"]
+            state["capital"] += proceeds
+            state["trades"].append({
+                "symbol": symbol,
+                "entry_date": pos["date"],
+                "exit_date": str(datetime.now()),
+                "entry_price": pos["entry"],
+                "exit_price": exit_price,
+                "pnl": round(pnl, 2),
+                "reason": f"stop_loss_{STOP_LOSS_PCT*100:.0f}pct",
+                "result": "win" if pnl > 0 else "loss",
+            })
+            state["positions"].pop(symbol)
+            log(
+                f"✗ STOP {symbol} | {pos['entry']:.4f}€ → {exit_price:.4f}€ | "
+                f"PnL: {pnl:+.2f}€ | ({loss_pct*100:.1f}% < -{STOP_LOSS_PCT*100:.0f}%)",
+                "SELL",
+            )
+
+    # ── 1. Filtre macro (VIX + QQQ) ──
+    if macro_context:
+        vix = macro_context.get("vix", 0.0)
+        qqq_ok = macro_context.get("qqq_regime_ok", True)
+        if vix > VIX_PAUSE_THRESHOLD:
+            log(f"VIX={vix:.1f} > {VIX_PAUSE_THRESHOLD} — rebalancement suspendu (stress marché)", "WARN")
+            return state
+        if not qqq_ok:
+            qqq_desc = macro_context.get("qqq_description", "N/A")
+            log(f"QQQ régime baissier ({qqq_desc}) — rebalancement suspendu", "WARN")
+            return state
+
+    # ── 2. Compute scores for all symbols ──
     scores = {}
     for symbol in config.SYMBOLS:
         score = compute_momentum_score(symbol, daily_cache)
         if score == score:  # not NaN
             scores[symbol] = score
 
-    # ── 2. Rank — keep only positive absolute momentum ──
+    # ── 3. Rank — keep only positive absolute momentum ──
     positive = {s: sc for s, sc in scores.items() if sc > 0}
     ranked = sorted(positive.items(), key=lambda x: x[1], reverse=True)
     top_symbols = [s for s, _ in ranked[:TOP_N]]
@@ -129,7 +175,7 @@ def run_momentum_cycle(state: dict, daily_cache: dict, macro_context: dict = Non
         f"Top {TOP_N}: " + ", ".join(f"{s} {sc:.1%}" for s, sc in ranked[:TOP_N])
     )
 
-    # ── 3. Check if rebalance needed ──
+    # ── 4. Check if rebalance needed ──
     if not _needs_rebalance(state):
         log(f"No rebalance (last: {state.get('last_rebalance_date')}). "
             f"Holding: {list(state['positions'].keys())}")
@@ -137,7 +183,7 @@ def run_momentum_cycle(state: dict, daily_cache: dict, macro_context: dict = Non
 
     log("Weekly rebalance triggered!")
 
-    # ── 4. Close positions no longer in top_N ──
+    # ── 5. Close positions no longer in top_N ──
     for symbol in list(state["positions"].keys()):
         if symbol not in top_symbols:
             pos = state["positions"][symbol]
@@ -169,19 +215,17 @@ def run_momentum_cycle(state: dict, daily_cache: dict, macro_context: dict = Non
                 "BUY" if pnl > 0 else "SELL",
             )
 
-    # ── 5. Open positions for new top_N not already held ──
-    # Distribute available capital equally among positions to buy (includes fees)
+    # ── 6. Open positions for new top_N not already held ──
+    # Sizing basé sur la valeur totale du portefeuille / TOP_N (équilibré)
     to_buy = [s for s in top_symbols if s not in state["positions"]]
+    total_portfolio = _portfolio_value(state, daily_cache)
+    target_per_pos = total_portfolio / TOP_N  # Cible uniforme par position
 
     for symbol in to_buy:
         df = daily_cache.get(symbol)
         if df is None:
             log(f"{symbol} — No data, skipping entry", "WARN")
             continue
-
-        # Remaining positions to buy (recalculate at each step)
-        remaining = len([s for s in to_buy if s not in state["positions"]])
-        target_per_pos = state["capital"] / remaining if remaining > 0 else 0
 
         entry_price = float(df["close"].iloc[-1]) * (1 + config.SLIPPAGE)
         if entry_price <= 0:
@@ -212,7 +256,7 @@ def run_momentum_cycle(state: dict, daily_cache: dict, macro_context: dict = Non
     state["top_symbols"] = top_symbols
     state["last_rebalance_date"] = str(date.today())
 
-    # ── 6. Summary ──
+    # ── 7. Summary ──
     total = _portfolio_value(state, daily_cache)
     perf = (total - state["initial_capital"]) / state["initial_capital"] * 100
     log(

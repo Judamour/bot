@@ -36,6 +36,8 @@ ADX_MIN = 20          # Modern filter: only enter in trending market
 # Position sizing
 RISK_PCT = 0.01           # 1% of capital per trade (Turtle unit sizing)
 MAX_POSITION_PCT = 0.33   # Max 33% of capital per position
+VIX_SCALE_START = 20      # En dessous : risk_pct plein
+VIX_SCALE_END = 40        # Au dessus : risk_pct réduit à 50%
 
 
 def load_state() -> dict:
@@ -81,15 +83,16 @@ def add_donchian_indicators(df):
     return df.dropna()
 
 
-def _turtle_unit_size(capital: float, atr: float, entry_price: float) -> float:
+def _turtle_unit_size(capital: float, atr: float, entry_price: float,
+                      risk_pct: float = RISK_PCT) -> float:
     """
-    Turtle position sizing: size such that 1N move = 1% of capital.
-    dollar_per_N = RISK_PCT × capital
+    Turtle position sizing: size such that 1N move = risk_pct of capital.
+    dollar_per_N = risk_pct × capital
     size = dollar_per_N / atr
     """
     if atr <= 0 or entry_price <= 0:
         return 0.0
-    dollar_per_N = RISK_PCT * capital
+    dollar_per_N = risk_pct * capital
     size = dollar_per_N / atr
     # Cap to MAX_POSITION_PCT of capital
     max_size = (capital * MAX_POSITION_PCT) / entry_price
@@ -101,6 +104,18 @@ def run_breakout_cycle(state: dict, daily_cache: dict, macro_context: dict = Non
     Run one cycle of the Donchian breakout strategy.
     Checks each BREAKOUT_SYMBOL for exit and entry conditions.
     """
+    # ── Ajustement du risque selon le VIX ──
+    vix = macro_context.get("vix", 0.0) if macro_context else 0.0
+    if vix <= VIX_SCALE_START:
+        vix_risk_factor = 1.0
+    elif vix >= VIX_SCALE_END:
+        vix_risk_factor = 0.5
+    else:
+        vix_risk_factor = 1.0 - 0.5 * (vix - VIX_SCALE_START) / (VIX_SCALE_END - VIX_SCALE_START)
+    effective_risk_pct = round(RISK_PCT * vix_risk_factor, 4)
+    if vix > VIX_SCALE_START:
+        log(f"VIX={vix:.1f} → risk_pct réduit à {effective_risk_pct:.3%} (facteur {vix_risk_factor:.2f})", "WARN")
+
     for symbol in BREAKOUT_SYMBOLS:
         df = daily_cache.get(symbol)
         if df is None or len(df) < ENTRY_PERIOD + 10:
@@ -173,7 +188,7 @@ def run_breakout_cycle(state: dict, daily_cache: dict, macro_context: dict = Non
             if breakout and adx_ok:
                 entry_price = current_price * (1 + config.SLIPPAGE)
                 stop_loss = entry_price - STOP_ATR_MULT * atr
-                size = _turtle_unit_size(state["capital"], atr, entry_price)
+                size = _turtle_unit_size(state["capital"], atr, entry_price, effective_risk_pct)
 
                 if size <= 0:
                     log(f"{symbol} — Size=0 (ATR too large or capital too small)", "WARN")
