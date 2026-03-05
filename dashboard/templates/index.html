@@ -564,6 +564,11 @@
       <div class="metric-value neutral" id="metVix">—</div>
       <div class="metric-sub">Volatilité S&amp;P 500</div>
     </div>
+    <div class="metric-card" id="metLLMCard" style="display:none">
+      <div class="metric-label">Coût LLM</div>
+      <div class="metric-value neutral" id="metLLMCost">—</div>
+      <div class="metric-sub" id="metLLMSub">—</div>
+    </div>
   </div>
 
   <!-- Portfolio Curve (Trade Republic style) -->
@@ -1266,9 +1271,19 @@ function fetchBotState(botId) {
       updatePositions(data.positions || []);
       if (data.trades) updateTrades(data.trades);
       if (data.equity_curve) updatePortfolioChart(data.equity_curve, data.total_value);
+      updateTokenStats(data.token_stats || null);
       updateLastUpdate();
     })
     .catch(console.error);
+}
+
+function updateTokenStats(stats) {
+  const card = document.getElementById('metLLMCard');
+  if (!stats || !stats.total_calls) { card.style.display = 'none'; return; }
+  card.style.display = '';
+  const totalK = Math.round((stats.total_input + stats.total_output) / 1000);
+  setText('metLLMCost', `$${stats.est_cost_usd.toFixed(3)}`);
+  setText('metLLMSub', `${stats.total_calls} appels · ${totalK}k tokens`);
 }
 
 function fetchContest() {

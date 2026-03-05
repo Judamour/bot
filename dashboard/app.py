@@ -371,6 +371,7 @@ def api_bot(bot_id):
     metrics["bot_id"] = bot_id
     metrics["bot_name"] = _BOT_NAMES.get(bot_id, bot_id)
     metrics["bot_color"] = _BOT_COLORS.get(bot_id, "#58a6ff")
+    metrics["token_stats"] = state.get("token_stats", None)
     return jsonify(metrics)
 
 

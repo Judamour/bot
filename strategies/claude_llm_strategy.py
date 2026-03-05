@@ -22,6 +22,10 @@ INITIAL_CAPITAL = 1000.0
 POSITION_SIZE = 100.0
 MAX_POSITIONS = 6
 CLAUDE_MODEL = os.getenv("CLAUDE_LLM_MODEL", "claude-sonnet-4-6")
+THINKING_BUDGET = 5000   # tokens de raisonnement par appel
+# Pricing Claude Sonnet 4.6 (les tokens thinking comptent comme output)
+_INPUT_PRICE_PER_M  = 3.0   # $3 / 1M tokens
+_OUTPUT_PRICE_PER_M = 15.0  # $15 / 1M tokens
 
 
 def load_state() -> dict:
@@ -138,22 +142,32 @@ Respond ONLY with valid JSON (no markdown):
     return prompt
 
 
-def _call_claude(prompt: str) -> dict:
+def _call_claude(prompt: str) -> tuple:
+    """Returns (decision_dict, usage_dict). usage = {input, output} tokens."""
     try:
         from anthropic import Anthropic
         client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
         response = client.messages.create(
             model=CLAUDE_MODEL,
-            max_tokens=120,
+            max_tokens=THINKING_BUDGET + 1000,  # budget + marge pour le JSON
+            thinking={"type": "enabled", "budget_tokens": THINKING_BUDGET},
             messages=[{"role": "user", "content": prompt}]
         )
-        raw = response.content[0].text.strip()
-        # Strip markdown code blocks if present
+        # Extraire uniquement le bloc texte (ignorer les blocs thinking)
+        raw = ""
+        for block in response.content:
+            if block.type == "text":
+                raw = block.text.strip()
+                break
         raw = re.sub(r"```(?:json)?\s*", "", raw).strip("`").strip()
-        return json.loads(raw)
+        usage = {
+            "input":  response.usage.input_tokens,
+            "output": response.usage.output_tokens,  # inclut les tokens thinking
+        }
+        return json.loads(raw), usage
     except Exception as e:
         log(f"Claude API error: {e}", "WARN")
-        return {"action": "HOLD", "confidence": 0, "reason": f"error: {e}"}
+        return {"action": "HOLD", "confidence": 0, "reason": f"error: {e}"}, {"input": 0, "output": 0}
 
 
 def run_claude_cycle(state: dict, ohlcv_4h: dict, macro: dict) -> dict:
@@ -177,13 +191,30 @@ def run_claude_cycle(state: dict, ohlcv_4h: dict, macro: dict) -> dict:
         position = state["positions"].get(symbol)
 
         prompt = _build_prompt(symbol, df_signals, state, macro)
-        decision = _call_claude(prompt)
+        decision, usage = _call_claude(prompt)
+
+        # ── Token tracking ──
+        stats = state.setdefault("token_stats", {
+            "total_input": 0, "total_output": 0, "total_calls": 0, "est_cost_usd": 0.0
+        })
+        stats["total_input"]  += usage["input"]
+        stats["total_output"] += usage["output"]
+        stats["total_calls"]  += 1
+        stats["est_cost_usd"] = round(
+            stats["est_cost_usd"]
+            + usage["input"]  / 1_000_000 * _INPUT_PRICE_PER_M
+            + usage["output"] / 1_000_000 * _OUTPUT_PRICE_PER_M,
+            4
+        )
 
         action = decision.get("action", "HOLD").upper()
         confidence = decision.get("confidence", 0)
         reason = decision.get("reason", "")
 
-        log(f"{symbol} | {current_price:.4f}€ | {action} (conf={confidence}) | {reason}")
+        log(
+            f"{symbol} | {current_price:.4f}€ | {action} (conf={confidence}) | {reason} "
+            f"[↑{usage['input']}+{usage['output']} tok | cumul ${stats['est_cost_usd']:.3f}]"
+        )
 
         # ── SELL ──
         if action == "SELL" and position:

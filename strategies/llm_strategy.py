@@ -23,6 +23,9 @@ INITIAL_CAPITAL = 1000.0
 POSITION_SIZE = 100.0
 MAX_POSITIONS = 6
 DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-reasoner")
+# Pricing DeepSeek Reasoner V3.2 (cache miss, conservateur)
+_INPUT_PRICE_PER_M  = 0.28  # $0.28 / 1M tokens
+_OUTPUT_PRICE_PER_M = 0.42  # $0.42 / 1M tokens (inclut les reasoning tokens)
 
 
 def load_state() -> dict:
@@ -139,7 +142,8 @@ Respond ONLY with valid JSON (no markdown):
     return prompt
 
 
-def _call_deepseek(prompt: str) -> dict:
+def _call_deepseek(prompt: str) -> tuple:
+    """Returns (decision_dict, usage_dict). usage = {input, output} tokens."""
     try:
         from openai import OpenAI
         client = OpenAI(
@@ -149,15 +153,18 @@ def _call_deepseek(prompt: str) -> dict:
         response = client.chat.completions.create(
             model=DEEPSEEK_MODEL,
             messages=[{"role": "user", "content": prompt}],
-            max_tokens=2048,  # reasoner needs room for chain-of-thought
+            max_tokens=2048,  # reasoner a besoin d'espace pour le chain-of-thought
         )
         raw = response.choices[0].message.content.strip()
-        # Strip markdown code blocks if present
         raw = re.sub(r"```(?:json)?\s*", "", raw).strip("`").strip()
-        return json.loads(raw)
+        usage = {
+            "input":  response.usage.prompt_tokens,
+            "output": response.usage.completion_tokens,  # inclut reasoning tokens
+        }
+        return json.loads(raw), usage
     except Exception as e:
         log(f"DeepSeek API error: {e}", "WARN")
-        return {"action": "HOLD", "confidence": 0, "reason": f"error: {e}"}
+        return {"action": "HOLD", "confidence": 0, "reason": f"error: {e}"}, {"input": 0, "output": 0}
 
 
 def run_llm_cycle(state: dict, ohlcv_4h: dict, macro: dict) -> dict:
@@ -181,13 +188,30 @@ def run_llm_cycle(state: dict, ohlcv_4h: dict, macro: dict) -> dict:
         position = state["positions"].get(symbol)
 
         prompt = _build_prompt(symbol, df_signals, state, macro)
-        decision = _call_deepseek(prompt)
+        decision, usage = _call_deepseek(prompt)
+
+        # ── Token tracking ──
+        stats = state.setdefault("token_stats", {
+            "total_input": 0, "total_output": 0, "total_calls": 0, "est_cost_usd": 0.0
+        })
+        stats["total_input"]  += usage["input"]
+        stats["total_output"] += usage["output"]
+        stats["total_calls"]  += 1
+        stats["est_cost_usd"] = round(
+            stats["est_cost_usd"]
+            + usage["input"]  / 1_000_000 * _INPUT_PRICE_PER_M
+            + usage["output"] / 1_000_000 * _OUTPUT_PRICE_PER_M,
+            4
+        )
 
         action = decision.get("action", "HOLD").upper()
         confidence = decision.get("confidence", 0)
         reason = decision.get("reason", "")
 
-        log(f"{symbol} | {current_price:.4f}€ | {action} (conf={confidence}) | {reason}")
+        log(
+            f"{symbol} | {current_price:.4f}€ | {action} (conf={confidence}) | {reason} "
+            f"[↑{usage['input']}+{usage['output']} tok | cumul ${stats['est_cost_usd']:.3f}]"
+        )
 
         # ── SELL ──
         if action == "SELL" and position:
