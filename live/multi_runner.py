@@ -1,9 +1,9 @@
 """
 Multi-Bot Contest Runner
-Runs 4 trading strategies simultaneously with a shared market data hub.
+Runs 5 trading strategies simultaneously with a shared market data hub.
 
 Architecture:
-  One MarketSnapshot (macro + OHLCV) → Bot A + Bot B + Bot C + Bot D
+  One MarketSnapshot (macro + OHLCV) → Bot A + Bot B + Bot C + Bot D + Bot E
 
   Bot A: Supertrend + filters + MR RSI(2)     — 1000€ capital
          [live/bot.py — unchanged logic]
@@ -13,9 +13,11 @@ Architecture:
          [strategies/breakout_strategy.py]
   Bot D: LLM-Driven (DeepSeek V3)             — 1000€ capital
          [strategies/llm_strategy.py]
+  Bot E: LLM-Driven (Claude Sonnet 4.6)       — 1000€ capital
+         [strategies/claude_llm_strategy.py]
 
 API efficiency: 1× macro fetch + 2× OHLCV cache (4h + daily)
-vs 4 independent bots × 2 fetches = 8× → 4× savings
+vs 5 independent bots × 2 fetches = 10× → 5× savings
 
 Usage:
     python live/multi_runner.py
@@ -25,6 +27,7 @@ State files:
     logs/momentum/state.json     — Bot B
     logs/breakout/state.json     — Bot C
     logs/llm/state.json          — Bot D
+    logs/claude_llm/state.json   — Bot E
 """
 import json
 import os
@@ -45,6 +48,9 @@ from strategies.breakout_strategy import (
 )
 from strategies.llm_strategy import (
     run_llm_cycle, load_state as load_llm, save_state as save_llm,
+)
+from strategies.claude_llm_strategy import (
+    run_claude_cycle, load_state as load_cla, save_state as save_cla,
 )
 import live.bot as bot_a
 
@@ -101,12 +107,13 @@ def _portfolio_value(state: dict, price_cache: dict = None) -> float:
 
 
 def print_contest_status(state_a: dict, state_b: dict, state_c: dict,
-                          state_d: dict, daily_cache: dict = None):
+                          state_d: dict, state_e: dict, daily_cache: dict = None):
     bots = [
-        ("A — Supertrend+MR", state_a),
-        ("B — Momentum",      state_b),
-        ("C — Breakout",      state_c),
-        ("D — DeepSeek LLM",  state_d),
+        ("A — Supertrend+MR",  state_a),
+        ("B — Momentum",       state_b),
+        ("C — Breakout",       state_c),
+        ("D — DeepSeek LLM",   state_d),
+        ("E — Claude Sonnet",  state_e),
     ]
 
     print(f"\n{Fore.CYAN}{'='*72}")
@@ -131,16 +138,16 @@ def print_contest_status(state_a: dict, state_b: dict, state_c: dict,
 
     # Combined
     total_all = sum(
-        _portfolio_value(s, daily_cache) for s in [state_a, state_b, state_c, state_d]
+        _portfolio_value(s, daily_cache) for s in [state_a, state_b, state_c, state_d, state_e]
     )
     total_init = sum(
         s.get("initial_capital", INITIAL_CAPITAL_PER_BOT)
-        for s in [state_a, state_b, state_c, state_d]
+        for s in [state_a, state_b, state_c, state_d, state_e]
     )
     combined_perf = (total_all - total_init) / total_init * 100 if total_init > 0 else 0
     color = Fore.GREEN if combined_perf > 0 else Fore.RED
     print("-" * 72)
-    print(f"{'TOTAL (4000€ base)':<24} {'':>10} {total_all:>8.2f}€  "
+    print(f"{'TOTAL (5000€ base)':<24} {'':>10} {total_all:>8.2f}€  "
           f"{'':>10} {'':>8}  {color}{combined_perf:>+6.1f}%{Style.RESET_ALL}")
     print(f"{Fore.CYAN}{'='*72}{Style.RESET_ALL}\n")
 
@@ -166,6 +173,7 @@ def run():
     os.makedirs("logs/momentum",   exist_ok=True)
     os.makedirs("logs/breakout",   exist_ok=True)
     os.makedirs("logs/llm",        exist_ok=True)
+    os.makedirs("logs/claude_llm", exist_ok=True)
 
     log(f"{'='*60}", "INFO")
     log("  MULTI-BOT CONTEST STARTED", "INFO")
@@ -173,18 +181,21 @@ def run():
     log(f"  Bot B: Momentum Rotation → logs/momentum/state.json", "INFO")
     log(f"  Bot C: Donchian Breakout → logs/breakout/state.json", "INFO")
     log(f"  Bot D: DeepSeek LLM     → logs/llm/state.json", "INFO")
-    log(f"  Capital initial: {INITIAL_CAPITAL_PER_BOT:.0f}€ × 4 = {INITIAL_CAPITAL_PER_BOT*4:.0f}€", "INFO")
+    log(f"  Bot E: Claude Sonnet    → logs/claude_llm/state.json", "INFO")
+    log(f"  Capital initial: {INITIAL_CAPITAL_PER_BOT:.0f}€ × 5 = {INITIAL_CAPITAL_PER_BOT*5:.0f}€", "INFO")
     log(f"{'='*60}", "INFO")
 
     state_a = load_state_a()
     state_b = load_mom()
     state_c = load_brk()
     state_d = load_llm()
+    state_e = load_cla()
 
     log(f"Bot A capital: {state_a['capital']:.2f}€ | Positions: {list(state_a['positions'].keys())}")
     log(f"Bot B capital: {state_b['capital']:.2f}€ | Positions: {list(state_b['positions'].keys())}")
     log(f"Bot C capital: {state_c['capital']:.2f}€ | Positions: {list(state_c['positions'].keys())}")
     log(f"Bot D capital: {state_d['capital']:.2f}€ | Positions: {list(state_d['positions'].keys())}")
+    log(f"Bot E capital: {state_e['capital']:.2f}€ | Positions: {list(state_e['positions'].keys())}")
 
     while True:
         try:
@@ -292,11 +303,21 @@ def run():
                 f"Trades: {len(state_d['trades'])}"
             )
 
-            # ── 8. Contest summary ────────────────────────────────────────────
-            print_contest_status(state_a, state_b, state_c, state_d, ohlcv_daily)
+            # ── 8. Bot E: Claude Sonnet ───────────────────────────────────────
+            log(f"\n{Fore.RED}--- Bot E: Claude Sonnet ---{Style.RESET_ALL}")
+            state_e = run_claude_cycle(state_e, ohlcv_4h, macro)
+            save_cla(state_e)
+            log(
+                f"[E] Capital: {state_e['capital']:.2f}€ | "
+                f"Positions: {list(state_e['positions'].keys())} | "
+                f"Trades: {len(state_e['trades'])}"
+            )
 
-            # ── 9. Drawdown checks ────────────────────────────────────────────
-            for name, state in [("A", state_a), ("B", state_b), ("C", state_c), ("D", state_d)]:
+            # ── 9. Contest summary ────────────────────────────────────────────
+            print_contest_status(state_a, state_b, state_c, state_d, state_e, ohlcv_daily)
+
+            # ── 10. Drawdown checks ───────────────────────────────────────────
+            for name, state in [("A", state_a), ("B", state_b), ("C", state_c), ("D", state_d), ("E", state_e)]:
                 total = _portfolio_value(state, ohlcv_daily)
                 init = state.get("initial_capital", INITIAL_CAPITAL_PER_BOT)
                 dd = (total - init) / init
@@ -308,10 +329,10 @@ def run():
                         f"Seuil: {config.MAX_DRAWDOWN*100:.0f}%"
                     )
 
-            # ── 10. Snapshot journalier pour Bot A ────────────────────────────
+            # ── 11. Snapshot journalier pour Bot A ────────────────────────────
             bot_a._check_daily_snapshot(state_a)
 
-            # ── 11. Wait for next cycle ───────────────────────────────────────
+            # ── 12. Wait for next cycle ───────────────────────────────────────
             next_run = _next_cycle_utc()
             wait_sec = max(0, (next_run - datetime.now(timezone.utc).replace(tzinfo=None)).total_seconds())
             log(
@@ -326,6 +347,7 @@ def run():
             save_mom(state_b)
             save_brk(state_c)
             save_llm(state_d)
+            save_cla(state_e)
             break
         except Exception as e:
             log(f"Erreur inattendue: {e}", "WARN")
