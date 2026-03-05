@@ -10,14 +10,14 @@ API_SECRET = os.getenv("KRAKEN_API_SECRET", "")
 
 # ── Paires tradées ──────────────────────────────────────────────────────────
 # Format Kraken : "BTC/EUR", "ETH/EUR", "SOL/EUR"
-CRYPTO = ["BTC/EUR", "ETH/EUR", "SOL/EUR", "BNB/EUR", "TON/EUR", "INJ/EUR", "LINK/EUR", "AVAX/EUR"]
+CRYPTO = ["BTC/EUR", "ETH/EUR", "SOL/EUR", "BNB/EUR", "TON/EUR", "LINK/EUR", "AVAX/EUR"]
 
 # xStocks : actions tokenisées sur Kraken, tradées en EUR 24/7
 # Symboles Kraken : suffixe "x" (ex: NVDAx/EUR)
 XSTOCKS = [
     "NVDAx/EUR", "AAPLx/EUR", "TSLAx/EUR", "MSFTx/EUR",
     "METAx/EUR", "AMZNx/EUR", "GOOGx/EUR",
-    "PLTRx/EUR", "AMDx/EUR", "AVGOx/EUR", "COINx/EUR",
+    "PLTRx/EUR", "AMDx/EUR", "AVGOx/EUR",
 ]
 
 SYMBOLS = CRYPTO + XSTOCKS
@@ -38,11 +38,10 @@ SECTORS = {
     "TSLAx/EUR": "auto",
     "PLTRx/EUR": "ai_data",
     "AMDx/EUR":  "semis",      "AVGOx/EUR": "semis",
-    "COINx/EUR": "crypto_equity",
     "BTC/EUR":   "crypto",     "ETH/EUR":   "crypto",
     "SOL/EUR":   "crypto",     "BNB/EUR":   "crypto",
-    "TON/EUR":   "crypto",     "INJ/EUR":   "crypto",
-    "LINK/EUR":  "crypto",     "AVAX/EUR":  "crypto",
+    "TON/EUR":   "crypto",     "LINK/EUR":  "crypto",
+    "AVAX/EUR":  "crypto",
 }
 
 # ── Timeframe ───────────────────────────────────────────────────────────────
