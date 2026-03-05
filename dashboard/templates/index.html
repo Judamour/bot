@@ -430,6 +430,7 @@
   </div>
   <div class="price-ticker" id="priceTicker"></div>
   <div class="sys-stats" id="sysStats"></div>
+  <div id="nextAnalysis" style="font-size:11px;color:var(--muted);white-space:nowrap">⏱ —</div>
   <div class="last-update" id="lastUpdate">—</div>
 </header>
 
@@ -1103,6 +1104,35 @@ function init() {
   setInterval(updateSysStats, 30000);
   fetchClaude();
   setInterval(fetchClaude, 60000);
+
+  // ── Countdown prochaine analyse ──────────────────────────────────────────
+  let _nextAnalysisTs = null;
+
+  function fetchNextAnalysis() {
+    fetch('/api/health').then(r => r.json()).then(d => {
+      if (d.next_analysis_utc) {
+        _nextAnalysisTs = new Date(d.next_analysis_utc + 'Z');
+      }
+    }).catch(() => {});
+  }
+
+  function updateCountdown() {
+    const el = document.getElementById('nextAnalysis');
+    if (!_nextAnalysisTs) { el.textContent = '⏱ —'; return; }
+    const now = new Date();
+    let diff = Math.max(0, Math.floor((_nextAnalysisTs - now) / 1000));
+    const h = Math.floor(diff / 3600);
+    const m = Math.floor((diff % 3600) / 60);
+    const s = diff % 60;
+    const pad = n => String(n).padStart(2, '0');
+    const color = diff < 300 ? 'var(--green)' : 'var(--muted)';
+    el.innerHTML = `<span style="color:${color}">⏱ Prochain scan ${h > 0 ? h + 'h' : ''}${pad(m)}m${pad(s)}s</span>`;
+    if (diff === 0) fetchNextAnalysis();
+  }
+
+  fetchNextAnalysis();
+  setInterval(fetchNextAnalysis, 60000);
+  setInterval(updateCountdown, 1000);
 }
 
 document.addEventListener('DOMContentLoaded', init);

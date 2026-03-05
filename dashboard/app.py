@@ -179,10 +179,27 @@ def api_health():
                         break
         except Exception:
             pass
+    # Prochain cycle (heures UTC fixes : 03 07 11 15 19 23)
+    CYCLE_HOURS_UTC = [3, 7, 11, 15, 19, 23]
+    now_utc = datetime.utcnow()
+    next_run = None
+    for h in CYCLE_HOURS_UTC:
+        candidate = now_utc.replace(hour=h, minute=0, second=0, microsecond=0)
+        if candidate > now_utc:
+            next_run = candidate
+            break
+    if next_run is None:
+        next_run = (now_utc + timedelta(days=1)).replace(
+            hour=CYCLE_HOURS_UTC[0], minute=0, second=0, microsecond=0
+        )
+    seconds_until = max(0, int((next_run - now_utc).total_seconds()))
+
     state = load_state()
     return jsonify({
         "bot_running": bot_active,
         "last_analysis": last_analysis,
+        "next_analysis_utc": next_run.isoformat(),
+        "seconds_until_next": seconds_until,
         "open_positions": len(state.get("positions", {})),
         "timestamp": datetime.now().isoformat(),
     })

@@ -788,8 +788,22 @@ def run():
     state = load_state()
     log(f"Capital de départ: {state['capital']:.2f}€")
 
-    intervals = {"1m": 60, "5m": 300, "15m": 900, "1h": 3600, "4h": 14400, "1d": 86400}
-    sleep_time = intervals.get(config.TIMEFRAME, 3600)
+    # Heures UTC des cycles : alignées sur 10h ET + 14h ET (US market) + crypto 24/7
+    # 03:00 | 07:00 | 11:00 | 15:00(=10hET) | 19:00(=14hET) | 23:00
+    CYCLE_HOURS_UTC = [3, 7, 11, 15, 19, 23]
+
+    def _next_cycle_utc() -> datetime:
+        """Retourne le prochain slot UTC du cycle (arrondi à l'heure exacte)."""
+        now = datetime.utcnow()
+        for h in CYCLE_HOURS_UTC:
+            candidate = now.replace(hour=h, minute=0, second=0, microsecond=0)
+            if candidate > now:
+                return candidate
+        # Prochain jour
+        tomorrow = (now + timedelta(days=1)).replace(
+            hour=CYCLE_HOURS_UTC[0], minute=0, second=0, microsecond=0
+        )
+        return tomorrow
 
     while True:
         try:
@@ -883,8 +897,10 @@ def run():
             _check_daily_snapshot(state)
             _check_premarket(state, btc_context=btc_context, vix=vix, fear_greed=fear_greed)
 
-            log(f"Prochaine analyse dans {sleep_time // 60} minutes...")
-            time.sleep(sleep_time)
+            next_run = _next_cycle_utc()
+            wait_sec = max(0, (next_run - datetime.utcnow()).total_seconds())
+            log(f"Prochaine analyse à {next_run.strftime('%H:%M UTC')} (dans {int(wait_sec // 60)} min)")
+            time.sleep(wait_sec)
 
         except KeyboardInterrupt:
             log("Bot arrêté manuellement.")
