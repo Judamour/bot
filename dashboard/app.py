@@ -20,6 +20,32 @@ STATE_FILE   = os.path.join(BASE_DIR, "logs", "paper_state.json")
 LOG_FILE     = os.path.join(BASE_DIR, "logs", "bot.log")
 SIGNALS_FILE = os.path.join(BASE_DIR, "logs", "signals.jsonl")
 
+# ── Multi-bot contest ──────────────────────────────────────────────────────────
+_BOT_PATHS = {
+    "a": os.path.join(BASE_DIR, "logs", "supertrend", "state.json"),
+    "b": os.path.join(BASE_DIR, "logs", "momentum",   "state.json"),
+    "c": os.path.join(BASE_DIR, "logs", "breakout",   "state.json"),
+}
+_BOT_NAMES = {"a": "Supertrend+MR", "b": "Momentum", "c": "Breakout"}
+_BOT_COLORS = {"a": "#58a6ff", "b": "#3fb950", "c": "#ffa657"}
+MULTI_LOG   = os.path.join(BASE_DIR, "logs", "multi_runner.log")
+MULTI_INITIAL_CAPITAL = 500.0
+
+
+def load_bot_state(bot_id: str) -> dict:
+    path = _BOT_PATHS.get(bot_id)
+    # Fallback to legacy path for Bot A
+    if bot_id == "a" and (not path or not os.path.exists(path)):
+        path = STATE_FILE
+    if path and os.path.exists(path):
+        try:
+            with open(path) as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {"capital": MULTI_INITIAL_CAPITAL, "positions": {},
+            "trades": [], "initial_capital": MULTI_INITIAL_CAPITAL}
+
 app = Flask(__name__)
 app.config["SECRET_KEY"] = "bot-trading-dashboard"
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
@@ -320,20 +346,69 @@ def api_claude():
 
 @app.route("/api/log")
 def api_log():
+    log_file = MULTI_LOG if os.path.exists(MULTI_LOG) else LOG_FILE
     lines = []
-    if os.path.exists(LOG_FILE):
+    if os.path.exists(log_file):
         try:
-            with open(LOG_FILE) as f:
+            with open(log_file) as f:
                 lines = f.readlines()[-50:]
         except Exception:
             pass
     return jsonify({"lines": [l.rstrip() for l in lines]})
 
 
+@app.route("/api/bot/<bot_id>")
+def api_bot(bot_id):
+    """Métriques pour un bot spécifique (a, b ou c)."""
+    if bot_id not in _BOT_PATHS:
+        return jsonify({"error": "Bot inconnu"}), 404
+    state = load_bot_state(bot_id)
+    metrics = compute_metrics(state, _live_prices)
+    metrics["equity_curve"] = compute_equity_curve(state)
+    metrics["trades"] = list(reversed(state.get("trades", [])))[:50]
+    metrics["bot_id"] = bot_id
+    metrics["bot_name"] = _BOT_NAMES.get(bot_id, bot_id)
+    metrics["bot_color"] = _BOT_COLORS.get(bot_id, "#58a6ff")
+    return jsonify(metrics)
+
+
+@app.route("/api/contest")
+def api_contest():
+    """Vue d'ensemble des 3 bots — classement et courbes d'équité."""
+    bots_data = []
+    for bot_id in ["a", "b", "c"]:
+        state = load_bot_state(bot_id)
+        metrics = compute_metrics(state, _live_prices)
+        bots_data.append({
+            "id": bot_id,
+            "name": _BOT_NAMES[bot_id],
+            "color": _BOT_COLORS[bot_id],
+            "capital": metrics["capital"],
+            "total_value": metrics["total_value"],
+            "initial_capital": metrics["initial_capital"],
+            "pnl_pct": metrics["pnl_pct"],
+            "pnl_eur": metrics["pnl_eur"],
+            "win_rate": metrics["win_rate"],
+            "open_trades": metrics["open_trades"],
+            "total_trades": metrics["total_trades"],
+            "equity_curve": compute_equity_curve(state),
+        })
+    total_value   = sum(b["total_value"]   for b in bots_data)
+    total_initial = sum(b["initial_capital"] for b in bots_data)
+    combined_pnl  = (total_value - total_initial) / total_initial * 100 if total_initial else 0
+    return jsonify({
+        "bots": bots_data,
+        "total_value": round(total_value, 2),
+        "total_initial": round(total_initial, 2),
+        "combined_pnl_pct": round(combined_pnl, 2),
+    })
+
+
 # ── Background Thread ─────────────────────────────────────────────────────────
 
 _live_prices: dict = {}
 _state_mtime: float = 0.0
+_bot_mtimes: dict = {}
 _log_size: int = 0
 _chart_cache: dict = {}          # {symbol: (timestamp, payload)}
 _fear_greed_cache: dict = {"score": None, "label": "—"}
@@ -345,7 +420,7 @@ FG_POLL_INTERVAL = 300           # Fear & Greed toutes les 5 min
 
 def background_thread():
     """Surveille les fichiers et émet les mises à jour WebSocket."""
-    global _state_mtime, _log_size, _live_prices, _fear_greed_cache, _vix_cache
+    global _state_mtime, _log_size, _live_prices, _fear_greed_cache, _vix_cache, _bot_mtimes
     _fg_last_poll = 0
 
     import ccxt
@@ -406,14 +481,28 @@ def background_thread():
                     metrics["trades"] = list(reversed(state.get("trades", [])))[:50]
                     socketio.emit("state_update", metrics)
 
-            # ── Nouvelles lignes de log ──
-            if os.path.exists(LOG_FILE):
-                size = os.path.getsize(LOG_FILE)
+            # ── Nouvelles lignes de log (préfère multi_runner.log) ──
+            active_log = MULTI_LOG if os.path.exists(MULTI_LOG) else LOG_FILE
+            if os.path.exists(active_log):
+                size = os.path.getsize(active_log)
                 if size != _log_size:
                     _log_size = size
-                    with open(LOG_FILE) as f:
+                    with open(active_log) as f:
                         lines = f.readlines()[-10:]
                     socketio.emit("log_update", {"lines": [l.rstrip() for l in lines]})
+
+            # ── Multi-bot state files ──
+            for bot_id, path in _BOT_PATHS.items():
+                if os.path.exists(path):
+                    mtime = os.path.getmtime(path)
+                    if mtime != _bot_mtimes.get(bot_id, 0):
+                        _bot_mtimes[bot_id] = mtime
+                        bot_state = load_bot_state(bot_id)
+                        bot_metrics = compute_metrics(bot_state, _live_prices)
+                        bot_metrics["equity_curve"] = compute_equity_curve(bot_state)
+                        bot_metrics["trades"] = list(reversed(bot_state.get("trades", [])))[:50]
+                        bot_metrics["bot_id"] = bot_id
+                        socketio.emit("bot_update", bot_metrics)
 
         except Exception:
             pass

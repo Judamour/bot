@@ -414,6 +414,63 @@
     .log-line.buy { color: var(--green); }
     .log-line.sell { color: var(--red); }
     .log-line.warn { color: var(--yellow); }
+
+    /* ── Tab bar ── */
+    .tab-bar {
+      display: flex;
+      align-items: stretch;
+      padding: 0 20px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+    }
+    .tab-btn {
+      padding: 9px 16px;
+      background: transparent;
+      border: none;
+      border-bottom: 2px solid transparent;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      transition: color 0.15s, border-color 0.15s;
+      white-space: nowrap;
+      margin-bottom: -1px;
+    }
+    .tab-btn:hover { color: var(--text); }
+    .tab-btn.active { color: var(--text); border-bottom-color: var(--tab-color, #58a6ff); }
+    .tab-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+
+    /* ── Contest ── */
+    .contest-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px 16px;
+    }
+    .contest-card .bot-label { font-size: 11px; font-weight: 600; margin-bottom: 6px; }
+    .contest-card .bot-value { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1; }
+    .contest-card .bot-perf { font-size: 12px; margin-top: 5px; }
+    .contest-table { width: 100%; border-collapse: collapse; }
+    .contest-table th {
+      padding: 8px 14px;
+      text-align: left;
+      font-size: 10px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      border-bottom: 1px solid var(--border);
+    }
+    .contest-table td { padding: 10px 14px; border-bottom: 1px solid var(--border); font-variant-numeric: tabular-nums; }
+    .contest-table tr:last-child td { border-bottom: none; }
+    .contest-table tr:hover td { background: var(--surface2); }
+    .contest-rank { font-size: 18px; }
+
+    @media (max-width: 768px) {
+      .tab-btn { padding: 8px 10px; font-size: 11px; }
+    }
   </style>
 </head>
 <body>
@@ -434,7 +491,25 @@
   <div class="last-update" id="lastUpdate">—</div>
 </header>
 
-<main class="main">
+<!-- Tab bar -->
+<div class="tab-bar">
+  <button class="tab-btn active" data-tab="a" style="--tab-color:#58a6ff" onclick="switchTab('a')">
+    <span class="tab-dot" style="background:#58a6ff"></span>Bot A — Supertrend
+  </button>
+  <button class="tab-btn" data-tab="b" style="--tab-color:#3fb950" onclick="switchTab('b')">
+    <span class="tab-dot" style="background:#3fb950"></span>Bot B — Momentum
+  </button>
+  <button class="tab-btn" data-tab="c" style="--tab-color:#ffa657" onclick="switchTab('c')">
+    <span class="tab-dot" style="background:#ffa657"></span>Bot C — Breakout
+  </button>
+  <button class="tab-btn" data-tab="contest" style="--tab-color:#d29922" onclick="switchTab('contest')">
+    🏆 Contest
+  </button>
+</div>
+
+<main class="main" style="padding:0;gap:0">
+
+<div id="botContent" class="main">
 
   <!-- Métriques -->
   <div class="metrics-row">
@@ -583,8 +658,26 @@
     </div>
   </div>
 
+</div><!-- /botContent -->
+
+<!-- Contest -->
+<div id="contestContent" style="display:none;flex-direction:column;gap:14px;padding:14px 20px">
+  <!-- Bot cards -->
+  <div id="contestBotCards" style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px"></div>
+  <!-- 3-line equity chart -->
+  <div class="chart-section">
+    <div class="panel-header" style="padding:9px 14px">Performance comparative — % retour sur capital initial</div>
+    <div style="padding:12px;height:220px;position:relative"><canvas id="contestChart"></canvas></div>
+  </div>
+  <!-- Ranking table -->
+  <div class="panel">
+    <div class="panel-header">Classement</div>
+    <div id="contestRanking"><div class="empty-state">Chargement…</div></div>
+  </div>
+</div><!-- /contestContent -->
+
   <!-- Log -->
-  <div class="log-section">
+  <div class="log-section" style="margin:14px 20px">
     <div class="panel-header">Journal Bot</div>
     <div class="log-body" id="logBody"></div>
   </div>
@@ -596,6 +689,7 @@ const SYMBOLS = {{ symbols | tojson }};
 const XSTOCKS = {{ xstocks | tojson }};
 const DEFAULT_TF = {{ timeframe | tojson }};
 const MAX_LOG_LINES = 80;
+let activeBot = 'a';
 
 // ── Log buffer (évite la croissance infinie du DOM) ───────────────────────────
 let logBuffer = [];
@@ -649,11 +743,21 @@ socket.on('disconnect', () => {
 socket.on('price_update', prices => { updateTicker(prices); updateLastUpdate(); });
 
 socket.on('state_update', data => {
+  if (activeBot !== 'a') return;
   updateMetrics(data);
   updatePositions(data.positions || []);
   if (data.trades) updateTrades(data.trades);
   if (data.equity_curve) updatePortfolioChart(data.equity_curve, data.total_value);
   if (data.us_market_open !== undefined) updateMarketBadge(data.us_market_open);
+  updateLastUpdate();
+});
+
+socket.on('bot_update', data => {
+  if (activeBot !== data.bot_id) return;
+  updateMetrics(data);
+  updatePositions(data.positions || []);
+  if (data.trades) updateTrades(data.trades);
+  if (data.equity_curve) updatePortfolioChart(data.equity_curve, data.total_value);
   updateLastUpdate();
 });
 
@@ -931,6 +1035,7 @@ function setPeriod(period, btn) {
 // ── Price Chart ───────────────────────────────────────────────────────────────
 let chart = null, candleSeries, supertrendSeries, emaFastSeries, emaTrendSeries, volumeSeries;
 let currentTf = DEFAULT_TF;
+let contestChart = null;
 
 function initPriceChart() {
   const container = document.getElementById('priceChart');
@@ -1133,6 +1238,149 @@ function init() {
   fetchNextAnalysis();
   setInterval(fetchNextAnalysis, 60000);
   setInterval(updateCountdown, 1000);
+}
+
+// ── Tab switcher ──────────────────────────────────────────────────────────────
+function switchTab(botId) {
+  activeBot = botId;
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.querySelector(`[data-tab="${botId}"]`).classList.add('active');
+  const isContest = botId === 'contest';
+  document.getElementById('botContent').style.display    = isContest ? 'none' : '';
+  document.getElementById('contestContent').style.display = isContest ? 'flex' : 'none';
+  if (isContest) fetchContest();
+  else            fetchBotState(botId);
+}
+
+function fetchBotState(botId) {
+  fetch(`/api/bot/${botId}`)
+    .then(r => r.json())
+    .then(data => {
+      updateMetrics(data);
+      updatePositions(data.positions || []);
+      if (data.trades) updateTrades(data.trades);
+      if (data.equity_curve) updatePortfolioChart(data.equity_curve, data.total_value);
+      updateLastUpdate();
+    })
+    .catch(console.error);
+}
+
+function fetchContest() {
+  fetch('/api/contest').then(r => r.json()).then(renderContest).catch(console.error);
+}
+
+function renderContest(data) {
+  const bots = data.bots || [];
+
+  // ── Bot cards ──
+  document.getElementById('contestBotCards').innerHTML = bots.map(b => {
+    const sign = b.pnl_pct >= 0 ? '+' : '';
+    const cls  = b.pnl_pct >= 0 ? 'positive' : 'negative';
+    return `<div class="contest-card">
+      <div class="bot-label" style="color:${b.color}">Bot ${b.id.toUpperCase()} — ${b.name}</div>
+      <div class="bot-value">${fmt2(b.total_value)} €</div>
+      <div class="bot-perf ${cls}">${sign}${b.pnl_pct.toFixed(2)}% · ${sign}${fmt2(b.pnl_eur)} €</div>
+    </div>`;
+  }).join('');
+
+  // ── Ranking table ──
+  const sorted = [...bots].sort((a, b) => b.pnl_pct - a.pnl_pct);
+  const medals = ['🥇', '🥈', '🥉'];
+  document.getElementById('contestRanking').innerHTML = `<table class="contest-table">
+    <thead><tr>
+      <th></th><th>Bot</th><th>Capital libre</th><th>Total</th><th>P&L</th><th>Win rate</th><th>Trades</th>
+    </tr></thead>
+    <tbody>${sorted.map((b, i) => {
+      const sign = b.pnl_pct >= 0 ? '+' : '';
+      const cls  = b.pnl_pct >= 0 ? 'positive' : 'negative';
+      return `<tr>
+        <td class="contest-rank">${medals[i] || i + 1}</td>
+        <td><strong style="color:${b.color}">Bot ${b.id.toUpperCase()} — ${b.name}</strong></td>
+        <td>${fmt2(b.capital)} €</td>
+        <td><strong>${fmt2(b.total_value)} €</strong></td>
+        <td class="${cls}">${sign}${b.pnl_pct.toFixed(2)}% (${sign}${fmt2(b.pnl_eur)} €)</td>
+        <td>${b.win_rate.toFixed(1)}%</td>
+        <td>${b.total_trades}</td>
+      </tr>`;
+    }).join('')}</tbody>
+  </table>`;
+
+  renderContestChart(bots);
+}
+
+function renderContestChart(bots) {
+  const ctx = document.getElementById('contestChart');
+  if (!ctx) return;
+
+  // % return relative to initial capital (all start at 0)
+  const datasets = bots.map(b => {
+    const curve = b.equity_curve || [];
+    const init  = b.initial_capital || 500;
+    return {
+      label: `Bot ${b.id.toUpperCase()} — ${b.name}`,
+      data: curve.map(p => +((p.value - init) / init * 100).toFixed(2)),
+      borderColor: b.color,
+      backgroundColor: 'transparent',
+      borderWidth: 2,
+      pointRadius: 0,
+      pointHoverRadius: 4,
+      tension: 0.4,
+    };
+  });
+
+  const maxLen = Math.max(...bots.map(b => (b.equity_curve || []).length), 2);
+  const labels = Array.from({ length: maxLen }, (_, i) => i === 0 ? 'Début' : `T${i}`);
+
+  if (contestChart) {
+    contestChart.data.labels   = labels;
+    contestChart.data.datasets = datasets;
+    contestChart.update('none');
+    return;
+  }
+
+  contestChart = new Chart(ctx, {
+    type: 'line',
+    data: { labels, datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: { duration: 300 },
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: {
+          display: true,
+          position: 'top',
+          labels: { color: '#8b949e', boxWidth: 10, font: { size: 11 } },
+        },
+        tooltip: {
+          backgroundColor: 'rgba(22,27,34,0.95)',
+          borderColor: '#30363d',
+          borderWidth: 1,
+          titleColor: '#8b949e',
+          bodyColor: '#e6edf3',
+          callbacks: {
+            label: item => {
+              const v = item.parsed.y;
+              return `${item.dataset.label}: ${v >= 0 ? '+' : ''}${v.toFixed(2)}%`;
+            },
+          },
+        },
+      },
+      scales: {
+        x: { display: false },
+        y: {
+          display: true,
+          ticks: {
+            color: '#8b949e',
+            font: { size: 10 },
+            callback: v => (v >= 0 ? '+' : '') + v.toFixed(1) + '%',
+          },
+          grid:   { color: 'rgba(48,54,61,0.5)' },
+          border: { color: '#30363d' },
+        },
+      },
+    },
+  });
 }
 
 document.addEventListener('DOMContentLoaded', init);
