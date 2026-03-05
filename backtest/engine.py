@@ -43,9 +43,6 @@ def run_backtest(symbol: str, timeframe: str = config.TIMEFRAME, days: int = con
             if row["low"] <= position["stop"]:
                 exit_price = position["stop"]
                 exit_reason = "stop_loss"
-            elif row["high"] >= position["tp"]:
-                exit_price = position["tp"]
-                exit_reason = "take_profit"
             elif row["signal"] == -1:
                 exit_reason = "signal"
 
@@ -67,6 +64,11 @@ def run_backtest(symbol: str, timeframe: str = config.TIMEFRAME, days: int = con
                     "result": "win" if pnl > 0 else "loss",
                 })
                 position = None
+            else:
+                # ATR trailing stop : monte le stop si le prix progresse
+                new_stop = row["close"] - config.ATR_MULTIPLIER * row["atr"]
+                if new_stop > position["stop"]:
+                    position["stop"] = new_stop
 
         # Ouvrir position sur signal achat (si pas déjà en position)
         if row["signal"] == 1 and position is None and capital > 0:

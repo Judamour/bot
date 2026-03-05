@@ -89,43 +89,18 @@ def log(msg: str, level: str = "INFO"):
         f.write(f"{ts} [{level}] {msg}\n")
 
 
-# ── Trailing Stop (ratchet) ───────────────────────────────────────────────────
+# ── Trailing Stop (ATR continu) ───────────────────────────────────────────────
 
-def apply_trailing_stop(position: dict, current_price: float, symbol: str) -> dict:
+def apply_trailing_stop(position: dict, current_price: float, atr: float, symbol: str) -> dict:
     """
-    Ratchet stop : verrouille les profits par paliers de R.
-      +1R atteint → stop monté au breakeven (entrée)
-      +2R atteint → stop monté à +1R
-      +3R atteint → stop monté à +2R
-
+    ATR trailing stop : monte continuellement le stop sous le prix.
+    new_stop = max(current_stop, price - ATR_MULTIPLIER × ATR)
     Le stop ne descend jamais.
     """
-    entry = position["entry"]
-    initial_stop = position.get("initial_stop", position["stop"])
-    stop_distance = entry - initial_stop
-
-    if stop_distance <= 0 or current_price <= entry:
-        return position
-
-    r = (current_price - entry) / stop_distance
-
-    if r >= 3:
-        new_stop = entry + 2 * stop_distance      # Lock +2R
-    elif r >= 2:
-        new_stop = entry + 1 * stop_distance      # Lock +1R
-    elif r >= 1:
-        new_stop = entry                           # Breakeven
-    else:
-        return position
-
-    new_stop = round(new_stop, 4)
+    new_stop = round(current_price - config.ATR_MULTIPLIER * atr, 4)
     if new_stop > position["stop"]:
         position["stop"] = new_stop
-        label = "breakeven" if new_stop == entry else f"+{r:.1f}R verrouillé"
-        log(f"{symbol} — Trailing stop → {new_stop:.4f}€ ({label})", "INFO")
-        if new_stop == entry:
-            notify(f"🔒 <b>{symbol}</b> stop breakeven → {new_stop:.2f}€")
-
+        log(f"{symbol} — Trailing stop → {new_stop:.4f}€", "INFO")
     return position
 
 
@@ -209,7 +184,7 @@ def process_symbol(
 
     # ── Trailing stop avant vérification de sortie ──
     if position:
-        position = apply_trailing_stop(position, current_price, symbol)
+        position = apply_trailing_stop(position, current_price, atr, symbol)
         state["positions"][symbol] = position
 
     # ── Vérifier stop-loss / take-profit ──
@@ -220,9 +195,6 @@ def process_symbol(
         if current_price <= position["stop"]:
             reason = "stop_loss"
             exit_price = position["stop"]
-        elif current_price >= position["tp"]:
-            reason = "take_profit"
-            exit_price = position["tp"]
         elif signal == -1:
             reason = "signal_exit"
 
