@@ -109,6 +109,7 @@ def apply_trailing_stop(position: dict, current_price: float, atr: float, symbol
 def process_symbol(
     symbol: str,
     state: dict,
+    df=None,
     btc_context: dict = None,
     vix_factor: float = 1.0,
     vix: float = 0.0,
@@ -120,7 +121,8 @@ def process_symbol(
 ) -> dict:
     """Analyse un symbole et exécute les ordres si nécessaire."""
     try:
-        df = fetch_ohlcv(symbol, config.TIMEFRAME, days=45)
+        if df is None:
+            df = fetch_ohlcv(symbol, config.TIMEFRAME, days=45)
         df = generate_signals(df)
         last = df.iloc[-1]
         current_price = float(last["close"])
