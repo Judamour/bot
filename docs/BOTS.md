@@ -254,6 +254,61 @@ Identique à Bot D/E mais avec Claude Haiku 4.5 (modèle le plus petit/rapide).
 
 ---
 
+## Bot G — Trend Following Multi-Asset (Volatility Targeting)
+
+**Fichier** : `strategies/trend_following_strategy.py`
+**State** : `logs/trend/state.json`
+**Origine** : recommandation ChatGPT — architecture CTA funds (AQR, Man Group, SG CTA Index)
+
+### Pourquoi ce bot plutôt qu'améliorer Bot C
+
+Bot C fait du Donchian breakout sur 3 crypto seulement avec un sizing Turtle fixe (1% du capital).
+Bot G applique la même philosophie trend following mais :
+- Sur **tous les 16 actifs** (crypto + xStocks)
+- Avec un **sizing adaptatif** : les actifs calmes reçoivent plus de capital, les volatils moins
+- Avec un **filtre de tendance SMA200** (plus robuste que Donchian pur en range)
+
+### Stratégie
+Acheter les actifs en tendance haussière confirmée, tenir jusqu'à ce que la tendance se brise.
+Les positions les plus grosses vont aux actifs les moins volatils (risk parity partiel).
+
+### Paramètres
+| Paramètre | Valeur |
+|-----------|--------|
+| SMA long | 200j |
+| SMA court | 50j |
+| Breakout entrée | High 50j (shift 1 — no lookahead) |
+| Filtre ADX | > 20 |
+| ATR période | 20 |
+| Stop loss | 3×ATR trailing |
+| Sortie tendance | prix < SMA200 |
+| Target vol | 15% annualisé |
+| Max/position | 10% du capital |
+| Max positions | 8 |
+| Filtre VIX | > 35 → suspend nouvelles entrées |
+| Timeframe | Daily (ohlcv_daily, déjà fetchés pour B et C) |
+| Data requis | 230 jours minimum |
+
+### Sizing — Volatility Targeting (détail)
+```
+daily_vol = std(daily_returns, 20 jours)
+annual_vol = daily_vol × √252
+size_pct   = min(TARGET_VOL / annual_vol, MAX_POSITION_PCT)
+size_units = (capital × size_pct) / entry_price
+```
+Exemple : BTC annual_vol=60% → size_pct=15%/60%=25% mais cappé à 10%
+Exemple : NVDAx annual_vol=30% → size_pct=15%/30%=50% mais cappé à 10%
+Exemple : GLDx annual_vol=12% → size_pct=15%/12%=125% cappé à 10% (or = actif calme → taille max)
+
+### Appel API
+**Aucun.** Stratégie 100% quantitative, pas d'appel LLM.
+
+### Performance historique de référence
+CTA trend following indices : 10-18% CAGR sur longue période.
+Sous-performe en marchés range/choppy (2022-2023), sur-performe lors de grandes tendances (2020-2021, 2024).
+
+---
+
 ## Résumé des appels API par cycle
 
 | Bot | API | Nb appels/cycle (estimé) | Coût/cycle |
@@ -264,6 +319,7 @@ Identique à Bot D/E mais avec Claude Haiku 4.5 (modèle le plus petit/rapide).
 | D | DeepSeek Reasoner | 0-10 (si pre-filter passe) | ~$0.002 |
 | E | Anthropic Sonnet | 0-10 (si pre-filter passe) | ~$0.05 |
 | F | Anthropic Haiku | 0-10 (si pre-filter passe) | ~$0.008 |
+| G | Aucun | 0 | $0 |
 | A pré-marché | Anthropic Haiku | 1/jour ouvré | ~$0.005/jour |
 
 **Total journalier estimé** : $0.05-0.15/jour selon activité du marché
@@ -289,6 +345,7 @@ Mots-clés détectés : `credit`, `billing`, `insufficient`, `balance`, `quota`,
 **xStocks paper Kraken (11)** : NVDAx, AAPLx, MSFTx, METAx, GOOGx, PLTRx, AMDx, AVGOx, GLDx, NFLXx, CRWDx
 
 **Bot C uniquement** : BTC/EUR, ETH/EUR, SOL/EUR (meilleurs trends Donchian)
+**Bot G** : tous les 16 symboles (trend following multi-actifs)
 
 ---
 
