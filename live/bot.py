@@ -871,7 +871,10 @@ def run():
             momentum_filter = _update_momentum_filter(state)
 
             for symbol in config.SYMBOLS:
-                if not momentum_filter.get(symbol, True) and symbol not in state["positions"]:
+                # Momentum filter : xStocks uniquement
+                # Crypto = déjà protégé par EMA200 + Supertrend + BTC regime block
+                is_crypto = symbol in config.CRYPTO
+                if not is_crypto and not momentum_filter.get(symbol, True) and symbol not in state["positions"]:
                     log(f"{symbol} — Ignoré (momentum 90j négatif)", "INFO")
                     time.sleep(1)
                     continue
