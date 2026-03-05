@@ -25,9 +25,10 @@ _BOT_PATHS = {
     "a": os.path.join(BASE_DIR, "logs", "supertrend", "state.json"),
     "b": os.path.join(BASE_DIR, "logs", "momentum",   "state.json"),
     "c": os.path.join(BASE_DIR, "logs", "breakout",   "state.json"),
+    "d": os.path.join(BASE_DIR, "logs", "llm",        "state.json"),
 }
-_BOT_NAMES = {"a": "Supertrend+MR", "b": "Momentum", "c": "Breakout"}
-_BOT_COLORS = {"a": "#58a6ff", "b": "#3fb950", "c": "#ffa657"}
+_BOT_NAMES = {"a": "Supertrend+MR", "b": "Momentum", "c": "Breakout", "d": "DeepSeek LLM"}
+_BOT_COLORS = {"a": "#58a6ff", "b": "#3fb950", "c": "#ffa657", "d": "#c792ea"}
 MULTI_LOG   = os.path.join(BASE_DIR, "logs", "multi_runner.log")
 MULTI_INITIAL_CAPITAL = 1000.0
 
@@ -376,7 +377,7 @@ def api_bot(bot_id):
 def api_contest():
     """Vue d'ensemble des 3 bots — classement et courbes d'équité."""
     bots_data = []
-    for bot_id in ["a", "b", "c"]:
+    for bot_id in ["a", "b", "c", "d"]:
         state = load_bot_state(bot_id)
         metrics = compute_metrics(state, _live_prices)
         bots_data.append({

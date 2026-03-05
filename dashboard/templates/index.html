@@ -502,6 +502,9 @@
   <button class="tab-btn" data-tab="c" style="--tab-color:#ffa657" onclick="switchTab('c')">
     <span class="tab-dot" style="background:#ffa657"></span>Bot C — Breakout
   </button>
+  <button class="tab-btn" data-tab="d" style="--tab-color:#c792ea" onclick="switchTab('d')">
+    <span class="tab-dot" style="background:#c792ea"></span>Bot D — DeepSeek
+  </button>
   <button class="tab-btn" data-tab="contest" style="--tab-color:#d29922" onclick="switchTab('contest')">
     🏆 Contest
   </button>
@@ -663,7 +666,7 @@
 <!-- Contest -->
 <div id="contestContent" style="display:none;flex-direction:column;gap:14px;padding:14px 20px">
   <!-- Bot cards -->
-  <div id="contestBotCards" style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px"></div>
+  <div id="contestBotCards" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px"></div>
   <!-- 3-line equity chart -->
   <div class="chart-section">
     <div class="panel-header" style="padding:9px 14px">Performance comparative — % retour sur capital initial</div>
@@ -1285,7 +1288,7 @@ function renderContest(data) {
 
   // ── Ranking table ──
   const sorted = [...bots].sort((a, b) => b.pnl_pct - a.pnl_pct);
-  const medals = ['🥇', '🥈', '🥉'];
+  const medals = ['🥇', '🥈', '🥉', '4️⃣'];
   document.getElementById('contestRanking').innerHTML = `<table class="contest-table">
     <thead><tr>
       <th></th><th>Bot</th><th>Capital libre</th><th>Total</th><th>P&L</th><th>Win rate</th><th>Trades</th>
