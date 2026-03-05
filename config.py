@@ -62,7 +62,8 @@ ADX_PERIOD = 14     # Période ADX
 ADX_THRESHOLD = 22  # ADX > 22 = tendance suffisante
 
 # ── Gestion du risque ───────────────────────────────────────────────────────
-POSITION_SIZE_EUR = 100  # Montant fixe investi par position (en EUR)
+POSITION_SIZE_PCT = 0.10  # 10% du capital disponible par position
+POSITION_MIN_EUR  = 20    # Plancher absolu (évite des positions ridicules)
 ATR_MULTIPLIER = 3.0     # Stop-loss = 3x ATR sous le prix d'entrée (adapté au 4h)
 TAKE_PROFIT_RATIO = 2.5  # Take-profit = 2.5x le stop-loss (ratio R:R = 1:2.5)
 MAX_OPEN_TRADES = 8      # Maximum de trades ouverts simultanément

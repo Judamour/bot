@@ -28,7 +28,7 @@ def run_all(symbols=None, days=config.BACKTEST_DAYS, workers=4):
 
     print(f"\n{'='*65}")
     print(f"  BACKTEST GLOBAL — {len(symbols)} symboles | {days}j | {config.TIMEFRAME}")
-    print(f"  Position: {config.POSITION_SIZE_EUR}€ | SL: 3×ATR | TP: {config.TAKE_PROFIT_RATIO}R")
+    print(f"  Position: {config.POSITION_SIZE_PCT*100:.0f}% capital | SL: 3×ATR | TP: {config.TAKE_PROFIT_RATIO}R")
     print(f"  Filtres: ADX>{config.ADX_THRESHOLD} | RSI<{config.RSI_OVERBOUGHT} | Supertrend + EMA")
     print(f"{'='*65}")
 

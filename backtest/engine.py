@@ -71,7 +71,8 @@ def run_backtest(symbol: str, timeframe: str = config.TIMEFRAME, days: int = con
         # Ouvrir position sur signal achat (si pas déjà en position)
         if row["signal"] == 1 and position is None and capital > 0:
             entry_price = row["close"] * (1 + config.SLIPPAGE)
-            pos = calculate_position_size(config.POSITION_SIZE_EUR, entry_price, row["atr"])
+            position_eur = max(config.POSITION_MIN_EUR, capital * config.POSITION_SIZE_PCT)
+            pos = calculate_position_size(position_eur, entry_price, row["atr"])
             fee_entry = entry_price * pos["size"] * config.EXCHANGE_FEE
             cost = pos["size"] * entry_price + fee_entry
             if cost <= capital:
