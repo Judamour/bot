@@ -50,7 +50,15 @@
 
     .header-left { display: flex; align-items: center; gap: 10px; }
 
-    .logo { font-size: 15px; font-weight: 700; letter-spacing: 0.5px; }
+    .logo {
+      font-size: 15px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      background: linear-gradient(90deg, #58a6ff, #3fb950);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
 
     .badge {
       padding: 2px 8px;
@@ -93,17 +101,54 @@
     @media (max-width: 768px) {
       .bottom-row { grid-template-columns: 1fr; }
       .main { padding: 8px 10px; gap: 10px; }
-      .header { padding: 8px 12px; }
-      .price-ticker { max-width: 100%; overflow-x: auto; flex-wrap: nowrap; }
+      .header { padding: 8px 10px; gap: 6px; }
+      .header-left { flex-wrap: wrap; gap: 6px; }
+      .price-ticker {
+        width: 100%;
+        overflow-x: auto;
+        flex-wrap: nowrap;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+        padding-bottom: 2px;
+      }
+      .price-ticker::-webkit-scrollbar { display: none; }
       .sys-stats { display: none; }
-      #priceChart { height: 260px; }
+      #priceChart { height: 240px; }
+      #nextAnalysis { font-size: 10px; }
+      .last-update { font-size: 10px; }
+      .metrics-row { grid-template-columns: repeat(2, 1fr); gap: 8px; }
+      .metric-value { font-size: 17px; }
+      .portfolio-section { padding: 14px 14px 0; }
+      .portfolio-value { font-size: 26px; }
+      .tab-btn { padding: 8px 11px; font-size: 11px; gap: 5px; }
+      .tab-btn .tab-label-long { display: none; }
+      .tab-btn .tab-label-short { display: inline; }
+      .panel-header { padding: 8px 12px; font-size: 10px; }
+      .positions-table th, .positions-table td { padding: 7px 8px; font-size: 11px; }
+      .trades-table th, .trades-table td { padding: 6px 8px; font-size: 11px; }
+      .contest-table th, .contest-table td { padding: 7px 10px; font-size: 11px; }
+      .claude-table th, .claude-table td { padding: 6px 8px; font-size: 10px; }
+      .portfolio-chart-wrapper { height: 130px; }
+      .period-btn { padding: 3px 8px; font-size: 10px; }
+    }
+
+    @media (max-width: 480px) {
+      .header { flex-direction: column; align-items: flex-start; }
+      .price-ticker { width: 100%; }
+      .metrics-row { grid-template-columns: repeat(2, 1fr); }
     }
 
     .metric-card {
       background: var(--surface);
       border: 1px solid var(--border);
-      border-radius: 8px;
+      border-radius: 10px;
       padding: 14px 16px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.35);
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    .metric-card:hover {
+      border-color: #484f58;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.5);
     }
 
     .metric-label {
@@ -129,8 +174,9 @@
     .chart-section {
       background: var(--surface);
       border: 1px solid var(--border);
-      border-radius: 8px;
+      border-radius: 10px;
       overflow: hidden;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.35);
     }
 
     .chart-toolbar {
@@ -149,17 +195,20 @@
       background: var(--surface2);
       border: 1px solid var(--border);
       color: var(--text);
-      padding: 4px 8px;
-      border-radius: 5px;
+      padding: 5px 10px;
+      border-radius: 6px;
       font-size: 12px;
       cursor: pointer;
+      transition: border-color 0.15s;
     }
+    .symbol-select:hover { border-color: #484f58; }
+    .symbol-select:focus { outline: none; border-color: var(--blue); }
 
     .tf-buttons { display: flex; gap: 3px; }
 
     .tf-btn {
-      padding: 3px 8px;
-      border-radius: 4px;
+      padding: 5px 10px;
+      border-radius: 5px;
       border: 1px solid var(--border);
       background: transparent;
       color: var(--muted);
@@ -186,10 +235,11 @@
     .panel {
       background: var(--surface);
       border: 1px solid var(--border);
-      border-radius: 8px;
+      border-radius: 10px;
       overflow: hidden;
       display: flex;
       flex-direction: column;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.35);
     }
 
     .panel-header {
@@ -243,11 +293,15 @@
     .trades-section {
       background: var(--surface);
       border: 1px solid var(--border);
-      border-radius: 8px;
+      border-radius: 10px;
       overflow: hidden;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.35);
     }
 
-    .trades-table-wrapper { max-height: 220px; overflow-y: auto; }
+    .trades-table-wrapper { max-height: 220px; overflow-y: auto; overflow-x: auto; }
+    .table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    .table-scroll::-webkit-scrollbar { height: 4px; }
+    .table-scroll::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
     .trades-table-wrapper::-webkit-scrollbar { width: 5px; }
     .trades-table-wrapper::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 
@@ -282,8 +336,9 @@
     .claude-section {
       background: var(--surface);
       border: 1px solid var(--border);
-      border-radius: 8px;
+      border-radius: 10px;
       overflow: hidden;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.35);
     }
 
     .claude-body { display: flex; gap: 0; }
@@ -335,16 +390,17 @@
 
     @media (max-width: 768px) {
       .claude-body { flex-direction: column; }
-      .claude-premarket { border-left: none; border-top: 1px solid var(--border); }
+      .claude-premarket { border-left: none; border-top: 1px solid var(--border); max-height: 200px; }
     }
 
     /* ── Portfolio Curve (Trade Republic) ── */
     .portfolio-section {
       background: var(--surface);
       border: 1px solid var(--border);
-      border-radius: 8px;
+      border-radius: 10px;
       padding: 22px 22px 0;
       overflow: hidden;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.35);
     }
 
     .portfolio-header {
@@ -394,8 +450,9 @@
     .log-section {
       background: var(--surface);
       border: 1px solid var(--border);
-      border-radius: 8px;
+      border-radius: 10px;
       overflow: hidden;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.35);
     }
 
     .log-body {
@@ -422,7 +479,11 @@
       padding: 0 20px;
       background: var(--surface);
       border-bottom: 1px solid var(--border);
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: none;
     }
+    .tab-bar::-webkit-scrollbar { display: none; }
     .tab-btn {
       padding: 9px 16px;
       background: transparent;
@@ -438,6 +499,7 @@
       transition: color 0.15s, border-color 0.15s;
       white-space: nowrap;
       margin-bottom: -1px;
+      flex-shrink: 0;
     }
     .tab-btn:hover { color: var(--text); }
     .tab-btn.active { color: var(--text); border-bottom-color: var(--tab-color, #58a6ff); }
@@ -447,9 +509,12 @@
     .contest-card {
       background: var(--surface);
       border: 1px solid var(--border);
-      border-radius: 8px;
+      border-radius: 10px;
       padding: 14px 16px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.35);
+      transition: border-color 0.2s;
     }
+    .contest-card:hover { border-color: #484f58; }
     .contest-card .bot-label { font-size: 11px; font-weight: 600; margin-bottom: 6px; }
     .contest-card .bot-value { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1; }
     .contest-card .bot-perf { font-size: 12px; margin-top: 5px; }
@@ -468,9 +533,7 @@
     .contest-table tr:hover td { background: var(--surface2); }
     .contest-rank { font-size: 18px; }
 
-    @media (max-width: 768px) {
-      .tab-btn { padding: 8px 10px; font-size: 11px; }
-    }
+    .tab-label-short { display: none; }
   </style>
 </head>
 <body>
@@ -494,25 +557,25 @@
 <!-- Tab bar -->
 <div class="tab-bar">
   <button class="tab-btn active" data-tab="a" style="--tab-color:#58a6ff" onclick="switchTab('a')">
-    <span class="tab-dot" style="background:#58a6ff"></span>Bot A — Supertrend
+    <span class="tab-dot" style="background:#58a6ff"></span><span class="tab-label-long">Bot A — Supertrend</span><span class="tab-label-short">A</span>
   </button>
   <button class="tab-btn" data-tab="b" style="--tab-color:#3fb950" onclick="switchTab('b')">
-    <span class="tab-dot" style="background:#3fb950"></span>Bot B — Momentum
+    <span class="tab-dot" style="background:#3fb950"></span><span class="tab-label-long">Bot B — Momentum</span><span class="tab-label-short">B</span>
   </button>
   <button class="tab-btn" data-tab="c" style="--tab-color:#ffa657" onclick="switchTab('c')">
-    <span class="tab-dot" style="background:#ffa657"></span>Bot C — Breakout
+    <span class="tab-dot" style="background:#ffa657"></span><span class="tab-label-long">Bot C — Breakout</span><span class="tab-label-short">C</span>
   </button>
   <button class="tab-btn" data-tab="d" style="--tab-color:#c792ea" onclick="switchTab('d')">
-    <span class="tab-dot" style="background:#c792ea"></span>Bot D — DeepSeek
+    <span class="tab-dot" style="background:#c792ea"></span><span class="tab-label-long">Bot D — DeepSeek</span><span class="tab-label-short">D</span>
   </button>
   <button class="tab-btn" data-tab="e" style="--tab-color:#ff7b72" onclick="switchTab('e')">
-    <span class="tab-dot" style="background:#ff7b72"></span>Bot E — Claude
+    <span class="tab-dot" style="background:#ff7b72"></span><span class="tab-label-long">Bot E — Claude</span><span class="tab-label-short">E</span>
   </button>
   <button class="tab-btn" data-tab="f" style="--tab-color:#f7c948" onclick="switchTab('f')">
-    <span class="tab-dot" style="background:#f7c948"></span>Bot F — Haiku
+    <span class="tab-dot" style="background:#f7c948"></span><span class="tab-label-long">Bot F — Haiku</span><span class="tab-label-short">F</span>
   </button>
   <button class="tab-btn" data-tab="contest" style="--tab-color:#d29922" onclick="switchTab('contest')">
-    🏆 Contest
+    🏆<span class="tab-label-long"> Contest</span>
   </button>
 </div>
 
@@ -874,7 +937,7 @@ function updatePositions(positions) {
     return;
   }
 
-  body.innerHTML = `<table class="positions-table">
+  body.innerHTML = `<div class="table-scroll"><table class="positions-table">
     <thead><tr>
       <th>Symbole</th><th>Entrée</th><th>Prix actuel</th>
       <th>Taille</th><th>P&L</th><th>SL / TP</th>
@@ -900,7 +963,7 @@ function updatePositions(positions) {
         </td>
       </tr>`;
     }).join('')}</tbody>
-  </table>`;
+  </table></div>`;
 }
 
 // ── Trades ────────────────────────────────────────────────────────────────────
@@ -1140,7 +1203,7 @@ function fetchClaude() {
     if (!filters.length) {
       filterEl.innerHTML = '<div class="claude-empty">Aucun filtre Claude enregistré</div>';
     } else {
-      filterEl.innerHTML = `<table class="claude-table">
+      filterEl.innerHTML = `<div class="table-scroll"><table class="claude-table">
         <thead><tr>
           <th>Date</th><th>Symbole</th><th>Décision</th><th>Raison</th><th>RSI</th><th>ADX</th>
         </tr></thead>
@@ -1159,7 +1222,7 @@ function fetchClaude() {
             <td>${adx}</td>
           </tr>`;
         }).join('')}</tbody>
-      </table>`;
+      </table></div>`;
     }
 
     // ── Analyse pré-marché (panel droit) ──
@@ -1311,7 +1374,7 @@ function renderContest(data) {
   // ── Ranking table ──
   const sorted = [...bots].sort((a, b) => b.pnl_pct - a.pnl_pct);
   const medals = ['🥇', '🥈', '🥉', '4️⃣', '5️⃣', '6️⃣'];
-  document.getElementById('contestRanking').innerHTML = `<table class="contest-table">
+  document.getElementById('contestRanking').innerHTML = `<div class="table-scroll"><table class="contest-table">
     <thead><tr>
       <th></th><th>Bot</th><th>Capital libre</th><th>Total</th><th>P&L</th><th>Win rate</th><th>Trades</th>
     </tr></thead>
@@ -1328,7 +1391,7 @@ function renderContest(data) {
         <td>${b.total_trades}</td>
       </tr>`;
     }).join('')}</tbody>
-  </table>`;
+  </table></div>`;
 
   renderContestChart(bots);
 }
