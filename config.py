@@ -10,16 +10,18 @@ API_SECRET = os.getenv("KRAKEN_API_SECRET", "")
 
 # ── Paires tradées ──────────────────────────────────────────────────────────
 # Format Kraken : "BTC/EUR", "ETH/EUR", "SOL/EUR"
-CRYPTO = ["BTC/EUR", "ETH/EUR", "SOL/EUR", "BNB/EUR", "TON/EUR", "LINK/EUR", "AVAX/EUR"]
+CRYPTO = ["BTC/EUR", "ETH/EUR", "SOL/EUR", "BNB/EUR", "TON/EUR"]
+# Retirés : LINK/EUR (PF<1 sur 1 et 3 ans), AVAX/EUR (idem)
 
 # xStocks : actions tokenisées sur Kraken, tradées en EUR 24/7
 # Symboles Kraken : suffixe "x" (ex: NVDAx/EUR)
 XSTOCKS = [
-    "NVDAx/EUR", "AAPLx/EUR", "TSLAx/EUR", "MSFTx/EUR",
-    "METAx/EUR", "AMZNx/EUR", "GOOGx/EUR",
+    "NVDAx/EUR", "AAPLx/EUR", "MSFTx/EUR",
+    "METAx/EUR", "GOOGx/EUR",
     "PLTRx/EUR", "AMDx/EUR", "AVGOx/EUR",
     "GLDx/EUR", "NFLXx/EUR", "CRWDx/EUR",
 ]
+# Retirés : TSLAx/EUR (WR=20%, Musk volatility), AMZNx/EUR (PF=0.07)
 
 SYMBOLS = CRYPTO + XSTOCKS
 
@@ -43,8 +45,7 @@ SECTORS = {
     "CRWDx/EUR": "cybersec",
     "BTC/EUR":   "crypto",     "ETH/EUR":   "crypto",
     "SOL/EUR":   "crypto",     "BNB/EUR":   "crypto",
-    "TON/EUR":   "crypto",     "LINK/EUR":  "crypto",
-    "AVAX/EUR":  "crypto",
+    "TON/EUR":   "crypto",
 }
 
 # ── Timeframe ───────────────────────────────────────────────────────────────
@@ -65,7 +66,7 @@ ADX_THRESHOLD = 22  # ADX > 22 = tendance suffisante
 POSITION_SIZE_PCT = 0.10  # 10% du capital disponible par position
 POSITION_MIN_EUR  = 20    # Plancher absolu (évite des positions ridicules)
 ATR_MULTIPLIER = 3.0     # Stop-loss = 3x ATR sous le prix d'entrée (adapté au 4h)
-TAKE_PROFIT_RATIO = 2.5  # Take-profit = 2.5x le stop-loss (ratio R:R = 1:2.5)
+TAKE_PROFIT_RATIO = 3.0  # Take-profit = 3.0x le stop-loss (ratio R:R = 1:3)
 MAX_OPEN_TRADES = 8      # Maximum de trades ouverts simultanément
 TARGET_VOL   = 0.15     # Volatilité annualisée cible (15%) pour le vol targeting
 MAX_LEVERAGE = 1.3      # Exposition max (×1.3 position de base)
