@@ -75,6 +75,13 @@ MAX_BOTS_SAME_ASSET = 2      # max 2 bots simultanés long sur le même actif
 CASH_VIX_THRESHOLD  = 35.0   # VIX > 35 → forcer cash 30%
 TARGET_VOL          = 0.15   # volatilité cible (pour rolling score)
 
+# ── Améliorations Meta v2+ ────────────────────────────────────────────────────
+SWITCH_PENALTY         = 0.05   # pénalité de score si changement d'engine (évite micro-switchs)
+TARGET_PORTFOLIO_VOL   = 0.20   # vol annualisée cible portefeuille (vol targeting global)
+BTC_HIGH_VOL_THRESHOLD = 0.80   # vol réalisée BTC > 80% annualisé → force HIGH_VOL
+CORR_REDUCE_THRESHOLD  = 0.70   # corrélation inter-bots > 70% → réduction exposition ×0.80
+REGIME_PERSIST_DAYS    = 7      # jours pour confiance pleine dans un régime (persist factor)
+
 # ── Circuit Breaker ──────────────────────────────────────────────────────────
 CB_THRESHOLD  = -0.25   # -25% DD → réduction exposition
 CB_MIN_FACTOR = 0.30    # exposition minimale (30% = 70% cash)
@@ -123,7 +130,10 @@ META_ENGINE_HYSTERESIS = {"ENHANCED": 7, "OMEGA": 5, "OMEGA_V2": 4, "PRO": 3}
 
 def select_engine_live(vix: float, btc_bearish: bool, qqq_bearish: bool,
                        port_dd: float, regime: str,
-                       rolling_scores: dict, bot_vols: dict) -> str:
+                       rolling_scores: dict, bot_vols: dict,
+                       current_engine: str = "OMEGA",
+                       regime_confidence: float = 1.0,
+                       regime_strength: float = 1.0) -> str:
     """
     Sélectionne l'engine optimal pour ce cycle (production, sans shadow tracking).
 
@@ -132,7 +142,9 @@ def select_engine_live(vix: float, btc_bearish: bool, qqq_bearish: bool,
       ENHANCED bloqué si BTC ou QQQ bearish
 
     Scoring (si pas de hard rule) :
-      score = 0.50 × regime_fit + 0.30 × rolling_quality_norm + 0.20 × inverse_vol_norm
+      rf    = regime_fit × regime_confidence × regime_strength
+      score = 0.50 × rf + 0.30 × rolling_quality_norm + 0.20 × inverse_vol_norm
+              - SWITCH_PENALTY si engine différent du current (évite micro-switchs)
     """
     # Hard rules
     force_pro = ((btc_bearish and qqq_bearish and vix > 26) or vix > 32 or port_dd < -0.12)
@@ -156,7 +168,8 @@ def select_engine_live(vix: float, btc_bearish: bool, qqq_bearish: bool,
         if eng == "ENHANCED" and block_enhanced:
             continue
 
-        rf = ENGINE_REGIME_FIT[eng].get(regime, 0.5)
+        # regime_fit pondéré par confiance × persistance du régime
+        rf = ENGINE_REGIME_FIT[eng].get(regime, 0.5) * regime_confidence * regime_strength
 
         # Inverse vol : chaque engine a un profil différent
         if eng == "PRO":
@@ -171,6 +184,10 @@ def select_engine_live(vix: float, btc_bearish: bool, qqq_bearish: bool,
             inv_risk_norm = max(0.0, 1.0 - avg_vol / max(max_vol, 0.01))
 
         score = 0.50 * rf + 0.30 * quality_norm + 0.20 * inv_risk_norm
+
+        # Pénalité de switch : évite les micro-switchs sur signaux marginaux
+        if eng != current_engine:
+            score -= SWITCH_PENALTY
 
         if score > best_score:
             best_score  = score
@@ -270,6 +287,11 @@ def detect_regime(macro: dict) -> str:
     if btc_bearish and qqq_bearish:
         regime = "BEAR"
     elif (btc_bearish or qqq_bearish) and regime in ("BULL", "RANGE"):
+        regime = "HIGH_VOL"
+
+    # BTC realized vol override : capte les crises crypto que VIX détecte avec retard
+    btc_vol = macro.get("btc_realized_vol", 0.0)
+    if btc_vol > BTC_HIGH_VOL_THRESHOLD and regime in ("BULL", "RANGE"):
         regime = "HIGH_VOL"
 
     return regime
@@ -372,6 +394,121 @@ def compute_bot_volatility(state: dict, window: int = 20) -> float:
     trades_per_year = 252 / max(5, 365 / len(trades))
     annual_vol = std * math.sqrt(trades_per_year)
     return max(0.05, min(1.0, annual_vol))  # clamp entre 5% et 100%
+
+
+# ── Helpers Meta v2+ ─────────────────────────────────────────────────────────
+
+def compute_portfolio_vol(z_capital_history: list) -> float:
+    """
+    Volatilité annualisée du portefeuille Z sur les 20 derniers cycles (4h).
+    Retourne TARGET_PORTFOLIO_VOL si pas assez de données.
+    """
+    if len(z_capital_history) < 5:
+        return TARGET_PORTFOLIO_VOL
+    vals = z_capital_history[-21:]
+    returns = [(vals[i] / vals[i - 1] - 1) for i in range(1, len(vals)) if vals[i - 1] > 0]
+    if len(returns) < 2:
+        return TARGET_PORTFOLIO_VOL
+    avg = sum(returns) / len(returns)
+    variance = sum((r - avg) ** 2 for r in returns) / len(returns)
+    if variance < 1e-10:
+        return TARGET_PORTFOLIO_VOL  # pas de vol mesurable → utilise la cible (vol_factor=1.0)
+    std = math.sqrt(variance)
+    # 6 cycles/jour × 365 jours = 2190 cycles/an
+    annual_vol = std * math.sqrt(2190)
+    return max(0.05, min(2.0, annual_vol))
+
+
+def compute_bot_correlation(all_states: dict) -> float:
+    """
+    Corrélation moyenne (pairwise) entre les bots sur les 20 derniers trades.
+    Retourne 0.0 si pas assez de données.
+    """
+    window = 20
+    bot_returns = {}
+    for bot_id, state in all_states.items():
+        trades = state.get("trades", [])[-window:]
+        if len(trades) < 5:
+            continue
+        capital = state.get("capital", 1000.0)
+        if capital <= 0:
+            continue
+        bot_returns[bot_id] = [t.get("pnl", 0) / capital for t in trades]
+
+    bots = list(bot_returns.keys())
+    if len(bots) < 2:
+        return 0.0
+
+    min_len = min(len(bot_returns[b]) for b in bots)
+    if min_len < 3:
+        return 0.0
+
+    series = {b: bot_returns[b][-min_len:] for b in bots}
+
+    def pearson(xs, ys):
+        n = len(xs)
+        mx = sum(xs) / n
+        my = sum(ys) / n
+        num = sum((xs[i] - mx) * (ys[i] - my) for i in range(n))
+        dx = math.sqrt(sum((x - mx) ** 2 for x in xs))
+        dy = math.sqrt(sum((y - my) ** 2 for y in ys))
+        if dx == 0 or dy == 0:
+            return 0.0
+        return num / (dx * dy)
+
+    pairs = [(bots[i], bots[j]) for i in range(len(bots)) for j in range(i + 1, len(bots))]
+    if not pairs:
+        return 0.0
+    corrs = [abs(pearson(series[a], series[b])) for a, b in pairs]
+    return sum(corrs) / len(corrs)
+
+
+def compute_btc_realized_vol(ohlcv: dict) -> float:
+    """
+    Volatilité réalisée BTC sur 20 bougies (annualisée, timeframe 4h).
+    Retourne 0.0 si pas de données disponibles.
+    """
+    btc_df = None
+    if ohlcv:
+        btc_df = ohlcv.get("BTC/EUR") or ohlcv.get("BTC/USDT")
+    if btc_df is None or btc_df.empty:
+        return 0.0
+    closes = btc_df["close"].dropna()
+    if len(closes) < 5:
+        return 0.0
+    returns = closes.pct_change().dropna().iloc[-20:]
+    if len(returns) < 3:
+        return 0.0
+    std = float(returns.std())
+    # 6 candles/jour × 365 jours
+    annual_vol = std * math.sqrt(6 * 365)
+    return max(0.0, min(5.0, annual_vol))
+
+
+def compute_allocation_drift(target_weights: dict, all_states: dict) -> float:
+    """
+    Mesure l'écart entre allocation cible (Bot Z) et allocation réelle (sub-bots).
+    drift = sum(|target_weight[b] - actual_weight[b]|) pour b in VALID_BOTS
+    Valide que backtest ≈ paper live. Drift > 0.20 = warning.
+    """
+    actual_values = {}
+    total_actual = 0.0
+    for bot_id, state in all_states.items():
+        val = state.get("capital", 1000.0)
+        for pos in state.get("positions", {}).values():
+            val += pos.get("entry", 0) * pos.get("size", 0)
+        actual_values[bot_id] = val
+        total_actual += val
+
+    if total_actual <= 0:
+        return 0.0
+
+    drift = 0.0
+    for bot_id in VALID_BOTS:
+        target_w = target_weights.get(bot_id, 0.0)
+        actual_w = actual_values.get(bot_id, 0.0) / total_actual
+        drift += abs(target_w - actual_w)
+    return round(drift, 4)
 
 
 # ── Allocation principale ────────────────────────────────────────────────────
@@ -524,12 +661,27 @@ def run_bot_z_cycle(macro: dict, ohlcv: dict = None) -> dict:
     # 1. Charger les états de tous les bots valides
     all_states = {bot_id: load_bot_state(bot_id) for bot_id in BOT_STATE_FILES}
 
-    # 2. Détecter le régime + Momentum Overlay
+    # 2. BTC realized vol → injectée dans macro avant détection de régime
+    btc_vol = compute_btc_realized_vol(ohlcv) if ohlcv else 0.0
+    macro = dict(macro)  # copie pour ne pas muter l'argument
+    macro["btc_realized_vol"] = btc_vol
+
+    # Détecter le régime + Momentum Overlay
     regime_info = detect_regime_score(macro)
     regime = regime_info["regime"]
+    regime_confidence = regime_info["confidence"]
 
-    # 3. Circuit Breaker — calcul DD portefeuille sur z_capital
+    # 3. Charger state + regime persistence tracking
     state = load_state()
+
+    # Persistance du régime : confiance pleine après REGIME_PERSIST_DAYS jours
+    last_regime_for_persist = state.get("last_regime", regime)
+    days_in_regime = state.get("days_in_regime", 0)
+    if regime == last_regime_for_persist:
+        days_in_regime += 1
+    else:
+        days_in_regime = 0  # reset si changement de régime
+    regime_strength = min(1.0, days_in_regime / max(REGIME_PERSIST_DAYS, 1))
 
     # Valeur actuelle de chaque sub-bot (capital libre + positions mark-to-market)
     # Si ohlcv disponible → prix live ; sinon → prix d'entrée (approximation)
@@ -576,8 +728,6 @@ def run_bot_z_cycle(macro: dict, ohlcv: dict = None) -> dict:
     elif port_dd > -0.10:
         cb_factor = min(1.0, cb_factor + CB_RECOVERY)
 
-    cb_active = cb_factor < 1.0
-
     # 4. Meta v2 — Sélection d'engine avec hysteresis
     vix = macro.get("vix", 15.0)
     btc_trend   = macro.get("btc_context", {}).get("btc_trend", "bull")
@@ -587,28 +737,19 @@ def run_bot_z_cycle(macro: dict, ohlcv: dict = None) -> dict:
     rolling_scores = {b: compute_rolling_score(b, s) for b, s in all_states.items()}
     bot_vols       = {b: compute_bot_volatility(s)   for b, s in all_states.items()}
 
-    raw_engine     = select_engine_live(vix, btc_bearish, qqq_bearish,
-                                        port_dd, regime, rolling_scores, bot_vols)
-
-    # Raisons de sélection d'engine (pour historique et debug)
-    _hard_pro = ((btc_bearish and qqq_bearish and vix > 26) or vix > 32 or port_dd < -0.12)
-    engine_reason = {
-        "hard_rule_pro":      _hard_pro,
-        "block_enhanced":     btc_bearish or qqq_bearish,
-        "btc_bearish":        btc_bearish,
-        "qqq_bearish":        qqq_bearish,
-        "vix":                round(vix, 1),
-        "port_dd_pct":        round(port_dd * 100, 2),
-        "regime":             regime,
-        "raw_engine":         raw_engine,
-        "rolling_scores":     {b: round(v, 3) for b, v in rolling_scores.items()},
-        "bot_vols":           {b: round(v, 3) for b, v in bot_vols.items()},
-    }
-
     # Hysteresis : on attend N jours de confirmation avant de switcher
     current_engine = state.get("current_engine", "OMEGA")
-    pending_engine = state.get("pending_engine", raw_engine)
+    pending_engine = state.get("pending_engine", "OMEGA")
     days_pending   = state.get("days_pending", 0)
+
+    # Sélection engine avec switch penalty + confidence × persistence
+    raw_engine = select_engine_live(
+        vix, btc_bearish, qqq_bearish, port_dd, regime,
+        rolling_scores, bot_vols,
+        current_engine=current_engine,
+        regime_confidence=regime_confidence,
+        regime_strength=regime_strength,
+    )
 
     prev_engine = current_engine  # pour détecter les switchs
     if raw_engine != pending_engine:
@@ -622,8 +763,25 @@ def run_bot_z_cycle(macro: dict, ohlcv: dict = None) -> dict:
         engine_switched = (current_engine != pending_engine)
         current_engine = pending_engine
 
-    engine_reason["engine_switched"] = engine_switched
-    engine_reason["prev_engine"]     = prev_engine
+    # Raisons de sélection d'engine (pour historique et debug)
+    _hard_pro = ((btc_bearish and qqq_bearish and vix > 26) or vix > 32 or port_dd < -0.12)
+    engine_reason = {
+        "hard_rule_pro":      _hard_pro,
+        "block_enhanced":     btc_bearish or qqq_bearish,
+        "btc_bearish":        btc_bearish,
+        "qqq_bearish":        qqq_bearish,
+        "vix":                round(vix, 1),
+        "port_dd_pct":        round(port_dd * 100, 2),
+        "regime":             regime,
+        "regime_confidence":  round(regime_confidence, 2),
+        "regime_strength":    round(regime_strength, 2),
+        "btc_realized_vol":   round(btc_vol, 3),
+        "raw_engine":         raw_engine,
+        "rolling_scores":     {b: round(v, 3) for b, v in rolling_scores.items()},
+        "bot_vols":           {b: round(v, 3) for b, v in bot_vols.items()},
+        "engine_switched":    engine_switched,
+        "prev_engine":        prev_engine,
+    }
 
     # CB seuils adaptés par engine (PRO plus sensible)
     cb_tiers = {
@@ -640,27 +798,47 @@ def run_bot_z_cycle(macro: dict, ohlcv: dict = None) -> dict:
     if target_factor < cb_factor:
         cb_factor = max(target_factor, cb_factor - 0.05)
 
-    # 5. Allocation Meta v2 (engine sélectionné + CB)
-    allocation = compute_shadow_allocation(regime, all_states, macro, cb_factor, current_engine)
+    # Vol targeting global : ajuste l'exposition si le portefeuille est trop volatil
+    z_capital_history = state.get("z_capital_history", [])
+    z_capital_history.append(new_z_capital)
+    z_capital_history = z_capital_history[-25:]  # garde 25 valeurs (20 retours + marge)
+    portfolio_vol = compute_portfolio_vol(z_capital_history)
+    vol_factor = max(0.3, min(1.5, TARGET_PORTFOLIO_VOL / max(portfolio_vol, 0.01)))
+    cb_factor_vol = round(cb_factor * vol_factor, 3)
+
+    # Corrélation inter-bots : si trop corrélés → réduit l'exposition de 20%
+    avg_corr = compute_bot_correlation(all_states)
+    corr_factor = 0.80 if avg_corr > CORR_REDUCE_THRESHOLD else 1.0
+    cb_factor_final = max(CB_MIN_FACTOR, cb_factor_vol * corr_factor)
+
+    # 5. Allocation Meta v2 (engine sélectionné + CB final)
+    allocation = compute_shadow_allocation(regime, all_states, macro, cb_factor_final, current_engine)
 
     # 6. Budget dispatch — écriture logs/bot_z/budget.json pour les sub-bots
     alloc_weights = {b: allocation[b]["weight_final"] for b in VALID_BOTS if b in allocation}
-    budget = {b: round(new_z_capital * cb_factor * alloc_weights.get(b, 0.0), 2) for b in VALID_BOTS}
+    budget = {b: round(new_z_capital * cb_factor_final * alloc_weights.get(b, 0.0), 2) for b in VALID_BOTS}
     _write_budget(budget)
 
-    # 7. Analyse exposition croisée
+    # 7. Analyse exposition croisée + drift d'allocation
     cross = analyze_cross_exposure(all_states, allocation)
+    alloc_drift = compute_allocation_drift(alloc_weights, all_states)
 
     # 8. Warnings
     warnings_list = []
-    if cb_active:
+    if cb_factor_final < 1.0:
         warnings_list.append(
-            f"CIRCUIT BREAKER actif — DD={port_dd*100:.1f}% | expo={cb_factor*100:.0f}%"
+            f"CIRCUIT BREAKER actif — DD={port_dd*100:.1f}% | expo={cb_factor_final*100:.0f}%"
         )
     if current_engine != "ENHANCED":
         warnings_list.append(f"Engine actif : {current_engine} (pending={pending_engine}, j={days_pending})")
     if vix > CASH_VIX_THRESHOLD:
         warnings_list.append(f"HIGH_VOL forcé (VIX={vix:.1f} > {CASH_VIX_THRESHOLD})")
+    if btc_vol > BTC_HIGH_VOL_THRESHOLD:
+        warnings_list.append(f"BTC realized vol élevée ({btc_vol:.0%}) → HIGH_VOL override")
+    if avg_corr > CORR_REDUCE_THRESHOLD:
+        warnings_list.append(f"Corrélation inter-bots élevée ({avg_corr:.0%}) → expo ×0.80")
+    if alloc_drift > 0.20:
+        warnings_list.append(f"Drift allocation élevé ({alloc_drift:.0%}) — backtest ≠ paper")
     for sym, info in cross.items():
         if info["warning"]:
             prio = info["priority_bot"]
@@ -678,20 +856,29 @@ def run_bot_z_cycle(macro: dict, ohlcv: dict = None) -> dict:
     summary = {
         "timestamp":          ts,
         "regime":             regime,
-        "regime_confidence":  regime_info["confidence"],
+        "regime_confidence":  regime_confidence,
+        "regime_strength":    round(regime_strength, 2),
+        "days_in_regime":     days_in_regime,
         "vix":                vix,
         "qqq_ok":             macro.get("qqq_regime_ok", True),
         "btc_trend":          macro.get("btc_context", {}).get("btc_trend", "?"),
+        "btc_realized_vol":   round(btc_vol, 3),
         "allocation":         allocation,
         "cross_exposure":     cross,
+        "alloc_drift":        alloc_drift,
         "warnings":           warnings_list,
         "bot_values":         bot_values,
         "total_simulated_eur": round(new_z_capital, 2),
         "z_capital_eur":      round(new_z_capital, 2),
         "initial_capital":    INITIAL_CAP,
         "perf_pct":           round(perf_pct, 2),
-        "cb_factor":          round(cb_factor, 2),
-        "cb_active":          cb_active,
+        "cb_factor":          round(cb_factor_final, 2),
+        "cb_active":          cb_factor_final < 1.0,
+        "cb_factor_raw":      round(cb_factor, 2),
+        "vol_factor":         round(vol_factor, 3),
+        "portfolio_vol":      round(portfolio_vol, 3),
+        "corr_factor":        corr_factor,
+        "avg_bot_corr":       round(avg_corr, 3),
         "port_dd":            round(port_dd * 100, 2),
         "days_running":       days_running,
         "paper_start":        PAPER_START_DATE,
@@ -709,25 +896,32 @@ def run_bot_z_cycle(macro: dict, ohlcv: dict = None) -> dict:
     _log_shadow(summary)
 
     # 12. Mise à jour state
-    state["cb_peak"]           = round(cb_peak, 2)
-    state["cb_factor"]         = round(cb_factor, 3)
-    state["z_capital"]         = round(new_z_capital, 2)
-    state["last_bot_values"]   = bot_values
-    state["last_alloc_weights"] = alloc_weights
-    state["current_engine"]    = current_engine
-    state["pending_engine"]    = pending_engine
-    state["days_pending"]      = days_pending
-    state["regime_history"].append({"ts": ts, "regime": regime, "engine": current_engine,
-                                    "confidence": regime_info["confidence"]})
+    state["cb_peak"]             = round(cb_peak, 2)
+    state["cb_factor"]           = round(cb_factor, 3)
+    state["z_capital"]           = round(new_z_capital, 2)
+    state["z_capital_history"]   = z_capital_history
+    state["last_bot_values"]     = bot_values
+    state["last_alloc_weights"]  = alloc_weights
+    state["current_engine"]      = current_engine
+    state["pending_engine"]      = pending_engine
+    state["days_pending"]        = days_pending
+    state["days_in_regime"]      = days_in_regime
+    state["last_portfolio_vol"]  = round(portfolio_vol, 4)
+    state["last_vol_factor"]     = round(vol_factor, 4)
+    state["last_avg_corr"]       = round(avg_corr, 4)
+    state["last_alloc_drift"]    = alloc_drift
+    state["regime_history"].append({
+        "ts": ts, "regime": regime, "engine": current_engine,
+        "confidence": regime_confidence, "strength": round(regime_strength, 2),
+    })
     state["regime_history"] = state["regime_history"][-500:]
     state["allocation_history"].append({"ts": ts, "allocation": {k: v["budget_eur"] for k, v in allocation.items()}})
-    state["allocation_history"] = state["allocation_history"][-500:]
+    state["allocation_history"]  = state["allocation_history"][-500:]
     state["last_regime"]         = regime
     state["last_regime_info"]    = regime_info
     state["last_allocation"]     = allocation
     state["last_cross_exposure"] = cross
     state["last_warnings"]       = warnings_list
-    state["last_bot_values"]     = bot_values
     state["total_simulated_eur"] = round(new_z_capital, 2)
     state["perf_pct"]            = round(perf_pct, 2)
     state["days_running"]        = days_running
