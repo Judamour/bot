@@ -63,13 +63,18 @@ ADX_PERIOD = 14     # Période ADX
 ADX_THRESHOLD = 22  # ADX > 22 = tendance suffisante
 
 # ── Gestion du risque ───────────────────────────────────────────────────────
-POSITION_SIZE_PCT = 0.10  # 10% du capital disponible par position
+POSITION_SIZE_PCT = 0.15  # 15% du capital disponible par position
 POSITION_MIN_EUR  = 20    # Plancher absolu (évite des positions ridicules)
-ATR_MULTIPLIER = 3.0     # Stop-loss = 3x ATR sous le prix d'entrée (adapté au 4h)
-TAKE_PROFIT_RATIO = 3.0  # Take-profit = 3.0x le stop-loss (ratio R:R = 1:3)
-MAX_OPEN_TRADES = 8      # Maximum de trades ouverts simultanément
+ATR_MULTIPLIER = 3.0     # Stop-loss = 3x ATR (trend following)
+TAKE_PROFIT_RATIO = 3.0  # (référence calcul, non utilisé en live — trailing stop)
+MAX_OPEN_TRADES = 6      # Maximum de trades ouverts simultanément
 TARGET_VOL   = 0.15     # Volatilité annualisée cible (15%) pour le vol targeting
 MAX_LEVERAGE = 1.3      # Exposition max (×1.3 position de base)
+
+# ── Mean Reversion (RSI 2 — marché en range) ────────────────────────────────
+MR_RSI_ENTRY       = 10   # RSI(2) < 10 → signal d'achat mean reversion
+MR_RSI_EXIT        = 90   # RSI(2) > 90 → sortie mean reversion
+MR_ATR_MULTIPLIER  = 1.0  # Stop serré : 1×ATR (vs 3×ATR pour trend)
 
 # ── Coûts de transaction ────────────────────────────────────────────────────
 EXCHANGE_FEE = 0.0026   # 0.26% taker Kraken (pire cas)

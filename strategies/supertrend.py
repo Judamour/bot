@@ -104,7 +104,8 @@ def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     df["ema21"] = compute_ema(df["close"], span=config.EMA_SLOW)
     df["ema50"] = compute_ema(df["close"], span=50)
     df["ema200"] = compute_ema(df["close"], span=200)
-    df["rsi"] = compute_rsi(df["close"], length=14)
+    df["rsi"]  = compute_rsi(df["close"], length=14)
+    df["rsi2"] = compute_rsi(df["close"], length=2)
     df["atr"] = compute_atr(df["high"], df["low"], df["close"], length=14)
     df["adx"] = compute_adx(df["high"], df["low"], df["close"], length=config.ADX_PERIOD)
     # Volume : remplacer 0 (hors heures marché xStocks) par NaN puis ffill
@@ -152,18 +153,29 @@ def generate_signals(df: pd.DataFrame) -> pd.DataFrame:
     df["f_rsi"]           = not_overbought
     df["f_volume"]        = strong_volume
 
-    df["signal"] = 0
-    # ── 3 conditions hard (non négociables) ──────────────────────────────────
-    # Supertrend flip + pas de surachat RSI + prix au-dessus EMA200
-    # Les 4 autres filtres (ADX, volume, structure, momentum) sont passés à
-    # Claude comme contexte — il est le décideur final.
-    df.loc[
-        supertrend_up
-        & not_overbought
-        & above_ema200,
-        "signal",
-    ] = 1
-    df.loc[supertrend_down, "signal"] = -1
+    # ── Signal Trend Following ───────────────────────────────────────────────
+    trend_buy  = supertrend_up & not_overbought & above_ema200
+    trend_exit = supertrend_down
+
+    # ── Signal Mean Reversion ────────────────────────────────────────────────
+    # Conditions : RSI(2) < 10 (extrême survente) + prix > EMA200 (uptrend)
+    #              + Supertrend pas baissier (évite couteaux qui tombent)
+    mr_buy  = (
+        (df["rsi2"] < config.MR_RSI_ENTRY)
+        & above_ema200
+        & (df["supertrend_dir"] != -1)
+    )
+    mr_exit = df["rsi2"] > config.MR_RSI_EXIT
+
+    # ── Combinaison : trend prioritaire sur MR ───────────────────────────────
+    df["signal"]    = 0
+    df["mr_signal"] = 0
+
+    df.loc[trend_buy,  "signal"] = 1
+    df.loc[trend_exit, "signal"] = -1
+
+    df.loc[mr_buy,  "mr_signal"] = 1
+    df.loc[mr_exit, "mr_signal"] = -1
 
     return df
 

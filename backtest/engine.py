@@ -35,15 +35,19 @@ def run_backtest(symbol: str, timeframe: str = config.TIMEFRAME, days: int = con
     equity_dates = [df.index[0]]
 
     for i, (ts, row) in enumerate(df.iterrows()):
-        # Vérifier stop-loss / take-profit si position ouverte
+        # Vérifier sortie si position ouverte
         if position:
+            stype = position.get("stype", "trend")
             exit_reason = None
             exit_price = row["close"]
 
-            if row["low"] <= position["stop"]:
+            # Sortie Mean Reversion : RSI(2) > 90
+            if stype == "mr" and row["mr_signal"] == -1:
+                exit_reason = "mr_exit"
+            elif row["low"] <= position["stop"]:
                 exit_price = position["stop"]
                 exit_reason = "stop_loss"
-            elif row["signal"] == -1:
+            elif stype == "trend" and row["signal"] == -1:
                 exit_reason = "signal"
 
             if exit_reason:
@@ -61,31 +65,52 @@ def run_backtest(symbol: str, timeframe: str = config.TIMEFRAME, days: int = con
                     "pnl": pnl,
                     "pnl_pct": pnl / (position["entry"] * position["size"]) * 100,
                     "reason": exit_reason,
+                    "stype": stype,
                     "result": "win" if pnl > 0 else "loss",
                 })
                 position = None
-            else:
-                # ATR trailing stop : monte le stop si le prix progresse
+            elif stype == "trend":
+                # ATR trailing uniquement pour les trades de tendance
                 new_stop = row["close"] - config.ATR_MULTIPLIER * row["atr"]
                 if new_stop > position["stop"]:
                     position["stop"] = new_stop
 
-        # Ouvrir position sur signal achat (si pas déjà en position)
-        if row["signal"] == 1 and position is None and capital > 0:
-            entry_price = row["close"] * (1 + config.SLIPPAGE)
+        # ── Ouverture position ───────────────────────────────────────────────
+        if position is None and capital > 0:
             position_eur = max(config.POSITION_MIN_EUR, capital * config.POSITION_SIZE_PCT)
-            pos = calculate_position_size(position_eur, entry_price, row["atr"])
-            fee_entry = entry_price * pos["size"] * config.EXCHANGE_FEE
-            cost = pos["size"] * entry_price + fee_entry
-            if cost <= capital:
-                position = {
-                    "entry": entry_price,
-                    "size": pos["size"],
-                    "stop": pos["stop_loss"],
-                    "tp": pos["take_profit"],
-                    "date": ts,
-                    "fee_entry": fee_entry,
-                }
+
+            # Trend signal (prioritaire)
+            if row["signal"] == 1:
+                entry_price = row["close"] * (1 + config.SLIPPAGE)
+                pos = calculate_position_size(position_eur, entry_price, row["atr"])
+                fee_entry = entry_price * pos["size"] * config.EXCHANGE_FEE
+                cost = pos["size"] * entry_price + fee_entry
+                if cost <= capital:
+                    position = {
+                        "entry": entry_price,
+                        "size": pos["size"],
+                        "stop": pos["stop_loss"],
+                        "date": ts,
+                        "fee_entry": fee_entry,
+                        "stype": "trend",
+                    }
+
+            # Mean Reversion signal (si pas de trend signal)
+            elif row["mr_signal"] == 1:
+                entry_price = row["close"] * (1 + config.SLIPPAGE)
+                size = position_eur / entry_price
+                stop = entry_price - config.MR_ATR_MULTIPLIER * row["atr"]
+                fee_entry = entry_price * size * config.EXCHANGE_FEE
+                cost = size * entry_price + fee_entry
+                if cost <= capital:
+                    position = {
+                        "entry": entry_price,
+                        "size": size,
+                        "stop": stop,
+                        "date": ts,
+                        "fee_entry": fee_entry,
+                        "stype": "mr",
+                    }
 
         equity_curve.append(capital)
         equity_dates.append(ts)

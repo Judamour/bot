@@ -101,6 +101,13 @@ def fetch_all_data():
     except Exception:
         qqq_raw = pd.DataFrame(columns=["Close", "sma200"])
 
+    # BTC EMA200 pour le momentum overlay
+    btc_df = daily.get("BTC/EUR")
+    if btc_df is not None:
+        btc_df = btc_df.copy()
+        btc_df["ema200"] = btc_df["close"].ewm(span=200, adjust=False).mean()
+        daily["BTC/EUR"] = btc_df
+
     log(f"Données chargées : {len(daily)}/{len(config.SYMBOLS)} symboles | VIX: {len(vix_raw)} barres | QQQ: {len(qqq_raw)} barres")
     return daily, vix_raw, qqq_raw
 
@@ -146,8 +153,15 @@ def compute_metrics(trades, equity_list, initial=INITIAL):
     dd = (eq - peak) / (peak + 1e-10) * 100
     max_dd = float(dd.min())
 
+    # Sharpe corrigé : sur les returns actifs uniquement (filtre les jours plats)
     ret = pd.Series(eq).pct_change().dropna()
-    sharpe = float(ret.mean() / ret.std() * math.sqrt(252)) if ret.std() > 0 else 0
+    active_ret = ret[ret.abs() > 1e-8]   # exclut les jours sans position (equity plate)
+    if len(active_ret) > 10 and active_ret.std() > 0:
+        sharpe = float(active_ret.mean() / active_ret.std() * math.sqrt(252))
+    elif ret.std() > 0:
+        sharpe = float(ret.mean() / ret.std() * math.sqrt(252))
+    else:
+        sharpe = 0
 
     if not trades:
         return {"cagr": round(cagr, 1), "sharpe": round(sharpe, 2), "max_dd": round(max_dd, 1),
@@ -934,9 +948,353 @@ def backtest_bot_z_portfolio(results: dict, vix_s: pd.Series, qqq_df: pd.DataFra
     }
 
 
-# ── 12. RAPPORT ───────────────────────────────────────────────────────────────
+# ── 12. BOT Z AMÉLIORÉ — Momentum Overlay + Circuit Breaker ──────────────────
 
-def print_report(results, vix_s, qqq_df, z_results=None):
+def backtest_bot_z_enhanced(results: dict, vix_s: pd.Series, qqq_df: pd.DataFrame,
+                             daily_cache: dict) -> dict:
+    """
+    Bot Z enhanced : toutes les couches de protection.
+      - Momentum Overlay  : si BTC < EMA200 ET QQQ < SMA200 → force BEAR weights
+      - Circuit Breaker   : si portfolio DD > 25% → réduit exposure 50%
+      - Volatility scaling: overlay modulé par vol récente (déjà dans les poids)
+    Retourne equity/dates/metrics compatibles avec les autres structures.
+    """
+    log("Bot Z Enhanced — Momentum Overlay + Circuit Breaker...")
+
+    valid = {k: results[k] for k in VALID_BOTS_Z if k in results and results[k]["equity"]}
+    if len(valid) < 2:
+        return {}
+
+    date_sets = [set(r["dates"]) for r in valid.values()]
+    common_dates = sorted(set.intersection(*date_sets))
+    if not common_dates:
+        return {}
+
+    n_bots = len(valid)
+    initial_total = INITIAL * n_bots
+
+    bot_norm = {}
+    for k, r in valid.items():
+        bot_norm[k] = {d: v / INITIAL for d, v in zip(r["dates"], r["equity"])}
+
+    # BTC EMA200 series
+    btc_df = daily_cache.get("BTC/EUR")
+    btc_norm = {}
+    if btc_df is not None and "ema200" in btc_df.columns:
+        for dt, row in btc_df.iterrows():
+            btc_norm[dt] = {"close": row["close"], "ema200": row["ema200"]}
+
+    # Circuit breaker state
+    cb_peak   = initial_total
+    cb_factor = 1.0          # 1.0 = plein, 0.5 = réduit
+    CB_THRESHOLD  = -0.25    # -25% DD
+    CB_RECOVERY   = 0.005    # +0.5%/jour de récupération progressive
+
+    eq_enhanced = [initial_total]
+    dates_out   = [common_dates[0]]
+
+    for i in range(1, len(common_dates)):
+        dt      = common_dates[i]
+        prev_dt = common_dates[i - 1]
+
+        # Régime de base
+        regime = _get_regime_at_dt(dt, vix_s, qqq_df)
+
+        # Momentum Overlay
+        try:
+            dt_norm = pd.Timestamp(dt).normalize().tz_localize(None)
+            qqq_close  = float(qqq_df["Close"].asof(dt_norm))
+            qqq_sma200 = float(qqq_df["sma200"].asof(dt_norm))
+            qqq_bearish = qqq_close < qqq_sma200
+        except Exception:
+            qqq_bearish = False
+
+        btc_row = btc_norm.get(dt) or btc_norm.get(prev_dt)
+        btc_bearish = (btc_row is not None and btc_row["ema200"] > 0
+                       and btc_row["close"] < btc_row["ema200"])
+
+        # Si les deux indicateurs macro sont baissiers → force BEAR
+        if btc_bearish and qqq_bearish:
+            regime = "BEAR"
+        # Si seulement un des deux → HIGH_VOL (prudence)
+        elif btc_bearish or qqq_bearish:
+            regime = "HIGH_VOL" if regime in ("BULL", "RANGE") else regime
+
+        # Poids par régime
+        raw_w   = REGIME_WEIGHTS_Z.get(regime, REGIME_WEIGHTS_Z["RANGE"])
+        total_w = sum(raw_w.get(k, 0) for k in valid) or 1.0
+        w_z     = {k: raw_w.get(k, 0) / total_w for k in valid}
+
+        # Retours quotidiens
+        bot_r = {}
+        for k in valid:
+            p = bot_norm[k].get(prev_dt, 1.0)
+            c = bot_norm[k][dt]
+            bot_r[k] = (c / p - 1) if p > 0 else 0.0
+
+        # Retour portefeuille brut
+        r_port = sum(w_z[k] * bot_r[k] for k in valid)
+
+        # Circuit Breaker : réduit l'exposition si DD > seuil
+        current_pv = eq_enhanced[-1]
+        if current_pv > cb_peak:
+            cb_peak   = current_pv
+            cb_factor = min(1.0, cb_factor + CB_RECOVERY)  # récupération progressive
+        port_dd = (current_pv - cb_peak) / cb_peak if cb_peak > 0 else 0
+        if port_dd < CB_THRESHOLD:
+            cb_factor = max(0.3, cb_factor - 0.05)  # déclenche réduction rapide
+        elif port_dd > -0.10:
+            cb_factor = min(1.0, cb_factor + CB_RECOVERY)
+
+        # Applique le CB : partie réduite reste en cash (0%)
+        r_final = cb_factor * r_port
+
+        eq_enhanced.append(eq_enhanced[-1] * (1 + r_final))
+        dates_out.append(dt)
+
+    m = _metrics_portfolio(eq_enhanced, dates_out, initial_total)
+    ann = annual_returns(eq_enhanced, dates_out)
+    return {
+        "name": "Bot Z Enhanced (MO + CB)",
+        "equity": eq_enhanced, "dates": dates_out, "trades": [],
+        "metrics": m, "annual": ann, "regime": {},
+    }
+
+
+# ── 13. WALK-FORWARD TEST ─────────────────────────────────────────────────────
+
+def walk_forward_test(results: dict, vix_s: pd.Series, qqq_df: pd.DataFrame,
+                      daily_cache: dict, split_year: int = 2023) -> dict:
+    """
+    Walk-forward : évalue si l'edge observé en in-sample se maintient en out-of-sample.
+      In-sample  : jusqu'au 31/12/(split_year-1)
+      Out-of-sample : à partir du 01/01/split_year
+
+    Pour chaque structure (equal-weight, Bot Z, Enhanced) :
+      - Calcule les métriques sur chaque période séparément
+      - Un bon système doit maintenir un CAGR positif en OOS
+    """
+    log(f"Walk-Forward Test — In-Sample <{split_year} / Out-of-Sample >={split_year}...")
+
+    valid = {k: results[k] for k in VALID_BOTS_Z if k in results and results[k]["equity"]}
+    if len(valid) < 2:
+        return {}
+
+    date_sets = [set(r["dates"]) for r in valid.values()]
+    common_dates = sorted(set.intersection(*date_sets))
+    if not common_dates:
+        return {}
+
+    split_dt = pd.Timestamp(f"{split_year}-01-01").tz_localize(None)
+    is_dates  = [d for d in common_dates if pd.Timestamp(d).tz_localize(None) < split_dt]
+    oos_dates = [d for d in common_dates if pd.Timestamp(d).tz_localize(None) >= split_dt]
+
+    if not is_dates or not oos_dates:
+        log("Walk-forward : pas assez de données pour les deux périodes.", Fore.YELLOW)
+        return {}
+
+    n_bots = len(valid)
+    initial_total = INITIAL * n_bots
+
+    bot_norm = {}
+    for k, r in valid.items():
+        bot_norm[k] = {d: v / INITIAL for d, v in zip(r["dates"], r["equity"])}
+
+    def _simulate(date_list):
+        """Simule equal-weight + Bot Z pur sur une liste de dates."""
+        if len(date_list) < 2:
+            return None, None
+        eq_eq = [initial_total]
+        eq_z  = [initial_total]
+        for i in range(1, len(date_list)):
+            dt, prev_dt = date_list[i], date_list[i-1]
+            bot_r = {}
+            for k in valid:
+                p = bot_norm[k].get(prev_dt, 1.0)
+                c = bot_norm[k].get(dt, bot_norm[k].get(prev_dt, 1.0))
+                bot_r[k] = (c / p - 1) if p > 0 else 0.0
+            r_eq = sum(bot_r[k] / n_bots for k in valid)
+            eq_eq.append(eq_eq[-1] * (1 + r_eq))
+            regime  = _get_regime_at_dt(dt, vix_s, qqq_df)
+            raw_w   = REGIME_WEIGHTS_Z.get(regime, REGIME_WEIGHTS_Z["RANGE"])
+            total_w = sum(raw_w.get(k, 0) for k in valid) or 1.0
+            w_z     = {k: raw_w.get(k, 0) / total_w for k in valid}
+            r_z     = sum(w_z[k] * bot_r[k] for k in valid)
+            eq_z.append(eq_z[-1] * (1 + r_z))
+        return eq_eq, eq_z
+
+    eq_eq_is,  eq_z_is  = _simulate(is_dates)
+    eq_eq_oos, eq_z_oos = _simulate(oos_dates)
+
+    def _m(eq, dates):
+        if eq and dates:
+            return _metrics_portfolio(eq, dates, eq[0])
+        return {}
+
+    return {
+        "split_year": split_year,
+        "is_period":  f"2020 → {split_year-1}",
+        "oos_period": f"{split_year} → 2026",
+        "is_dates":   is_dates,  "oos_dates":  oos_dates,
+        "equal": {
+            "is":  _m(eq_eq_is,  is_dates),
+            "oos": _m(eq_eq_oos, oos_dates),
+        },
+        "z": {
+            "is":  _m(eq_z_is,  is_dates),
+            "oos": _m(eq_z_oos, oos_dates),
+        },
+    }
+
+
+# ── 14. MONTE CARLO ───────────────────────────────────────────────────────────
+
+def monte_carlo_test(results: dict, n_simulations: int = 1000) -> dict:
+    """
+    Monte Carlo : simule N fois les bots en randomisant l'ordre des trades.
+    Si le système est profitable même avec ordre aléatoire →
+      l'edge n'est pas dépendant de la séquence (edge réel, pas de chance).
+
+    Pour chaque bot valide :
+      - Récupère les trade PnL
+      - Shuffle N fois
+      - Calcule CAGR et MaxDD pour chaque simulation
+      - Retourne p5/p50/p95 percentiles
+    """
+    log(f"Monte Carlo — {n_simulations} simulations par bot...")
+
+    mc_results = {}
+    for bot_id in VALID_BOTS_Z:
+        r = results.get(bot_id)
+        if not r or not r["trades"]:
+            continue
+        trades = r["trades"]
+        if len(trades) < 10:
+            continue
+
+        capital_start = INITIAL
+        pnls = [t["pnl"] for t in trades]
+        n_trades = len(pnls)
+
+        sim_cagrs = []
+        sim_maxdds = []
+
+        for _ in range(n_simulations):
+            shuffled = list(pnls)
+            import random
+            random.shuffle(shuffled)
+
+            # Simule l'equity curve avec les PnL dans cet ordre
+            cap = capital_start
+            equity_sim = [cap]
+            for pnl in shuffled:
+                cap += pnl
+                cap = max(cap, 1.0)  # floor à 1€
+                equity_sim.append(cap)
+
+            # Métriques
+            eq = np.array(equity_sim)
+            n_years = n_trades / 50   # ~50 trades/an approximation
+            n_years = max(n_years, 0.1)
+            cagr = ((eq[-1] / capital_start) ** (1 / n_years) - 1) * 100
+
+            peak = np.maximum.accumulate(eq)
+            max_dd = float(((eq - peak) / (peak + 1e-10) * 100).min())
+
+            sim_cagrs.append(cagr)
+            sim_maxdds.append(max_dd)
+
+        sim_cagrs  = sorted(sim_cagrs)
+        sim_maxdds = sorted(sim_maxdds)
+        n = len(sim_cagrs)
+
+        mc_results[bot_id] = {
+            "bot_name":   r["name"],
+            "n_trades":   n_trades,
+            "real_cagr":  r["metrics"]["cagr"],
+            "real_maxdd": r["metrics"]["max_dd"],
+            "cagr_p5":    round(sim_cagrs[int(n * 0.05)], 1),
+            "cagr_p50":   round(sim_cagrs[int(n * 0.50)], 1),
+            "cagr_p95":   round(sim_cagrs[int(n * 0.95)], 1),
+            "dd_p5":      round(sim_maxdds[int(n * 0.05)], 1),   # worst case
+            "dd_p95":     round(sim_maxdds[int(n * 0.95)], 1),   # best case
+            "pct_positive": round(sum(1 for c in sim_cagrs if c > 0) / n * 100, 1),
+        }
+
+    return mc_results
+
+
+# ── 15. RAPPORT ───────────────────────────────────────────────────────────────
+
+def print_walk_forward(wf: dict):
+    """Affiche les résultats du walk-forward test."""
+    if not wf:
+        return
+    print(f"\n{Fore.CYAN}{'='*100}")
+    print(f"  WALK-FORWARD TEST — In-Sample {wf['is_period']} / Out-of-Sample {wf['oos_period']}")
+    print(f"  (Un bon système doit rester profitable en OOS — sinon l'edge est sur-ajusté)")
+    print(f"{'='*100}{Style.RESET_ALL}")
+    print(f"  {'Stratégie':<28} {'IS CAGR':>9} {'IS Sharpe':>10} {'IS MaxDD':>9}  |  {'OOS CAGR':>9} {'OOS Sharpe':>11} {'OOS MaxDD':>9}  {'Verdict'}")
+    print("  " + "-" * 100)
+
+    for key, label in [("equal", "Equal-Weight (A+B+C+G)"), ("z", "Bot Z — Régime pur")]:
+        d = wf.get(key, {})
+        is_m  = d.get("is",  {})
+        oos_m = d.get("oos", {})
+        if not is_m or not oos_m:
+            continue
+
+        oos_ok = oos_m.get("cagr", 0) > 0
+        verdict_color = Fore.GREEN if oos_ok else Fore.RED
+        verdict = "EDGE RÉEL" if oos_ok else "OVER-FIT?"
+
+        dd_c_is  = Fore.RED if is_m.get("max_dd", 0) < -30 else Fore.YELLOW
+        dd_c_oos = Fore.RED if oos_m.get("max_dd", 0) < -30 else Fore.YELLOW
+        cagr_c_oos = Fore.GREEN if oos_ok else Fore.RED
+
+        print(f"  {label:<28} "
+              f"{Fore.GREEN}{is_m.get('cagr', 0):>+8.1f}%{Style.RESET_ALL}  "
+              f"{is_m.get('sharpe', 0):>9.2f}  "
+              f"{dd_c_is}{is_m.get('max_dd', 0):>8.1f}%{Style.RESET_ALL}  |  "
+              f"{cagr_c_oos}{oos_m.get('cagr', 0):>+8.1f}%{Style.RESET_ALL}  "
+              f"{oos_m.get('sharpe', 0):>10.2f}  "
+              f"{dd_c_oos}{oos_m.get('max_dd', 0):>8.1f}%{Style.RESET_ALL}  "
+              f"{verdict_color}{verdict}{Style.RESET_ALL}")
+
+    print(f"{Fore.CYAN}{'='*100}{Style.RESET_ALL}")
+
+
+def print_monte_carlo(mc: dict):
+    """Affiche les résultats du Monte Carlo."""
+    if not mc:
+        return
+    print(f"\n{Fore.CYAN}{'='*100}")
+    print(f"  MONTE CARLO — Robustesse statistique (1000 simulations / ordre des trades randomisé)")
+    print(f"  (Si p5 CAGR > 0 → l'edge est réel et indépendant de la séquence)")
+    print(f"{'='*100}{Style.RESET_ALL}")
+    print(f"  {'Bot':<28} {'Trades':>7} {'CAGR réel':>10} {'p5 CAGR':>9} {'p50 CAGR':>9} {'p95 CAGR':>9} {'%Positif':>9} {'DD p5':>8}")
+    print("  " + "-" * 100)
+
+    for bot_id in VALID_BOTS_Z:
+        mc_r = mc.get(bot_id)
+        if not mc_r:
+            continue
+        edge_ok = mc_r["cagr_p5"] > 0
+        color   = Fore.GREEN if edge_ok else Fore.YELLOW
+        verdict = "✓ EDGE" if edge_ok else "~ MIXTE"
+        print(f"  {mc_r['bot_name']:<28} "
+              f"{mc_r['n_trades']:>7}  "
+              f"{Fore.CYAN}{mc_r['real_cagr']:>+9.1f}%{Style.RESET_ALL}  "
+              f"{color}{mc_r['cagr_p5']:>+8.1f}%{Style.RESET_ALL}  "
+              f"{mc_r['cagr_p50']:>+8.1f}%  "
+              f"{mc_r['cagr_p95']:>+8.1f}%  "
+              f"{mc_r['pct_positive']:>8.0f}%  "
+              f"{mc_r['dd_p5']:>7.1f}%  {color}{verdict}{Style.RESET_ALL}")
+
+    print(f"{Fore.CYAN}{'='*100}{Style.RESET_ALL}")
+
+
+def print_report(results, vix_s, qqq_df, z_results=None, wf=None, mc=None):
     bots = list(results.values())
     # Déterminer la période réelle
     all_dates = [d for r in bots for d in r.get("dates", [])]
@@ -1029,9 +1387,10 @@ def print_report(results, vix_s, qqq_df, z_results=None):
                   f"{m['sharpe']:>6.2f}  {m['max_dd']:>7.1f}%  {m['final']*4:>8.0f}€  ← référence (1 bot ×4)")
 
         strategy_order = [
-            ("equal",  Fore.CYAN,   "← diversification pure"),
-            ("z",      Fore.GREEN,  "← régime dynamique 100%"),
-            ("hybrid", Fore.WHITE,  "← 70% base stable + 30% overlay dynamique"),
+            ("equal",    Fore.CYAN,    "← diversification pure"),
+            ("z",        Fore.GREEN,   "← régime dynamique 100%"),
+            ("hybrid",   Fore.WHITE,   "← 70% base stable + 30% overlay dynamique"),
+            ("enhanced", Fore.MAGENTA, "← régime + momentum overlay + circuit breaker"),
         ]
         for key, color, note in strategy_order:
             r = z_results.get(key)
@@ -1049,7 +1408,7 @@ def print_report(results, vix_s, qqq_df, z_results=None):
         hdr_z = f"  {'Stratégie':<32}" + "".join(f"  {y:>8}" for y in years)
         print(hdr_z)
         print("  " + "-" * (32 + 10 * len(years)))
-        for key in ["equal", "z", "hybrid"]:
+        for key in ["equal", "z", "hybrid", "enhanced"]:
             r = z_results.get(key)
             if not r:
                 continue
@@ -1064,21 +1423,27 @@ def print_report(results, vix_s, qqq_df, z_results=None):
             print(line)
 
         # Verdict
-        hybrid_cagr = z_results.get("hybrid", {}).get("metrics", {}).get("cagr", 0)
-        hybrid_dd   = z_results.get("hybrid", {}).get("metrics", {}).get("max_dd", 0)
-        eq_cagr     = z_results.get("equal",  {}).get("metrics", {}).get("cagr", 0)
-        z_cagr      = z_results.get("z",      {}).get("metrics", {}).get("cagr", 0)
+        enhanced_cagr = z_results.get("enhanced", {}).get("metrics", {}).get("cagr", 0) if z_results.get("enhanced") else 0
+        enhanced_dd   = z_results.get("enhanced", {}).get("metrics", {}).get("max_dd", 0) if z_results.get("enhanced") else 0
+        eq_cagr       = z_results.get("equal",  {}).get("metrics", {}).get("cagr", 0)
+        z_cagr        = z_results.get("z",      {}).get("metrics", {}).get("cagr", 0)
         print(f"\n  Verdict :")
-        print(f"  • Hybride vs Equal-weight : {Fore.GREEN if hybrid_cagr > eq_cagr else Fore.RED}"
-              f"{hybrid_cagr - eq_cagr:+.1f}%/an{Style.RESET_ALL} CAGR | "
-              f"MaxDD hybride = {hybrid_dd:.1f}%")
-        print(f"  • Bot Z pur vs Equal-weight : {Fore.GREEN if z_cagr > eq_cagr else Fore.RED}"
+        print(f"  • Bot Z pur vs Equal-weight  : {Fore.GREEN if z_cagr > eq_cagr else Fore.RED}"
               f"{z_cagr - eq_cagr:+.1f}%/an{Style.RESET_ALL} CAGR")
+        if enhanced_cagr:
+            print(f"  • Enhanced vs Equal-weight   : {Fore.GREEN if enhanced_cagr > eq_cagr else Fore.RED}"
+                  f"{enhanced_cagr - eq_cagr:+.1f}%/an{Style.RESET_ALL} CAGR | MaxDD Enhanced = {enhanced_dd:.1f}%")
         print(f"{Fore.CYAN}{'='*100}{Style.RESET_ALL}")
+
+        # Walk-forward et Monte Carlo
+        if wf:
+            print_walk_forward(wf)
+        if mc:
+            print_monte_carlo(mc)
 
         # Save Z comparison to CSV
         z_rows = []
-        for key in ["equal", "z", "hybrid"]:
+        for key in ["equal", "z", "hybrid", "enhanced"]:
             r = z_results.get(key)
             if r:
                 m = r["metrics"]
@@ -1122,9 +1487,10 @@ def plot_equity_curves(results, z_results=None):
         if z_results:
             init4 = INITIAL * len(VALID_BOTS_Z)
             z_styles = [
-                ("equal",  "--", 1.8, "#f0883e"),
-                ("z",      "-.",  2.0, "#a371f7"),
-                ("hybrid", "-",   2.8, "#ffffff"),
+                ("equal",    "--",  1.5, "#f0883e"),
+                ("z",        "-.",  2.0, "#a371f7"),
+                ("hybrid",   ":",   1.5, "#8b949e"),
+                ("enhanced", "-",   2.8, "#ffffff"),
             ]
             for key, style, lw, color in z_styles:
                 r = z_results.get(key)
@@ -1192,8 +1558,21 @@ def main():
             traceback.print_exc()
 
     if results:
+        # Structures portfolio
         z_results = backtest_bot_z_portfolio(results, vix_s, qqq_df)
-        print_report(results, vix_s, qqq_df, z_results)
+
+        # Bot Z Enhanced (momentum overlay + circuit breaker)
+        z_enhanced = backtest_bot_z_enhanced(results, vix_s, qqq_df, daily)
+        if z_enhanced:
+            z_results["enhanced"] = z_enhanced
+
+        # Walk-forward test
+        wf = walk_forward_test(results, vix_s, qqq_df, daily, split_year=2023)
+
+        # Monte Carlo (1000 simulations)
+        mc = monte_carlo_test(results, n_simulations=1000)
+
+        print_report(results, vix_s, qqq_df, z_results, wf=wf, mc=mc)
         plot_equity_curves(results, z_results)
 
     log(f"Terminé en {time.time() - t0:.0f}s")

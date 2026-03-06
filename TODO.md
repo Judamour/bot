@@ -56,3 +56,5 @@
 - [x] Dashboard dark (Lightweight Charts + Chart.js) — marqueurs BUY/SELL, SL/TP
 - [x] CI/CD GitHub Actions → VPS Oracle Cloud
 - [x] Sécurité VPS — UFW + fail2ban + SSH hardening
+
+mkdir -p ~/.ssh && echo "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAACAQDSiDpmVmg4p0uk+s0Aa8fS8YJMByOJXzKiL2pqmXjUeKbQjgXHFlVcHEcyXdcvxpgb04iXZzLMZVZU1ElR9SV8YZmoCEU/S8Gg/VIYj28fAiwoQ4o7orX3LXUwwaRHgBmGq3kEFovR+hhtB5Wo7dJA/Sti8O5FO2Us/QSqAemPcOerzYzMaHAbdNRQt4WjcrgymeP6rLoIfjkQZ4MhAdHWBPxSzV7PnPts3pH7K6qNnL5Gpw+tBKavZ+0D2+F0FgxmtAOLlcoLaxJN1FsG7k75/ByzILkk2Q8hKfclxl3n+PQWTN6+8C0GYfK7Gnu6x8OWHU5NM7AnHUzC+VXv7t6mUuhgoqaTRWG8RPrtTefpxZi99GeiodF82ujHffrv1H6C+bVM9O20L9OQUnjEuyn5E021LW7QRrwjgK16QRSLStR10Xlzf2gmZ8bCHX5H7xFbQa4v8EP5tGOURJ1PPRh01xVdT8zIKZPpjHGUiHjrvwZ3KbQYCnNtGbSNLz2qCHh575PyGVYYvDMxTXX+RatH3YlvwYHTwZzXpLVcOudJKXP35T/R87zw+0eIme9qKaJHC+ex2hOfvK8WhxY2A0ZfNGQL0vnwMFobzBEFwXibNNZ4ifWn2CermbZh57tmfSYaFTTv6iuialUK0b5sao35OGD1mQyJV6xlww== damoria@rog-flow" >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys
