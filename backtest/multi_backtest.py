@@ -2,13 +2,15 @@
 """
 backtest/multi_backtest.py
 ==========================
-Backtest 3 ans — 6 bots actifs (A, B, C, G, H, I)
+Backtest multi-période — 6 bots actifs (A, B, C, G, H, I) + Bot Z portfolio
 
 Produit :
   - Tableau comparatif console (CAGR, Sharpe, MaxDD, PF, Trades, WinRate)
-  - Performance par année (2022 / 2023 / 2024)
+  - Performance par année (2020→2026)
   - Performance par régime (BULL / RANGE / BEAR / HIGH_VOL)
+  - Simulation Bot Z : equal-weight vs régime pondéré vs hybride 70/30
   - backtest/results/multi_summary.csv
+  - backtest/results/bot_z_comparison.csv
   - backtest/results/multi_equity.png
 
 Usage :
@@ -35,9 +37,18 @@ init(autoreset=True)
 INITIAL      = 1000.0
 FEE          = config.EXCHANGE_FEE
 SLIP         = config.SLIPPAGE
-DAYS         = 365 * 3 + 60          # ~3 ans + buffer warm-up
+DAYS_CRYPTO  = 365 * 6 + 60          # ~6 ans crypto (Binance depuis 2020)
+DAYS_STOCKS  = 365 * 4 + 60          # ~4 ans xStocks (yfinance)
+DAYS         = DAYS_CRYPTO            # garde compat pour les fonctions bot
 RESULTS_DIR  = "backtest/results"
 os.makedirs(RESULTS_DIR, exist_ok=True)
+
+# ── Constantes portefeuille hybride ───────────────────────────────────────────
+# 70% base equal-weight avec poids fixes
+BASE_WEIGHTS = {"g": 0.30, "a": 0.20, "b": 0.20, "c": 0.15, "cash": 0.15}
+BASE_PCT     = 0.70    # 70% du capital en base stable
+OVERLAY_PCT  = 0.30    # 30% en overlay Bot Z dynamique
+MAX_BOT_WEIGHT = 0.45  # cap max par bot (base + overlay combiné)
 
 BREAKOUT_SYMS = ["BTC/EUR", "ETH/EUR", "SOL/EUR"]
 VCB_SYMS      = ["BTC/EUR", "ETH/EUR", "SOL/EUR", "NVDAx", "AMDx", "METAx", "PLTRx"]
@@ -52,14 +63,20 @@ def log(msg, color=Fore.CYAN):
 # ── 1. DATA FETCH ─────────────────────────────────────────────────────────────
 
 def fetch_all_data():
-    """Fetch 3 ans daily OHLCV pour tous les symboles + VIX + QQQ."""
+    """
+    Fetch daily OHLCV pour tous les symboles + VIX + QQQ.
+    Crypto : ~6 ans (depuis 2020, Binance)
+    xStocks : ~4 ans (yfinance)
+    """
     from data.fetcher import fetch_ohlcv
 
-    log("Fetching données daily 3 ans...")
+    log(f"Fetching données daily — crypto {DAYS_CRYPTO//365}ans / xStocks {DAYS_STOCKS//365}ans...")
     daily = {}
     for sym in config.SYMBOLS:
+        is_crypto = sym in config.CRYPTO
+        days = DAYS_CRYPTO if is_crypto else DAYS_STOCKS
         try:
-            df = fetch_ohlcv(sym, "1d", DAYS)
+            df = fetch_ohlcv(sym, "1d", days)
             if df is not None and len(df) > 250:
                 daily[sym] = df
                 log(f"  {sym}: {len(df)} barres", Fore.GREEN)
@@ -72,13 +89,13 @@ def fetch_all_data():
     log("Fetching VIX + QQQ (régime)...")
     import yfinance as yf
     try:
-        vix_raw = yf.Ticker("^VIX").history(period="4y", interval="1d")["Close"]
+        vix_raw = yf.Ticker("^VIX").history(period="7y", interval="1d")["Close"]
         vix_raw.index = vix_raw.index.tz_localize(None)
     except Exception:
         vix_raw = pd.Series(dtype=float)
 
     try:
-        qqq_raw = yf.Ticker("QQQ").history(period="4y", interval="1d")[["Close"]]
+        qqq_raw = yf.Ticker("QQQ").history(period="7y", interval="1d")[["Close"]]
         qqq_raw.index = qqq_raw.index.tz_localize(None)
         qqq_raw["sma200"] = qqq_raw["Close"].rolling(200).mean()
     except Exception:
@@ -732,12 +749,198 @@ def backtest_bot_i(daily_cache):
     return {"trades": trades, "equity": equity, "dates": dates, "name": "Bot I — RS Leaders"}
 
 
-# ── 11. RAPPORT ───────────────────────────────────────────────────────────────
+# ── 11. BOT Z — PORTFOLIO SIMULÉ ─────────────────────────────────────────────
 
-def print_report(results, vix_s, qqq_df):
+# Poids Bot Z pur par régime (normalise la somme à 1.0)
+REGIME_WEIGHTS_Z = {
+    "BULL":     {"a": 0.5,  "b": 1.0, "c": 0.8, "g": 1.3},
+    "RANGE":    {"a": 1.2,  "b": 0.8, "c": 0.5, "g": 0.7},
+    "BEAR":     {"a": 1.5,  "b": 0.0, "c": 0.0, "g": 0.2},
+    "HIGH_VOL": {"a": 0.8,  "b": 0.3, "c": 0.3, "g": 0.3},
+}
+
+# Bots valides pour le portefeuille (H=0 trades, I=bug)
+VALID_BOTS_Z = ["a", "b", "c", "g"]
+
+
+def _get_regime_at_dt(dt, vix_s, qqq_df) -> str:
+    """Détecte le régime pour une date donnée (normalise tz)."""
+    try:
+        dt_norm = pd.Timestamp(dt).normalize()
+        if dt_norm.tzinfo is not None:
+            dt_norm = dt_norm.tz_localize(None)
+        vix = float(vix_s.asof(dt_norm)) if not vix_s.empty else 15.0
+        # Support Close ou close dans le DataFrame
+        col_close = "Close" if "Close" in qqq_df.columns else "close"
+        col_sma   = "sma200"
+        qqq_close  = float(qqq_df[col_close].asof(dt_norm))
+        qqq_sma200 = float(qqq_df[col_sma].asof(dt_norm))
+        return classify_regime(vix, qqq_close, qqq_sma200)
+    except Exception:
+        return "RANGE"
+
+
+def _metrics_portfolio(equity_list, dates_list, init):
+    """Métriques sur une equity curve (CAGR, Sharpe, MaxDD)."""
+    if not equity_list or len(equity_list) < 2:
+        return {"cagr": 0, "sharpe": 0, "max_dd": 0, "final": init,
+                "profit_factor": 0, "trades": 0, "win_rate": 0}
+    eq = np.array(equity_list, dtype=float)
+    n_years = (dates_list[-1] - dates_list[0]).days / 365.25
+    cagr = ((eq[-1] / init) ** (1 / n_years) - 1) * 100 if n_years > 0.1 else 0
+    ret = pd.Series(eq).pct_change().dropna()
+    sharpe = float(ret.mean() / ret.std() * math.sqrt(252)) if ret.std() > 0 else 0
+    peak = np.maximum.accumulate(eq)
+    max_dd = float(((eq - peak) / (peak + 1e-10) * 100).min())
+    return {"cagr": round(cagr, 2), "sharpe": round(sharpe, 2),
+            "max_dd": round(max_dd, 2), "final": round(float(eq[-1]), 2),
+            "profit_factor": 0, "trades": 0, "win_rate": 0}
+
+
+def backtest_bot_z_portfolio(results: dict, vix_s: pd.Series, qqq_df: pd.DataFrame) -> dict:
+    """
+    Simule 3 structures de portefeuille pour les bots valides (A, B, C, G) :
+
+    1. Equal-Weight      : 25% sur chaque bot, rebalancé daily
+    2. Bot Z pur         : 100% allocation régime dynamique (BULL/RANGE/BEAR/HIGH_VOL)
+    3. Hybride 70/30     : 70% base fixe (G=30%,A=20%,B=20%,C=15%,cash=15%)
+                           + 30% overlay Bot Z dynamique (±10-15% ajustement)
+                           avec cap par bot à MAX_BOT_WEIGHT
+
+    Chaque structure part du même capital total = INITIAL × n_bots.
+    """
+    log("Bot Z — 3 structures portfolio (equal / régime / hybride 70-30)...")
+
+    # Equity curves des bots valides uniquement
+    valid = {k: results[k] for k in VALID_BOTS_Z if k in results and results[k]["equity"]}
+    if len(valid) < 2:
+        log("Bot Z: pas assez de bots valides.", Fore.YELLOW)
+        return {}
+
+    # Intersection des dates communes
+    date_sets = [set(r["dates"]) for r in valid.values()]
+    common_dates = sorted(set.intersection(*date_sets))
+    if not common_dates:
+        log("Bot Z: pas de dates communes.", Fore.YELLOW)
+        return {}
+
+    # Normalisé : returns quotidiens de chaque bot (base 1.0 = départ)
+    bot_norm = {}
+    for k, r in valid.items():
+        idx = {d: v / INITIAL for d, v in zip(r["dates"], r["equity"])}
+        bot_norm[k] = idx
+
+    n_bots       = len(valid)
+    initial_total = INITIAL * n_bots   # 4000€
+
+    eq_equal = []
+    eq_z     = []
+    eq_hybrid = []
+    dates_out = []
+
+    for dt in common_dates:
+        regime = _get_regime_at_dt(dt, vix_s, qqq_df)
+
+        # Ratios de performance de chaque bot à cette date
+        ratios = {k: bot_norm[k][dt] for k in valid}
+
+        # ── 1. Equal-Weight ──────────────────────────────────────────────────
+        w_equal = {k: 1.0 / n_bots for k in valid}
+        pv_equal = sum(w_equal[k] * ratios[k] for k in valid) * initial_total
+        eq_equal.append(pv_equal)
+
+        # ── 2. Bot Z pur — allocation régime ────────────────────────────────
+        raw_w = REGIME_WEIGHTS_Z.get(regime, REGIME_WEIGHTS_Z["RANGE"])
+        total_w = sum(raw_w.get(k, 0) for k in valid)
+        if total_w == 0:
+            w_z = {k: 1.0 / n_bots for k in valid}
+        else:
+            w_z = {k: raw_w.get(k, 0) / total_w for k in valid}
+        pv_z = sum(w_z[k] * ratios[k] for k in valid) * initial_total
+        eq_z.append(pv_z)
+
+        # ── 3. Hybride 70/30 ─────────────────────────────────────────────────
+        # Base (70%) : poids fixes, cash reste en cash (ratio=1.0)
+        base = BASE_WEIGHTS.copy()
+        cash_frac = base.pop("cash", 0.15)
+        # Poids base normalisés aux bots présents
+        base_valid = {k: base.get(k, 0) for k in valid}
+        base_sum = sum(base_valid.values())
+        if base_sum > 0:
+            base_scaled = {k: v / base_sum * (1 - cash_frac) for k, v in base_valid.items()}
+        else:
+            base_scaled = {k: (1 - cash_frac) / n_bots for k in valid}
+
+        # Overlay (30%) : même logique Bot Z pur
+        overlay_raw = {k: raw_w.get(k, 0) for k in valid}
+        overlay_sum = sum(overlay_raw.values())
+        if overlay_sum > 0:
+            overlay_scaled = {k: v / overlay_sum for k, v in overlay_raw.items()}
+        else:
+            overlay_scaled = {k: 1.0 / n_bots for k in valid}
+
+        # Combiné : 70% base + 30% overlay, avec cap MAX_BOT_WEIGHT
+        w_hybrid = {}
+        for k in valid:
+            w = BASE_PCT * base_scaled[k] + OVERLAY_PCT * overlay_scaled[k]
+            w_hybrid[k] = w
+        # Cap par bot
+        for k in valid:
+            if w_hybrid[k] > MAX_BOT_WEIGHT:
+                excess = w_hybrid[k] - MAX_BOT_WEIGHT
+                w_hybrid[k] = MAX_BOT_WEIGHT
+                # Redistribuer l'excès au cash (yield neutre = ratio 1.0)
+                cash_frac += excess
+        # Cash (yield 0 = ratio 1.0, reste dans la trésorerie)
+        pv_hybrid = (sum(w_hybrid[k] * ratios[k] for k in valid) + cash_frac) * initial_total
+        eq_hybrid.append(pv_hybrid)
+
+        dates_out.append(dt)
+
+    # Métriques
+    m_equal  = _metrics_portfolio(eq_equal,  dates_out, initial_total)
+    m_z      = _metrics_portfolio(eq_z,      dates_out, initial_total)
+    m_hybrid = _metrics_portfolio(eq_hybrid, dates_out, initial_total)
+
+    # Retours annuels
+    ann_equal  = annual_returns(eq_equal,  dates_out)
+    ann_z      = annual_returns(eq_z,      dates_out)
+    ann_hybrid = annual_returns(eq_hybrid, dates_out)
+
+    return {
+        "equal": {
+            "name": "Equal-Weight (A+B+C+G)",
+            "equity": eq_equal, "dates": dates_out, "trades": [],
+            "metrics": m_equal, "annual": ann_equal, "regime": {},
+        },
+        "z": {
+            "name": "Bot Z — Régime pur",
+            "equity": eq_z, "dates": dates_out, "trades": [],
+            "metrics": m_z, "annual": ann_z, "regime": {},
+        },
+        "hybrid": {
+            "name": "Hybride 70/30 (Base+Bot Z)",
+            "equity": eq_hybrid, "dates": dates_out, "trades": [],
+            "metrics": m_hybrid, "annual": ann_hybrid, "regime": {},
+        },
+    }
+
+
+# ── 12. RAPPORT ───────────────────────────────────────────────────────────────
+
+def print_report(results, vix_s, qqq_df, z_results=None):
     bots = list(results.values())
+    # Déterminer la période réelle
+    all_dates = [d for r in bots for d in r.get("dates", [])]
+    if all_dates:
+        d0 = min(all_dates).strftime("%Y-%m")
+        d1 = max(all_dates).strftime("%Y-%m")
+        period_str = f"{d0} → {d1}"
+    else:
+        period_str = "?"
+
     print(f"\n{Fore.CYAN}{'='*100}")
-    print(f"  BACKTEST 3 ANS — COMPARAISON MULTI-BOTS")
+    print(f"  BACKTEST — COMPARAISON MULTI-BOTS  [{period_str}]")
     print(f"{'='*100}{Style.RESET_ALL}")
 
     # Header
@@ -798,12 +1001,94 @@ def print_report(results, vix_s, qqq_df):
 
     print(f"\n{Fore.CYAN}{'='*100}{Style.RESET_ALL}")
 
+    # Bot Z comparison
+    if z_results:
+        print(f"\n{Fore.CYAN}{'='*100}")
+        print(f"  BOT Z — 3 STRUCTURES PORTFOLIO (4 bots valides A+B+C+G | capital 4×1000€)")
+        print(f"{'='*100}{Style.RESET_ALL}")
+        print(f"  {'Stratégie':<32} {'CAGR':>7} {'Sharpe':>7} {'MaxDD':>8} {'Final€':>9}  Notes")
+        print("  " + "-" * 90)
+
+        # Best individual bot (scaled ×4 for comparison)
+        valid_bots = [r for r in results.values()
+                      if r["metrics"]["cagr"] > 0 and r["name"].split(" — ")[0].replace("Bot ", "").lower()
+                      in VALID_BOTS_Z]
+        best = max(valid_bots, key=lambda r: r["metrics"]["cagr"], default=None)
+        if best:
+            m = best["metrics"]
+            name_short = best["name"].split(" — ")[0]
+            print(f"  {'REF: '+name_short+' seul (×4)':<32} {Fore.YELLOW}{m['cagr']:>+6.1f}%{Style.RESET_ALL}  "
+                  f"{m['sharpe']:>6.2f}  {m['max_dd']:>7.1f}%  {m['final']*4:>8.0f}€  ← référence (1 bot ×4)")
+
+        strategy_order = [
+            ("equal",  Fore.CYAN,   "← diversification pure"),
+            ("z",      Fore.GREEN,  "← régime dynamique 100%"),
+            ("hybrid", Fore.WHITE,  "← 70% base stable + 30% overlay dynamique"),
+        ]
+        for key, color, note in strategy_order:
+            r = z_results.get(key)
+            if not r:
+                continue
+            m = r["metrics"]
+            dd_color = Fore.RED if m["max_dd"] < -30 else (Fore.YELLOW if m["max_dd"] < -15 else Fore.GREEN)
+            print(f"  {r['name']:<32} {color}{m['cagr']:>+6.1f}%{Style.RESET_ALL}  "
+                  f"{m['sharpe']:>6.2f}  {dd_color}{m['max_dd']:>7.1f}%{Style.RESET_ALL}  "
+                  f"{m['final']:>8.0f}€  {note}")
+
+        # Annual comparison
+        print(f"\n  Performance annuelle :")
+        years = sorted({y for r in z_results.values() for y in r.get("annual", {}).keys()})
+        hdr_z = f"  {'Stratégie':<32}" + "".join(f"  {y:>8}" for y in years)
+        print(hdr_z)
+        print("  " + "-" * (32 + 10 * len(years)))
+        for key in ["equal", "z", "hybrid"]:
+            r = z_results.get(key)
+            if not r:
+                continue
+            line = f"  {r['name']:<32}"
+            for y in years:
+                pct = r.get("annual", {}).get(y)
+                if pct is not None:
+                    c = Fore.GREEN if pct > 0 else Fore.RED
+                    line += f"  {c}{pct:>+7.1f}%{Style.RESET_ALL}"
+                else:
+                    line += "         —"
+            print(line)
+
+        # Verdict
+        hybrid_cagr = z_results.get("hybrid", {}).get("metrics", {}).get("cagr", 0)
+        hybrid_dd   = z_results.get("hybrid", {}).get("metrics", {}).get("max_dd", 0)
+        eq_cagr     = z_results.get("equal",  {}).get("metrics", {}).get("cagr", 0)
+        z_cagr      = z_results.get("z",      {}).get("metrics", {}).get("cagr", 0)
+        print(f"\n  Verdict :")
+        print(f"  • Hybride vs Equal-weight : {Fore.GREEN if hybrid_cagr > eq_cagr else Fore.RED}"
+              f"{hybrid_cagr - eq_cagr:+.1f}%/an{Style.RESET_ALL} CAGR | "
+              f"MaxDD hybride = {hybrid_dd:.1f}%")
+        print(f"  • Bot Z pur vs Equal-weight : {Fore.GREEN if z_cagr > eq_cagr else Fore.RED}"
+              f"{z_cagr - eq_cagr:+.1f}%/an{Style.RESET_ALL} CAGR")
+        print(f"{Fore.CYAN}{'='*100}{Style.RESET_ALL}")
+
+        # Save Z comparison to CSV
+        z_rows = []
+        for key in ["equal", "z", "hybrid"]:
+            r = z_results.get(key)
+            if r:
+                m = r["metrics"]
+                z_row = {"strategie": r["name"], "cagr": m["cagr"], "sharpe": m["sharpe"],
+                         "max_dd": m["max_dd"], "final": m["final"]}
+                for y in years:
+                    z_row[f"annual_{y}"] = r.get("annual", {}).get(y, None)
+                z_rows.append(z_row)
+        if z_rows:
+            pd.DataFrame(z_rows).to_csv(f"{RESULTS_DIR}/bot_z_comparison.csv", index=False)
+            log(f"CSV Bot Z sauvegardé : {RESULTS_DIR}/bot_z_comparison.csv", Fore.GREEN)
+
     # CSV
     pd.DataFrame(rows).to_csv(f"{RESULTS_DIR}/multi_summary.csv", index=False)
     log(f"CSV sauvegardé : {RESULTS_DIR}/multi_summary.csv", Fore.GREEN)
 
 
-def plot_equity_curves(results):
+def plot_equity_curves(results, z_results=None):
     try:
         import matplotlib
         matplotlib.use("Agg")
@@ -823,10 +1108,25 @@ def plot_equity_curves(results):
             eq_pct = [(v / INITIAL - 1) * 100 for v in r["equity"]]
             key = r["name"].split(" — ")[0]
             color = colors.get(key, "#8b949e")
-            ax.plot(r["dates"], eq_pct, label=r["name"], color=color, linewidth=1.5)
+            ax.plot(r["dates"], eq_pct, label=r["name"], color=color, linewidth=1.2, alpha=0.6)
+
+        # Bot Z 3 structures (use 4×INITIAL as base since it's 4 bots)
+        if z_results:
+            init4 = INITIAL * len(VALID_BOTS_Z)
+            z_styles = [
+                ("equal",  "--", 1.8, "#f0883e"),
+                ("z",      "-.",  2.0, "#a371f7"),
+                ("hybrid", "-",   2.8, "#ffffff"),
+            ]
+            for key, style, lw, color in z_styles:
+                r = z_results.get(key)
+                if r and r["equity"]:
+                    eq_pct = [(v / init4 - 1) * 100 for v in r["equity"]]
+                    ax.plot(r["dates"], eq_pct, label=r["name"],
+                            color=color, linewidth=lw, linestyle=style, zorder=5)
 
         ax.axhline(0, color="#8b949e", linewidth=0.8, linestyle="--")
-        ax.set_title("Backtest 3 ans — Equity curves (%)", color="#e6edf3", fontsize=13, fontweight="bold")
+        ax.set_title("Backtest multi-période — Equity curves + 3 structures Bot Z", color="#e6edf3", fontsize=13, fontweight="bold")
         ax.set_ylabel("Performance (%)", color="#8b949e")
         ax.tick_params(colors="#8b949e")
         ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m"))
@@ -884,8 +1184,9 @@ def main():
             traceback.print_exc()
 
     if results:
-        print_report(results, vix_s, qqq_df)
-        plot_equity_curves(results)
+        z_results = backtest_bot_z_portfolio(results, vix_s, qqq_df)
+        print_report(results, vix_s, qqq_df, z_results)
+        plot_equity_curves(results, z_results)
 
     log(f"Terminé en {time.time() - t0:.0f}s")
 
