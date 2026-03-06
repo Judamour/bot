@@ -88,11 +88,22 @@ python backtest/analyze_botz.py --csv
 - [ ] Bot B (Momentum) : combien de rotations ? VIX>30 a bloqué combien de fois ?
 - [ ] Bot C (Breakout) : le VIX scaling a-t-il réduit les positions ?
 
-### 3. Décision go/no-go
-- [ ] **Budget dispatch** — Brancher si drift < 15% et rolling scores convergés
-- [ ] **Risk budgeting par trade** — si budget dispatch branché : ajouter risk_per_trade_eur
+### 3. Décision go/no-go (validée par audit ChatGPT 2026-03-06)
+- [ ] **Budget dispatch** — Brancher si drift > 20% sur 2+ semaines OU scores convergés
+- [ ] **Risk budgeting par trade** — `size = 0.4%×z_capital / |entry−stop|`
+      Effet estimé : Sharpe +15-30%, MaxDD -20-30%
 - [ ] **Passage en live** — Décision finale (cible : live en 2026-07 si paper ≥ 4 mois)
-- [ ] **Ajustement paramètres** — switch penalty, regime_persist_days, btc_vol_threshold
+- [ ] **Ajustement paramètres** (après revue data) :
+      - Si switchs > 0.3/jour → hysteresis OMEGA 5j → 7j
+      - Si faux BTC overrides → fenêtre vol 20 candles → 40 candles
+      - Si CB trop lent en live → recovery +0.5%/cycle → +1.0%/cycle
+      - Ne pas toucher SWITCH_PENALTY ni TARGET_PORTFOLIO_VOL avant 3 mois
+
+### Note audit ChatGPT (2026-03-06)
+Verdict : "Architecture CTA-style allocator — rare pour un projet solo.
+Le problème n'est plus la logique, c'est le calibrage et la validation."
+Paramètres confirmés corrects : SWITCH_PENALTY=0.05, TARGET_VOL=20%, REGIME_PERSIST=7j
+Action unique : ne pas toucher le code, observer 3 mois, puis budget dispatch.
 
 ## Prochaine session — Priorités
 
