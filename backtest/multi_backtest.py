@@ -2394,6 +2394,386 @@ def backtest_bot_z_meta(results: dict, vix_s: pd.Series, qqq_df: pd.DataFrame,
     }
 
 
+# ── 13g. BOT Z META V2 — Engine Scoring + Calibration affinée ─────────────────
+
+# Régime-fit par engine : dans quel régime chaque engine performe le mieux
+ENGINE_REGIME_FIT = {
+    "ENHANCED": {"BULL": 1.0, "RANGE": 0.6, "HIGH_VOL": 0.3, "BEAR": 0.1},
+    "OMEGA":    {"BULL": 0.8, "RANGE": 0.8, "HIGH_VOL": 0.7, "BEAR": 0.5},
+    "OMEGA_V2": {"BULL": 0.5, "RANGE": 0.7, "HIGH_VOL": 0.9, "BEAR": 0.8},
+    "PRO":      {"BULL": 0.3, "RANGE": 0.5, "HIGH_VOL": 0.8, "BEAR": 1.0},
+}
+
+
+def backtest_bot_z_meta_v2(results: dict, vix_s: pd.Series, qqq_df: pd.DataFrame,
+                            daily_cache: dict) -> dict:
+    """
+    Bot Z Meta v2 — Sélection d'engine data-driven (vs règles statiques en v1) :
+
+      engine_score = 0.40 × regime_fit
+                   + 0.30 × perf_rolling_60d   (shadow equity tracking)
+                   + 0.20 × inverse_risk         (1/vol récente de l'engine)
+                   + 0.10 × diversification      (corr engine vs portefeuille)
+
+      Hard rules (non-négociables) :
+        PRO forcé si (BTC+QQQ both bearish ET VIX>26) OU DD<-12%
+        ENHANCED bloqué si BTC ou QQQ bearish
+
+      Seuils recalibrés vs v1 :
+        OMEGA_V2 : VIX>26 (était 24) + DD>-10% (était -8%)
+        PRO      : VIX>32 (était 30) + DD>-12% (était -15%)
+    """
+    log("Bot Z Meta v2 — Engine Scoring data-driven...")
+
+    valid = {k: results[k] for k in VALID_BOTS_Z if k in results and results[k]["equity"]}
+    if "j" in results and results["j"]["equity"]:
+        valid["j"] = results["j"]
+    if len(valid) < 2:
+        return {}
+
+    date_sets = [set(r["dates"]) for r in valid.values()]
+    common_dates = sorted(set.intersection(*date_sets))
+    if not common_dates:
+        return {}
+
+    initial_total = INITIAL * len(VALID_BOTS_Z)
+
+    bot_norm = {}
+    for k, r in valid.items():
+        bot_norm[k] = {d: v / INITIAL for d, v in zip(r["dates"], r["equity"])}
+
+    btc_df = daily_cache.get("BTC/EUR")
+    btc_norm = {}
+    if btc_df is not None and "ema200" in btc_df.columns:
+        for dt, row in btc_df.iterrows():
+            btc_norm[dt] = {"close": row["close"], "ema200": row["ema200"]}
+
+    ENGINE_NAMES = ["ENHANCED", "OMEGA", "OMEGA_V2", "PRO"]
+    SHARPE_WIN = 90; VOL_WIN = 20; SLOPE_WIN = 60; CORR_WIN = 20; META_WIN = 30
+    PERF_WIN = 60    # fenêtre rolling performance par engine
+    SOFTMAX_BETA = 3.0; CB_RECOVERY = 0.005; TARGET_VOL = 0.20
+    CB_TIERS = {
+        "ENHANCED": [(-0.25, 0.30)],
+        "OMEGA":    [(-0.25, 0.30)],
+        "OMEGA_V2": [(-0.20, 0.50), (-0.30, 0.30)],
+        "PRO":      [(-0.10, 0.80), (-0.20, 0.50), (-0.30, 0.30)],
+    }
+    HYSTERESIS = {"ENHANCED": 7, "OMEGA": 5, "OMEGA_V2": 4, "PRO": 3}
+
+    ks = list(valid.keys())
+    ret_history  = {k: [] for k in ks}
+    eq_history   = {k: [] for k in ks}
+    bot_peaks    = {k: 1.0 for k in ks}
+
+    # Shadow equity tracking : chaque engine tourne en parallèle (sans CB)
+    shadow_eq = {e: [initial_total] for e in ENGINE_NAMES}
+    shadow_ret_hist = {e: [] for e in ENGINE_NAMES}
+
+    cb_peak   = initial_total
+    cb_factor = 1.0
+    current_engine = "OMEGA"
+    pending_engine = "OMEGA"
+    days_pending   = 0
+    engine_log     = []
+
+    eq_meta2  = [initial_total]
+    dates_out = [common_dates[0]]
+
+    for i in range(1, len(common_dates)):
+        dt      = common_dates[i]
+        prev_dt = common_dates[i - 1]
+
+        # ── Retours + historique ─────────────────────────────────────────────
+        bot_r = {}
+        for k in ks:
+            p = bot_norm[k].get(prev_dt, 1.0)
+            c = bot_norm[k].get(dt, p)
+            bot_r[k] = (c / p - 1) if p > 0 else 0.0
+            ret_history[k].append(bot_r[k])
+            ev = bot_norm[k].get(dt, 1.0)
+            eq_history[k].append(ev)
+            if ev > bot_peaks[k]:
+                bot_peaks[k] = ev
+
+        # ── Régime + MO ──────────────────────────────────────────────────────
+        regime = _get_regime_at_dt(dt, vix_s, qqq_df)
+        try:
+            dt_norm    = pd.Timestamp(dt).normalize().tz_localize(None)
+            vix_val    = float(vix_s.asof(dt_norm)) if not vix_s.empty else 15.0
+            qqq_close  = float(qqq_df["Close"].asof(dt_norm))
+            qqq_sma200 = float(qqq_df["sma200"].asof(dt_norm))
+            qqq_bearish = qqq_close < qqq_sma200
+        except Exception:
+            vix_val = 15.0; qqq_bearish = False
+
+        btc_row = btc_norm.get(dt) or btc_norm.get(prev_dt)
+        btc_bearish = (btc_row is not None and btc_row["ema200"] > 0
+                       and btc_row["close"] < btc_row["ema200"])
+
+        if btc_bearish and qqq_bearish:
+            regime = "BEAR"
+        elif btc_bearish or qqq_bearish:
+            regime = "HIGH_VOL" if regime in ("BULL", "RANGE") else regime
+
+        raw_regime_w = REGIME_WEIGHTS_Z.get(regime, REGIME_WEIGHTS_Z["RANGE"])
+
+        warmup = min(len(ret_history[k]) for k in ks)
+
+        # ── Corrélation ──────────────────────────────────────────────────────
+        avg_corr = 0.0
+        if warmup >= CORR_WIN:
+            rets_mat = np.array([ret_history[k][-CORR_WIN:] for k in ks])
+            try:
+                corr_m = np.corrcoef(rets_mat)
+                n = len(ks)
+                off_d = [corr_m[ii, jj] for ii in range(n) for jj in range(ii+1, n)]
+                avg_corr = float(np.mean(off_d)) if off_d else 0.0
+            except Exception:
+                pass
+
+        # ── Drawdown ─────────────────────────────────────────────────────────
+        current_pv = eq_meta2[-1]
+        if current_pv > cb_peak:
+            cb_peak = current_pv
+        port_dd = (current_pv - cb_peak) / cb_peak if cb_peak > 0 else 0.0
+
+        # ── ER/Risk scores (communs) ─────────────────────────────────────────
+        er_comp   = {k: {} for k in ks}
+        risk_comp = {k: {} for k in ks}
+        for k in ks:
+            hist = ret_history[k]
+            eq_h = eq_history[k]
+            if warmup >= SHARPE_WIN:
+                r90 = np.array(hist[-SHARPE_WIN:])
+                s90 = (float(r90.mean() / r90.std() * math.sqrt(252))
+                       if r90.std() > 1e-8 else 0.0)
+                ps = sum(r for r in hist[-SHARPE_WIN:] if r > 0)
+                ns = abs(sum(r for r in hist[-SHARPE_WIN:] if r < 0))
+                pf = min((ps / ns) if ns > 1e-8 else 3.0, 5.0)
+                slope = 0.0
+                if len(eq_h) >= SLOPE_WIN:
+                    eq_s = np.array(eq_h[-SLOPE_WIN:])
+                    x = np.arange(len(eq_s))
+                    if eq_s.std() > 1e-8:
+                        slope = float(np.polyfit(x, eq_s / max(eq_s[0], 1e-8), 1)[0]) * 252
+                total_rw = sum(raw_regime_w.values()) or 1.0
+                rf = raw_regime_w.get(k, 0) / (total_rw / max(len(VALID_BOTS_Z), 1))
+                er_comp[k] = {"sharpe": s90, "pf": pf, "slope": slope, "regime_fit": rf}
+                r20 = np.array(hist[-VOL_WIN:])
+                v20 = float(r20.std() * math.sqrt(252)) if r20.std() > 1e-8 else 0.01
+                dr = r20[r20 < 0]
+                dv = (float(dr.std() * math.sqrt(252)) if len(dr) > 1 and dr.std() > 1e-8 else v20)
+                ddv = abs(eq_history[k][-1] / bot_peaks[k] - 1) if bot_peaks[k] > 0 else 0.0
+                risk_comp[k] = {"vol": v20, "down_vol": dv, "dd": ddv}
+            else:
+                er_comp[k]   = {"sharpe": 0.0, "pf": 1.0, "slope": 0.0, "regime_fit": 1.0}
+                risk_comp[k] = {"vol": 0.3, "down_vol": 0.3, "dd": 0.0}
+
+        def _z(vals):
+            arr = np.array(vals, dtype=float)
+            m, s = arr.mean(), arr.std()
+            return list((arr - m) / s) if s > 1e-8 else [0.0] * len(vals)
+
+        # ── Poids par engine ─────────────────────────────────────────────────
+        def _omega_weights(net_score):
+            max_s = max(net_score.values())
+            exp_s = {k: math.exp(SOFTMAX_BETA * (net_score[k] - max_s)) for k in ks}
+            tot   = sum(exp_s.values()) or 1.0
+            return {k: exp_s[k] / tot for k in ks}
+
+        def _er_risk_net():
+            sharpe_z = dict(zip(ks, _z([er_comp[k]["sharpe"]     for k in ks])))
+            pf_z     = dict(zip(ks, _z([er_comp[k]["pf"]         for k in ks])))
+            slope_z  = dict(zip(ks, _z([er_comp[k]["slope"]      for k in ks])))
+            regime_z = dict(zip(ks, _z([er_comp[k]["regime_fit"] for k in ks])))
+            vol_z    = dict(zip(ks, _z([risk_comp[k]["vol"]      for k in ks])))
+            dvol_z   = dict(zip(ks, _z([risk_comp[k]["down_vol"] for k in ks])))
+            dd_z     = dict(zip(ks, _z([risk_comp[k]["dd"]       for k in ks])))
+            corr_pen = {k: 1.0 for k in ks}
+            if warmup >= CORR_WIN:
+                rets_m = np.array([ret_history[k][-CORR_WIN:] for k in ks])
+                try:
+                    cm = np.corrcoef(rets_m); n = len(ks)
+                    for ii, k in enumerate(ks):
+                        oth = [cm[ii, jj] for jj in range(n) if jj != ii]
+                        ac  = float(np.mean(oth)) if oth else 0.0
+                        corr_pen[k] = max(0.3, 1.0 - max(0.0, ac - 0.5) / 0.5)
+                except Exception:
+                    pass
+            er_s   = {k: 0.35*sharpe_z[k] + 0.25*pf_z[k] + 0.20*slope_z[k] + 0.20*regime_z[k] for k in ks}
+            risk_s = {k: 0.4*vol_z[k] + 0.3*dvol_z[k] + 0.3*dd_z[k] for k in ks}
+            return {k: (er_s[k] - risk_s[k]) * corr_pen[k] for k in ks}
+
+        def _rp_weights(blend=0.5, omega_w=None):
+            inv_v = {k: 1.0 / max(risk_comp[k]["vol"], 0.01) for k in ks}
+            tot   = sum(inv_v.values()) or 1.0
+            rp_w  = {k: inv_v[k] / tot for k in ks}
+            if omega_w:
+                return {k: (1-blend) * omega_w[k] + blend * rp_w[k] for k in ks}
+            return rp_w
+
+        def _meta_learning_confidence():
+            if warmup < max(SHARPE_WIN, META_WIN + 1):
+                return {k: 1.0 for k in ks}
+            conf = {}
+            for k in ks:
+                fh = np.array(ret_history[k])
+                ls = (float(fh.mean() / fh.std() * math.sqrt(252)) if fh.std() > 1e-8 else 0.0)
+                exp_30d = (1 + ls / math.sqrt(252)) ** META_WIN - 1
+                act_30d = float(np.prod(1 + np.array(ret_history[k][-META_WIN:])) - 1)
+                conf[k] = max(0.4, min(1.5, 1.0 + (act_30d - exp_30d) / 0.05))
+            return conf
+
+        def _engine_weights(engine):
+            if engine == "ENHANCED":
+                total_w = sum(raw_regime_w.get(k, 0) for k in ks) or 1.0
+                return {k: raw_regime_w.get(k, 0) / total_w for k in ks}
+            net = _er_risk_net()
+            if engine == "OMEGA":
+                return _omega_weights(net)
+            omega_w = _omega_weights(net)
+            if engine == "OMEGA_V2":
+                blended = _rp_weights(0.5, omega_w)
+                conf = _meta_learning_confidence()
+                adj  = {k: blended[k] * conf[k] for k in ks}
+                tot  = sum(adj.values()) or 1.0
+                return {k: adj[k] / tot for k in ks}
+            # PRO : vol targeting + RP 30% + meta
+            vs = {}
+            for k in ks:
+                if len(ret_history[k]) >= VOL_WIN:
+                    v = float(np.std(ret_history[k][-VOL_WIN:]) * math.sqrt(252))
+                    vs[k] = min(TARGET_VOL / max(v, 1e-8), 3.0)
+                else:
+                    vs[k] = 1.0
+            net_pro  = {k: net[k] * vs[k] for k in ks}
+            omega_pro = _omega_weights(net_pro)
+            blended  = _rp_weights(0.3, omega_pro)
+            conf     = _meta_learning_confidence()
+            adj      = {k: blended[k] * conf[k] for k in ks}
+            tot      = sum(adj.values()) or 1.0
+            return {k: adj[k] / tot for k in ks}
+
+        # ── Shadow tracking (tous les engines en parallèle) ──────────────────
+        for eng in ENGINE_NAMES:
+            w_eng  = _engine_weights(eng)
+            r_eng  = sum(w_eng[k] * bot_r[k] for k in ks)
+            shadow_eq[eng].append(shadow_eq[eng][-1] * (1 + r_eng))
+            shadow_ret_hist[eng].append(r_eng)
+
+        # ── Engine Scoring data-driven ───────────────────────────────────────
+        # Hard rules (priorité absolue)
+        force_pro = ((btc_bearish and qqq_bearish and vix_val > 26)
+                     or vix_val > 32 or port_dd < -0.12)
+        block_enhanced = btc_bearish or qqq_bearish
+
+        eng_scores = {}
+        for eng in ENGINE_NAMES:
+            # 1. Regime fit (table ENGINE_REGIME_FIT)
+            rf = ENGINE_REGIME_FIT[eng].get(regime, 0.5)
+
+            # 2. Performance rolling 60j du shadow engine (normalisée)
+            if len(shadow_eq[eng]) > PERF_WIN:
+                perf_60d = shadow_eq[eng][-1] / shadow_eq[eng][-PERF_WIN-1] - 1
+            else:
+                perf_60d = 0.0
+
+            # 3. Inverse risk (vol récente du shadow engine)
+            if len(shadow_ret_hist[eng]) >= VOL_WIN:
+                eng_vol = float(np.std(shadow_ret_hist[eng][-VOL_WIN:]) * math.sqrt(252))
+                inv_risk = 1.0 / max(eng_vol, 0.01)
+            else:
+                inv_risk = 1.0
+
+            # 4. Diversification (diversif du shadow engine vs portefeuille)
+            div_score = 0.5  # neutre par défaut
+            if len(shadow_ret_hist[eng]) >= CORR_WIN and len(shadow_ret_hist["OMEGA"]) >= CORR_WIN:
+                try:
+                    r_eng_arr = np.array(shadow_ret_hist[eng][-CORR_WIN:])
+                    r_ref_arr = np.array(shadow_ret_hist["OMEGA"][-CORR_WIN:])
+                    c = float(np.corrcoef(r_eng_arr, r_ref_arr)[0, 1])
+                    div_score = max(0.0, 1.0 - abs(c))
+                except Exception:
+                    pass
+
+            eng_scores[eng] = 0.40 * rf + 0.30 * perf_60d + 0.20 * inv_risk + 0.10 * div_score
+
+        # Normalise inv_risk across engines for comparability
+        inv_risks = {e: (1.0 / max(float(np.std(shadow_ret_hist[e][-VOL_WIN:]) * math.sqrt(252)), 0.01)
+                         if len(shadow_ret_hist[e]) >= VOL_WIN else 1.0) for e in ENGINE_NAMES}
+        max_ir = max(inv_risks.values()) or 1.0
+        for eng in ENGINE_NAMES:
+            # Recalculate with normalized inv_risk
+            rf = ENGINE_REGIME_FIT[eng].get(regime, 0.5)
+            perf_60d = (shadow_eq[eng][-1] / shadow_eq[eng][-PERF_WIN-1] - 1
+                        if len(shadow_eq[eng]) > PERF_WIN else 0.0)
+            inv_risk_norm = inv_risks[eng] / max_ir
+            div_score = 0.5
+            if len(shadow_ret_hist[eng]) >= CORR_WIN and len(shadow_ret_hist["OMEGA"]) >= CORR_WIN:
+                try:
+                    c = float(np.corrcoef(shadow_ret_hist[eng][-CORR_WIN:],
+                                          shadow_ret_hist["OMEGA"][-CORR_WIN:])[0, 1])
+                    div_score = max(0.0, 1.0 - abs(c))
+                except Exception:
+                    pass
+            eng_scores[eng] = 0.40 * rf + 0.30 * perf_60d + 0.20 * inv_risk_norm + 0.10 * div_score
+
+        # Appliquer hard rules + choisir l'engine avec le meilleur score
+        if force_pro:
+            raw_engine = "PRO"
+        elif block_enhanced:
+            # Choisir parmi OMEGA, OMEGA_V2, PRO selon les scores
+            scores_no_enh = {e: eng_scores[e] for e in ["OMEGA", "OMEGA_V2", "PRO"]}
+            raw_engine = max(scores_no_enh, key=scores_no_enh.get)
+        else:
+            raw_engine = max(eng_scores, key=eng_scores.get)
+
+        # Hysteresis
+        if raw_engine != pending_engine:
+            pending_engine = raw_engine
+            days_pending   = 0
+        else:
+            days_pending += 1
+
+        if days_pending >= HYSTERESIS.get(pending_engine, 5):
+            current_engine = pending_engine
+        engine_log.append((dt, current_engine))
+
+        # ── Appliquer l'engine sélectionné ───────────────────────────────────
+        weights = _engine_weights(current_engine)
+        r_port  = sum(weights[k] * bot_r[k] for k in ks)
+
+        # ── Circuit Breaker ──────────────────────────────────────────────────
+        tiers = CB_TIERS.get(current_engine, [(-0.25, 0.30)])
+        target_factor = 1.0
+        for threshold, floor in sorted(tiers, key=lambda x: x[0]):
+            if port_dd < threshold:
+                target_factor = floor
+        if target_factor < cb_factor:
+            cb_factor = max(target_factor, cb_factor - 0.05)
+        elif port_dd > -0.05:
+            cb_factor = min(1.0, cb_factor + CB_RECOVERY)
+
+        eq_meta2.append(eq_meta2[-1] * (1 + cb_factor * r_port))
+        dates_out.append(dt)
+
+    engine_counts = {}
+    for _, e in engine_log:
+        engine_counts[e] = engine_counts.get(e, 0) + 1
+    total_days = len(engine_log) or 1
+    engine_pct = {e: round(engine_counts.get(e, 0) / total_days * 100, 1)
+                  for e in ENGINE_NAMES}
+
+    m   = _metrics_portfolio(eq_meta2, dates_out, initial_total)
+    ann = annual_returns(eq_meta2, dates_out)
+    return {
+        "name":         "Bot Z Meta v2 (scored)",
+        "equity":       eq_meta2, "dates": dates_out, "trades": [],
+        "metrics":      m, "annual": ann, "regime": {},
+        "engine_stats": engine_pct,
+    }
+
+
 # ── 14. WALK-FORWARD TEST ─────────────────────────────────────────────────────
 
 def walk_forward_test(results: dict, vix_s: pd.Series, qqq_df: pd.DataFrame,
@@ -2731,6 +3111,7 @@ def print_report(results, vix_s, qqq_df, z_results=None, wf=None, mc=None):
             ("omega",    Fore.WHITE,   "← ER Engine + Risk Engine + Corr Penalty + softmax"),
             ("omega_v2", Fore.GREEN,   "← Omega + Risk Parity + Meta-Learning"),
             ("meta",     Fore.WHITE,   "← Méta-sélecteur ENHANCED/OMEGA/OMEGA_V2/PRO"),
+            ("meta_v2",  Fore.GREEN,   "← Meta v2 : engine scoring data-driven"),
         ]
         for key, color, note in strategy_order:
             r = z_results.get(key)
@@ -2748,7 +3129,7 @@ def print_report(results, vix_s, qqq_df, z_results=None, wf=None, mc=None):
         hdr_z = f"  {'Stratégie':<32}" + "".join(f"  {y:>8}" for y in years)
         print(hdr_z)
         print("  " + "-" * (32 + 10 * len(years)))
-        for key in ["equal", "z", "hybrid", "enhanced", "pro", "adaptive", "omega", "omega_v2", "meta"]:
+        for key in ["equal", "z", "hybrid", "enhanced", "pro", "adaptive", "omega", "omega_v2", "meta", "meta_v2"]:
             r = z_results.get(key)
             if not r:
                 continue
@@ -2816,6 +3197,17 @@ def print_report(results, vix_s, qqq_df, z_results=None, wf=None, mc=None):
                   f"{mt_cagr - enhanced_cagr:+.1f}%/an{Style.RESET_ALL} CAGR | "
                   f"MaxDD={mt_dd:.1f}% | Sharpe={mt_sharpe:.2f}")
             print(f"    Engines utilisés : {es_str}")
+        meta_v2_r = z_results.get("meta_v2")
+        if meta_v2_r:
+            mv2_cagr   = meta_v2_r["metrics"].get("cagr", 0)
+            mv2_dd     = meta_v2_r["metrics"].get("max_dd", 0)
+            mv2_sharpe = meta_v2_r["metrics"].get("sharpe", 0)
+            es2 = meta_v2_r.get("engine_stats", {})
+            es2_str = " | ".join(f"{e}:{v:.0f}%" for e, v in es2.items() if v > 0)
+            print(f"  • Meta v2 vs Enhanced        : {Fore.GREEN if mv2_cagr > enhanced_cagr else Fore.RED}"
+                  f"{mv2_cagr - enhanced_cagr:+.1f}%/an{Style.RESET_ALL} CAGR | "
+                  f"MaxDD={mv2_dd:.1f}% | Sharpe={mv2_sharpe:.2f}")
+            print(f"    Engines utilisés : {es2_str}")
         print(f"{Fore.CYAN}{'='*100}{Style.RESET_ALL}")
 
         # Walk-forward et Monte Carlo
@@ -2826,7 +3218,7 @@ def print_report(results, vix_s, qqq_df, z_results=None, wf=None, mc=None):
 
         # Save Z comparison to CSV
         z_rows = []
-        for key in ["equal", "z", "hybrid", "enhanced", "pro", "adaptive", "omega", "omega_v2", "meta"]:
+        for key in ["equal", "z", "hybrid", "enhanced", "pro", "adaptive", "omega", "omega_v2", "meta", "meta_v2"]:
             r = z_results.get(key)
             if r:
                 m = r["metrics"]
@@ -2979,6 +3371,11 @@ def main():
         z_meta = backtest_bot_z_meta(results, vix_s, qqq_df, daily)
         if z_meta:
             z_results["meta"] = z_meta
+
+        log("Bot Z Meta v2 — Engine Scoring data-driven...")
+        z_meta_v2 = backtest_bot_z_meta_v2(results, vix_s, qqq_df, daily)
+        if z_meta_v2:
+            z_results["meta_v2"] = z_meta_v2
 
         # Walk-forward test
         wf = walk_forward_test(results, vix_s, qqq_df, daily, split_year=2023)
