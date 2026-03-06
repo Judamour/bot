@@ -58,7 +58,7 @@
 > Calibration v2 BEAR : C=1.5, G=1.2 (validé sur 2022)
 > Sharpe corrigé : calculé sur retours actifs uniquement (|r| > 1e-8, exclut equity plate)
 
-### Comparaison des 5 structures
+### Comparaison des 6 structures
 
 | Stratégie | CAGR | Sharpe | MaxDD | Capital final | Description |
 |-----------|------|--------|-------|---------------|-------------|
@@ -66,14 +66,16 @@
 | Equal-Weight (A+B+C+G) | +46.4% | 1.20 | -31.1% | 41 592€ | 25% chaque bot, rebalancé daily |
 | Bot Z — Régime pur | +54.6% | 1.40 | -27.5% | 58 205€ | Allocation 100% dynamique par régime |
 | Hybride 70/30 | +44.2% | 1.30 | -25.3% | 38 030€ | 70% base fixe + 30% overlay dynamique |
-| **Bot Z Enhanced** | **+59.8%** | **1.61** | **-18.9%** | **71 421€** | Régime + Momentum Overlay + Circuit Breaker |
+| **Bot Z Enhanced** | **+59.8%** | **1.61** | **-18.9%** | **71 421€** | Régime + MO + CB single-tier |
 | Bot Z Pro | +29.9% | **1.90** | **-9.1%** | 20 001€ | VT + Adaptive Score + Corr Spike + Multi-CB |
+| Bot Z Adaptive | +29.4% | 1.60 | -11.7% | 19 508€ | Meta-switch E/B/P + hysteresis 7/5/3j |
 
-**→ Deux optimums selon l'objectif :**
-- **Max CAGR** → Bot Z Enhanced (+59.8%) : meilleure croissance absolue
+**→ Trois optimums selon l'objectif :**
+- **Max CAGR** → Bot Z Enhanced (+59.8%) : meilleure croissance absolue, production actuelle
 - **Max Sharpe/min DD** → Bot Z Pro (Sharpe 1.90, MaxDD -9.1%) : meilleur ratio risque/rendement
+- **Compromis avec adaptation** → Bot Z Adaptive (+29.4%, MaxDD -11.7%) : switch automatique selon régime
 
-### Performance annuelle des 5 structures
+### Performance annuelle des 6 structures
 
 | Stratégie | 2020 | 2021 | 2022 | 2023 | 2024 | 2025 | 2026 YTD |
 |-----------|------|------|------|------|------|------|----------|
@@ -82,6 +84,7 @@
 | Hybride 70/30 | +50.6% | +188.9% | -12.7% | +54.6% | +18.3% | +27.4% | +3.5% |
 | **Bot Z Enhanced** | **+62.7%** | **+276.9%** | **-9.0%** | **+72.2%** | **+27.2%** | **+36.1%** | **+3.1%** |
 | Bot Z Pro | +35.9% | +87.9% | **-5.5%** | +40.1% | +17.6% | +23.1% | +0.6% |
+| Bot Z Adaptive | +33.2% | +105.2% | -7.5% | +32.2% | +17.6% | +22.0% | +0.2% |
 
 ### Bot Z Enhanced — 3 couches (max CAGR)
 
@@ -140,6 +143,28 @@
 - Le ratio risque/rendement est supérieur sur l'ensemble de la période
 - MaxDD -9.1% = quasiment au niveau de Bot C défensif (-6.0%)
 - Pour un capital en production (20-100k€), Bot Z Pro est le choix rationnel
+
+### Bot Z Adaptive — Analyse Run 6
+
+**Distribution des profils sur 6 ans (2020-2026) :**
+- ENHANCED : 16% du temps (bull propre très rare)
+- BALANCED : 42% du temps (état de transition dominant)
+- PRO : 42% du temps (conditions défensives fréquentes)
+
+**Ce que les résultats révèlent :**
+
+| Période | Enhanced | Adaptive | Pro | Verdict |
+|---------|----------|---------|-----|---------|
+| 2020 | +62.7% | +33.2% | +35.9% | ENHANCED gagne (bull fort) |
+| 2021 | +276.9% | +105.2% | +87.9% | ENHANCED gagne (bull exceptionnel) |
+| 2022 | **-9.0%** | **-7.5%** | **-5.5%** | PRO gagne (bear) |
+| 2023 | +72.2% | +32.2% | +40.1% | ENHANCED gagne (rebond fort) |
+| 2024 | +27.2% | +17.6% | +17.6% | ENHANCED gagne (bull modéré) |
+| 2025 | +36.1% | +22.0% | +23.1% | ENHANCED gagne (bull) |
+
+**Interprétation :** Les seuils PRO (VIX>28) déclenchent trop souvent le mode défensif. Sur 6 ans majoritairement haussiers, l'Adaptive passe 84% du temps en BALANCED/PRO → perd la capture des hausses. En 2022 (la seule vraie bear), Adaptive **outperforme Enhanced** (-7.5% vs -9.0%).
+
+**Ajustement recommandé pour l'Adaptive v2 :** Relever le seuil PRO de VIX>28 à VIX>30, exiger 2+ conditions simultanées (au lieu d'une seule). Objectif : réduire le temps PRO de 42% à ~20-25%, et augmenter ENHANCED à ~35%.
 
 **4. Règle des fonds multi-stratégies confirmée :**
 > *"Plusieurs stratégies moyennes ensemble battent souvent une excellente stratégie seule."*
@@ -253,7 +278,8 @@ La calibration actuelle pour le régime BEAR (`a=1.5, g=0.2`) est **fausse** :
 - [x] Walk-Forward validation (IS 2020-2022 / OOS 2023-2026) — EDGE RÉEL confirmé
 - [x] Monte Carlo 5000 simulations — 100% positif tous les bots
 - [x] Bot Z Pro : Vol Targeting + Adaptive Score + Corr Spike + Multi-tier CB (Sharpe 1.90, MaxDD -9.1%)
-- [ ] Implémenter Bot Z Pro dans `live/bot_z.py` (architecture hedge fund complète)
+- [x] Bot Z Adaptive : Meta-switch E/B/P + hysteresis 7/5/3j (CAGR +29.4%, MaxDD -11.7%)
+- [ ] Bot Z Adaptive v2 : relever seuil PRO (VIX>30, 2+ conditions) — cible ENHANCED 35% du temps
 - [ ] Corriger le churn Bot I (REBAL_DAYS=10, filtre re-entry)
 - [ ] Exclure Bot H du backtest daily (0 trades)
 
@@ -269,6 +295,7 @@ La calibration actuelle pour le régime BEAR (`a=1.5, g=0.2`) est **fausse** :
 | 2026-03-06 | Jan 2020 → Mar 2026 (6 ans) | Run 3 : calibration BEAR v2 + Bot I fix + simulation retours daily | Equal +46.4% / Bot Z +54.6% | bot_z_comparison.csv |
 | 2026-03-06 | Jan 2020 → Mar 2026 (6 ans) | **Run 4** : Enhanced (MO+CB) + Sharpe fix + Walk-Forward + Monte Carlo | **Equal +46.4% / Bot Z Enhanced +59.8%** | bot_z_comparison.csv |
 | 2026-03-06 | Jan 2020 → Mar 2026 (6 ans) | **Run 5** : Bot Z Pro (VT+AS+CS+MultiCB) + MC 5000 | **Enhanced +59.8% / Pro +29.9% Sharpe 1.90** | bot_z_comparison.csv |
+| 2026-03-06 | Jan 2020 → Mar 2026 (6 ans) | **Run 6** : Bot Z Adaptive meta-switch E/B/P + hysteresis | **Adaptive +29.4% MaxDD -11.7% (ENHANCED 16%/BALANCED 42%/PRO 42%)** | bot_z_comparison.csv |
 
 ---
 

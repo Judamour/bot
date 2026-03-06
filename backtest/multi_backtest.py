@@ -1223,6 +1223,260 @@ def backtest_bot_z_pro(results: dict, vix_s: pd.Series, qqq_df: pd.DataFrame,
     }
 
 
+# ── 13c. BOT Z ADAPTIVE — Meta Regime Switch (Enhanced / Balanced / Pro) ──────
+
+# Configs des 3 profils — seuls les paramètres de risk management diffèrent.
+# Tous utilisent les mêmes REGIME_WEIGHTS_Z (calibration v2) et le MO.
+ADAPTIVE_PROFILES = {
+    "ENHANCED": {
+        # Max croissance — vol targeting off, CB simple -25%, corr quasi-inactif
+        "target_vol":   None,   # pas de vol targeting
+        "corr_thresh":  0.90,   # seuil corrélation très haut (quasi-désactivé)
+        "corr_reduce":  0.30,
+        "cb_tiers":     [(-0.25, 0.30)],          # single tier comme Enhanced
+    },
+    "BALANCED": {
+        # Compromis — vol targeting modéré, CB 2-tiers, corr intermédiaire
+        "target_vol":   0.25,
+        "corr_thresh":  0.75,
+        "corr_reduce":  0.30,
+        "cb_tiers":     [(-0.20, 0.50), (-0.30, 0.30)],
+    },
+    "PRO": {
+        # Protection max — vol targeting strict, CB 3-tiers, corr sensible
+        "target_vol":   0.20,
+        "corr_thresh":  0.70,
+        "corr_reduce":  0.50,
+        "cb_tiers":     [(-0.10, 0.80), (-0.20, 0.50), (-0.30, 0.30)],
+    },
+}
+
+# Jours de confirmation requis pour quitter chaque profil (hysteresis asymétrique)
+# Bear→Bull : lent (évite les faux signaux) | Bull→Bear : rapide (protection)
+ADAPTIVE_HYSTERESIS = {
+    "ENHANCED": 7,   # 7 jours dans ENHANCED avant de pouvoir basculer
+    "BALANCED": 5,
+    "PRO":      3,   # 3 jours dans PRO — on sort vite si le marché rebondit
+}
+
+
+def _select_profile_raw(vix: float, btc_bearish: bool, qqq_bearish: bool,
+                        port_dd: float, avg_corr: float = 0.0) -> str:
+    """
+    Profil brut selon market state (sans hysteresis).
+    PRO      : dès que conditions défensives sont présentes
+    ENHANCED : bull propre sur tous les critères
+    BALANCED : tout le reste (transition, bull fragile)
+    """
+    # PRO : au moins une condition défensive forte
+    if ((btc_bearish and qqq_bearish)
+            or vix > 28
+            or avg_corr > 0.70
+            or port_dd < -0.12):
+        return "PRO"
+    # ENHANCED : bull propre sur tous les critères
+    if (not btc_bearish and not qqq_bearish
+            and vix < 22
+            and port_dd > -0.05
+            and avg_corr < 0.60):
+        return "ENHANCED"
+    # BALANCED : transition / bull fragile
+    return "BALANCED"
+
+
+def backtest_bot_z_adaptive(results: dict, vix_s: pd.Series, qqq_df: pd.DataFrame,
+                             daily_cache: dict) -> dict:
+    """
+    Bot Z Adaptive : méta-switch entre 3 profils selon régime + hysteresis.
+
+    Profiles :
+      ENHANCED → max CAGR (bull propre) : Enhanced parameters
+      BALANCED → compromis (transition)  : risk management intermédiaire
+      PRO      → protection (bear/stress): vol targeting + multi-tier CB + corr spike
+
+    Hysteresis :
+      Évite le flip-flop. Délai de confirmation avant switch :
+        ENHANCED → switch : 7j | BALANCED : 5j | PRO → switch : 3j (protection rapide)
+
+    Switch déclenché par : VIX, BTC trend, QQQ SMA200, corrélation inter-bots, DD port.
+    """
+    log("Bot Z Adaptive — Meta Regime Switch (Enhanced / Balanced / Pro)...")
+
+    valid = {k: results[k] for k in VALID_BOTS_Z if k in results and results[k]["equity"]}
+    if len(valid) < 2:
+        return {}
+
+    date_sets = [set(r["dates"]) for r in valid.values()]
+    common_dates = sorted(set.intersection(*date_sets))
+    if not common_dates:
+        return {}
+
+    n_bots        = len(valid)
+    initial_total = INITIAL * n_bots
+
+    bot_norm = {}
+    for k, r in valid.items():
+        bot_norm[k] = {d: v / INITIAL for d, v in zip(r["dates"], r["equity"])}
+
+    btc_df = daily_cache.get("BTC/EUR")
+    btc_norm = {}
+    if btc_df is not None and "ema200" in btc_df.columns:
+        for dt, row in btc_df.iterrows():
+            btc_norm[dt] = {"close": row["close"], "ema200": row["ema200"]}
+
+    CB_RECOVERY = 0.005
+    VOL_WIN     = 20
+    CORR_WIN    = 20
+
+    ret_history   = {k: [] for k in valid}
+    cb_peak       = initial_total
+    cb_factor     = 1.0
+
+    # Hysteresis state
+    current_profile = "ENHANCED"
+    pending_profile = None
+    days_pending    = 0
+
+    eq_adaptive = [initial_total]
+    dates_out   = [common_dates[0]]
+    profile_log = []
+
+    for i in range(1, len(common_dates)):
+        dt      = common_dates[i]
+        prev_dt = common_dates[i - 1]
+
+        # ── Régime de base + Momentum Overlay ───────────────────────────────
+        regime = _get_regime_at_dt(dt, vix_s, qqq_df)
+        try:
+            dt_norm    = pd.Timestamp(dt).normalize().tz_localize(None)
+            qqq_close  = float(qqq_df["Close"].asof(dt_norm))
+            qqq_sma200 = float(qqq_df["sma200"].asof(dt_norm))
+            qqq_bearish = qqq_close < qqq_sma200
+            vix = float(vix_s.asof(dt_norm)) if not vix_s.empty else 15.0
+        except Exception:
+            qqq_bearish = False
+            vix = 15.0
+
+        btc_row = btc_norm.get(dt) or btc_norm.get(prev_dt)
+        btc_bearish = (btc_row is not None and btc_row["ema200"] > 0
+                       and btc_row["close"] < btc_row["ema200"])
+
+        if btc_bearish and qqq_bearish:
+            regime = "BEAR"
+        elif btc_bearish or qqq_bearish:
+            regime = "HIGH_VOL" if regime in ("BULL", "RANGE") else regime
+
+        # Retours quotidiens
+        bot_r = {}
+        for k in valid:
+            p = bot_norm[k].get(prev_dt, 1.0)
+            c = bot_norm[k][dt]
+            bot_r[k] = (c / p - 1) if p > 0 else 0.0
+            ret_history[k].append(bot_r[k])
+
+        # ── Corrélation inter-bots (pour profile selector) ──────────────────
+        avg_corr = 0.0
+        if len(ret_history[list(valid.keys())[0]]) >= CORR_WIN:
+            rets_mat = np.array([ret_history[k][-CORR_WIN:] for k in valid])
+            if rets_mat.shape[0] > 1:
+                try:
+                    corr_m = np.corrcoef(rets_mat)
+                    n_c    = corr_m.shape[0]
+                    off    = [corr_m[ii, jj] for ii in range(n_c) for jj in range(ii + 1, n_c)]
+                    avg_corr = float(np.mean(off)) if off else 0.0
+                except Exception:
+                    avg_corr = 0.0
+
+        # ── DD portefeuille ──────────────────────────────────────────────────
+        current_pv = eq_adaptive[-1]
+        if current_pv > cb_peak:
+            cb_peak = current_pv
+        port_dd = (current_pv - cb_peak) / cb_peak if cb_peak > 0 else 0.0
+
+        # ── Profile selector avec hysteresis ────────────────────────────────
+        raw_profile = _select_profile_raw(vix, btc_bearish, qqq_bearish, port_dd, avg_corr)
+
+        if raw_profile != current_profile:
+            if pending_profile == raw_profile:
+                days_pending += 1
+            else:
+                pending_profile = raw_profile
+                days_pending    = 1
+            min_days = ADAPTIVE_HYSTERESIS.get(current_profile, 5)
+            if days_pending >= min_days:
+                current_profile = pending_profile
+                pending_profile = None
+                days_pending    = 0
+                cb_factor = min(1.0, cb_factor + 0.02)  # léger reset CB au switch
+        else:
+            pending_profile = None
+            days_pending    = 0
+
+        profile_log.append((dt, current_profile))
+        cfg = ADAPTIVE_PROFILES[current_profile]
+
+        # ── Poids régime (calibration v2, identique pour tous les profils) ──
+        raw_w   = REGIME_WEIGHTS_Z.get(regime, REGIME_WEIGHTS_Z["RANGE"])
+        total_w = sum(raw_w.get(k, 0) for k in valid) or 1.0
+        w_base  = {k: raw_w.get(k, 0) / total_w for k in valid}
+
+        # ── Volatility Targeting (selon profil) ─────────────────────────────
+        vol_scale = {k: 1.0 for k in valid}
+        if cfg["target_vol"] is not None and len(ret_history[list(valid.keys())[0]]) >= VOL_WIN:
+            for k in valid:
+                dv  = float(np.std(ret_history[k][-VOL_WIN:]))
+                av  = dv * math.sqrt(252) if dv > 1e-8 else cfg["target_vol"]
+                vol_scale[k] = min(cfg["target_vol"] / av, 3.0)
+
+        # ── Poids combinés ───────────────────────────────────────────────────
+        w_raw    = {k: w_base[k] * vol_scale[k] for k in valid}
+        total_w2 = sum(w_raw.values()) or 1.0
+        w_final  = {k: w_raw[k] / total_w2 for k in valid}
+
+        # ── Correlation Spike (selon profil) ─────────────────────────────────
+        corr_factor = 1.0
+        if avg_corr > cfg["corr_thresh"]:
+            excess      = (avg_corr - cfg["corr_thresh"]) / max(0.95 - cfg["corr_thresh"], 1e-4)
+            corr_factor = 1.0 - cfg["corr_reduce"] * min(excess, 1.0)
+
+        # ── Retour portefeuille brut ─────────────────────────────────────────
+        r_port = sum(w_final[k] * bot_r[k] for k in valid)
+
+        # ── Multi-tier Circuit Breaker (selon profil) ────────────────────────
+        tiers = sorted(cfg["cb_tiers"], key=lambda x: x[0])
+        target_factor = 1.0
+        for (dd_thresh, factor) in tiers:
+            if port_dd < dd_thresh:
+                target_factor = factor
+
+        if target_factor < cb_factor:
+            cb_factor = max(target_factor, cb_factor - 0.05)
+        elif port_dd > -0.05:
+            cb_factor = min(1.0, cb_factor + CB_RECOVERY)
+
+        r_final = cb_factor * corr_factor * r_port
+        eq_adaptive.append(eq_adaptive[-1] * (1 + r_final))
+        dates_out.append(dt)
+
+    m   = _metrics_portfolio(eq_adaptive, dates_out, initial_total)
+    ann = annual_returns(eq_adaptive, dates_out)
+
+    # Statistiques profils
+    profile_counts = {}
+    for _, p in profile_log:
+        profile_counts[p] = profile_counts.get(p, 0) + 1
+    total_days = len(profile_log) or 1
+    profile_pct = {p: round(profile_counts.get(p, 0) / total_days * 100, 1)
+                   for p in ["ENHANCED", "BALANCED", "PRO"]}
+
+    return {
+        "name":          "Bot Z Adaptive (E/B/P)",
+        "equity":        eq_adaptive, "dates": dates_out, "trades": [],
+        "metrics":       m, "annual": ann, "regime": {},
+        "profile_stats": profile_pct,
+    }
+
+
 # ── 14. WALK-FORWARD TEST ─────────────────────────────────────────────────────
 
 def walk_forward_test(results: dict, vix_s: pd.Series, qqq_df: pd.DataFrame,
@@ -1556,6 +1810,7 @@ def print_report(results, vix_s, qqq_df, z_results=None, wf=None, mc=None):
             ("hybrid",   Fore.WHITE,   "← 70% base stable + 30% overlay dynamique"),
             ("enhanced", Fore.MAGENTA, "← régime + momentum overlay + circuit breaker"),
             ("pro",      Fore.YELLOW,  "← VT + adaptive score + corr spike + multi-tier CB"),
+            ("adaptive", Fore.CYAN,    "← meta-switch E/B/P + hysteresis 7/5/3j"),
         ]
         for key, color, note in strategy_order:
             r = z_results.get(key)
@@ -1573,7 +1828,7 @@ def print_report(results, vix_s, qqq_df, z_results=None, wf=None, mc=None):
         hdr_z = f"  {'Stratégie':<32}" + "".join(f"  {y:>8}" for y in years)
         print(hdr_z)
         print("  " + "-" * (32 + 10 * len(years)))
-        for key in ["equal", "z", "hybrid", "enhanced", "pro"]:
+        for key in ["equal", "z", "hybrid", "enhanced", "pro", "adaptive"]:
             r = z_results.get(key)
             if not r:
                 continue
@@ -1603,6 +1858,17 @@ def print_report(results, vix_s, qqq_df, z_results=None, wf=None, mc=None):
         if pro_cagr:
             print(f"  • Pro vs Enhanced            : {Fore.GREEN if pro_cagr > enhanced_cagr else Fore.RED}"
                   f"{pro_cagr - enhanced_cagr:+.1f}%/an{Style.RESET_ALL} CAGR | MaxDD Pro = {pro_dd:.1f}%")
+        adaptive_r = z_results.get("adaptive")
+        if adaptive_r:
+            ad_cagr = adaptive_r["metrics"].get("cagr", 0)
+            ad_dd   = adaptive_r["metrics"].get("max_dd", 0)
+            ad_sharpe = adaptive_r["metrics"].get("sharpe", 0)
+            ps = adaptive_r.get("profile_stats", {})
+            ps_str = " | ".join(f"{p}:{v:.0f}%" for p, v in ps.items() if v > 0)
+            print(f"  • Adaptive vs Enhanced       : {Fore.GREEN if ad_cagr > enhanced_cagr else Fore.RED}"
+                  f"{ad_cagr - enhanced_cagr:+.1f}%/an{Style.RESET_ALL} CAGR | "
+                  f"MaxDD={ad_dd:.1f}% | Sharpe={ad_sharpe:.2f}")
+            print(f"    Profils utilisés : {ps_str}")
         print(f"{Fore.CYAN}{'='*100}{Style.RESET_ALL}")
 
         # Walk-forward et Monte Carlo
@@ -1613,7 +1879,7 @@ def print_report(results, vix_s, qqq_df, z_results=None, wf=None, mc=None):
 
         # Save Z comparison to CSV
         z_rows = []
-        for key in ["equal", "z", "hybrid", "enhanced", "pro"]:
+        for key in ["equal", "z", "hybrid", "enhanced", "pro", "adaptive"]:
             r = z_results.get(key)
             if r:
                 m = r["metrics"]
@@ -1661,7 +1927,8 @@ def plot_equity_curves(results, z_results=None):
                 ("z",        "-.",  2.0, "#a371f7"),
                 ("hybrid",   ":",   1.5, "#8b949e"),
                 ("enhanced", "-",   2.8, "#ffffff"),
-                ("pro",      "-",   3.2, "#ffd700"),
+                ("pro",      "-",   2.5, "#ffd700"),
+                ("adaptive", "-",   3.2, "#00d9ff"),
             ]
             for key, style, lw, color in z_styles:
                 r = z_results.get(key)
@@ -1741,6 +2008,11 @@ def main():
         z_pro = backtest_bot_z_pro(results, vix_s, qqq_df, daily)
         if z_pro:
             z_results["pro"] = z_pro
+
+        # Bot Z Adaptive (meta-switch Enhanced/Balanced/Pro + hysteresis)
+        z_adaptive = backtest_bot_z_adaptive(results, vix_s, qqq_df, daily)
+        if z_adaptive:
+            z_results["adaptive"] = z_adaptive
 
         # Walk-forward test
         wf = walk_forward_test(results, vix_s, qqq_df, daily, split_year=2023)
