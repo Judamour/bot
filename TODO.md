@@ -75,6 +75,9 @@ python backtest/analyze_botz.py --csv
 - [ ] Vol_factor moyen (cible : 0.85-1.15 → vol targeting actif mais stable)
 - [ ] Allocation drift moyen (cible < 15%) — si > 20% : budget dispatch urgent
 - [ ] Corrélation inter-bots (cible < 50%) — si > 70% régulier : stratégies trop similaires
+- [ ] **Contribution au profit par bot** (alerte si Bot A > 70% du P&L total)
+      → si > 70% : MAX_BOT_WEIGHT 0.40 → 0.30 pour Bot A
+      → déjà calculé dans `analyze_botz.py` section "Contribution au profit"
 - [ ] BTC override HIGH_VOL : combien d'épisodes ? Ont-ils évité des pertes ?
 - [ ] Regime confidence moyenne (cible > 0.65) — si < : paramètres régime à ajuster
 

@@ -285,4 +285,83 @@ Monte Carlo 100% de simulations positives sur les 4 bots.
 Ne pas toucher le modèle. 3 mois paper trading → vérifier corrélations, drift, switches, vol_factor.
 Puis budget dispatch réel.
 
-**Note** : ChatGPT mentionne "le point le plus dangereux du système" (non révélé) — à demander à la prochaine session.
+**Note** : ChatGPT mentionne "le point le plus dangereux du système" — voir section 13 ci-dessous.
+
+---
+
+## 13. Le point le plus dangereux — Dépendance structurelle à Bot A
+
+### Constat
+
+Depuis la fin du bull crypto (2022-2026) :
+
+| Bot | CAGR 2022-2026 |
+|-----|----------------|
+| A   | ~+65%          |
+| G   | ~+24%          |
+| B   | ~+8%           |
+| C   | ~+8%           |
+
+**Bot A porte quasiment tout le système depuis 2022.**
+
+Dans un portefeuille quant, quand 1 stratégie = 60-80% du profit → **le système devient fragile**.
+C'est ce qui a tué beaucoup de fonds momentum et trend following.
+
+### Signal d'alerte : Sharpe 3.38
+
+| Sharpe | Interprétation |
+|--------|----------------|
+| 0.5 | normal |
+| 1.0 | bon |
+| 2.0 | excellent |
+| 3.0+ | **suspect / exploite une structure temporaire** |
+
+Un Sharpe 3.38 peut signifier soit un edge exceptionnel, soit une structure de marché temporaire en cours d'exploitation. Dans les deux cas — à surveiller.
+
+### Pourquoi Bot Z protège partiellement
+
+Le meta-allocateur limite le risque via regime switching + CB + allocation dynamique.
+Bot A ne peut pas détenir 100% du capital. Mais même à 30-40%, si A perd son edge → Sharpe global chute.
+
+### Signal à surveiller pendant le paper trading
+
+**Contribution au profit par bot** (pas le CAGR global) :
+
+```
+Si contribution_A > 70% du profit total → DANGER
+```
+
+Exemple sain :
+```
+A : 35-45%
+G : 20-25%
+B : 15-20%
+C : 10-15%
+```
+
+### Solution si bot A concentre > 70%
+
+Ne pas supprimer A. Réduire son poids maximum :
+```python
+MAX_BOT_WEIGHT : 0.40 → 0.30
+# ou
+weight_A *= 0.8  # dans le scoring Meta v2
+```
+
+Bot Z contrôle déjà l'allocation → correction facile sans toucher aux stratégies.
+
+### Point rassurant
+
+Le système reste rentable sans le bull 2020-2021. L'edge post-2022 est réel.
+Le risque est la **concentration**, pas la validité de l'edge.
+
+### Calcul à faire à la revue 2026-04-30
+
+```python
+# Dans analyze_botz.py — à ajouter
+profit_contribution = {
+    bot: sum(pnl_bot) / sum(pnl_total)
+    for bot in ["a", "b", "c", "g"]
+}
+# Alerte si contribution_a > 0.70
+```

@@ -206,6 +206,26 @@ def analyze(records: list, export_csv: bool = False):
 
     bot_budget_avg = {b: sum(v)/len(v) for b, v in bot_budget_history.items() if v}
 
+    # ── Contribution au profit par bot (risque concentration) ────────────────
+    # Approximation : profit attribué au bot proportionnellement à son budget
+    bot_profit_contrib = defaultdict(float)
+    prev_val = z_initial
+    for r in records[1:]:
+        val = float(r.get("z_capital_eur", r.get("total_simulated_eur", prev_val)))
+        cycle_pnl = val - prev_val
+        if cycle_pnl == 0:
+            prev_val = val
+            continue
+        budget = r.get("budget", {})
+        total_budget = sum(float(v) for v in budget.values()) or 1.0
+        for b, bgt in budget.items():
+            weight = float(bgt) / total_budget
+            bot_profit_contrib[b] += cycle_pnl * weight
+        prev_val = val
+
+    total_contrib = sum(abs(v) for v in bot_profit_contrib.values()) or 1.0
+    bot_contrib_pct = {b: v / total_contrib for b, v in bot_profit_contrib.items()}
+
     # ── VIX moyen ────────────────────────────────────────────────────────────
     vix_values = [float(r.get("vix", 0)) for r in records if r.get("vix")]
     vix_avg = sum(vix_values) / len(vix_values) if vix_values else 0
@@ -344,7 +364,34 @@ def analyze(records: list, export_csv: bool = False):
         sc_c = G if sc_last > 1.1 else (R if sc_last < 0.9 else W)
         print(f"  {name:<20} {sc_avg:>10.3f} {sc_c}{sc_last:>10.3f}{RST} {vol_avg:>9.1%} {bgt_avg:>10.0f}€")
 
-    # ── 7. Allocations moyennes ───────────────────────────────────────────────
+    # ── 7. Contribution au profit par bot (risque concentration) ─────────────
+    separator("CONTRIBUTION AU PROFIT PAR BOT — Risque concentration")
+    print(f"  {'Bot':<20} {'Contrib €':>10} {'Contrib %':>10}  Barre  Alerte")
+    separator()
+    DANGER_THRESHOLD = 0.70
+    has_contrib = sum(abs(v) for v in bot_profit_contrib.values()) > 0
+    for b in ["a", "b", "c", "g"]:
+        name  = BOT_NAMES.get(b, b)
+        pnl   = bot_profit_contrib.get(b, 0)
+        pct   = bot_contrib_pct.get(b, 0)
+        bc    = {"a": C, "b": G, "c": Y, "g": M}.get(b, W)
+        pnl_c = G if pnl >= 0 else R
+        b_bar = bar(abs(pct), 1.0, 20)
+        alert = f"  {R}⚠ CONCENTRATION > 70%{RST}" if pct > DANGER_THRESHOLD else ""
+        if has_contrib:
+            print(f"  {bc}{name:<20}{RST} {pnl_c}{pnl:>+9.0f}€{RST}  {pct:>8.0%}  {b_bar}{alert}")
+        else:
+            print(f"  {bc}{name:<20}{RST}  {DIM}pas encore de données P&L{RST}")
+    if has_contrib:
+        top = max(bot_contrib_pct, key=bot_contrib_pct.get)
+        top_pct = bot_contrib_pct[top]
+        if top_pct > DANGER_THRESHOLD:
+            print(f"\n  {R}DANGER : {BOT_NAMES.get(top, top)} concentre {top_pct:.0%} du profit{RST}")
+            print(f"  {R}→ Envisager MAX_BOT_WEIGHT 0.40 → 0.30 pour ce bot{RST}")
+        else:
+            print(f"\n  {G}✓ Concentration acceptable — aucun bot > 70%{RST}")
+
+    # ── 8. Allocations moyennes ───────────────────────────────────────────────
     separator("ALLOCATION MOYENNE DISPATCHING")
     total_avg = sum(bot_budget_avg.values()) or 1
     for b in ["a", "b", "c", "g"]:
