@@ -327,35 +327,14 @@ def run():
                 f"Trades: {len(state_c['trades'])}"
             )
 
-            # ── 7. Bot D: DeepSeek LLM ────────────────────────────────────────
-            log(f"\n{Fore.MAGENTA}--- Bot D: DeepSeek LLM ---{Style.RESET_ALL}")
-            state_d = run_llm_cycle(state_d, ohlcv_4h, macro)
-            save_llm(state_d)
-            log(
-                f"[D] Capital: {state_d['capital']:.2f}€ | "
-                f"Positions: {list(state_d['positions'].keys())} | "
-                f"Trades: {len(state_d['trades'])}"
-            )
+            # ── 7. Bot D: DeepSeek LLM (DÉSACTIVÉ — coût tokens) ────────────
+            log(f"\n[D] Bot D DeepSeek — désactivé (coût tokens)")
 
-            # ── 8. Bot E: Claude Sonnet ───────────────────────────────────────
-            log(f"\n{Fore.RED}--- Bot E: Claude Sonnet ---{Style.RESET_ALL}")
-            state_e = run_claude_cycle(state_e, ohlcv_4h, macro)
-            save_cla(state_e)
-            log(
-                f"[E] Capital: {state_e['capital']:.2f}€ | "
-                f"Positions: {list(state_e['positions'].keys())} | "
-                f"Trades: {len(state_e['trades'])}"
-            )
+            # ── 8. Bot E: Claude Sonnet (DÉSACTIVÉ — coût tokens) ────────────
+            log(f"[E] Bot E Claude Sonnet — désactivé (coût tokens)")
 
-            # ── 9. Bot F: Claude Haiku ────────────────────────────────────────
-            log(f"\n{Fore.YELLOW}--- Bot F: Claude Haiku ---{Style.RESET_ALL}")
-            state_f = run_haiku_cycle(state_f, ohlcv_4h, macro)
-            save_hai(state_f)
-            log(
-                f"[F] Capital: {state_f['capital']:.2f}€ | "
-                f"Positions: {list(state_f['positions'].keys())} | "
-                f"Trades: {len(state_f['trades'])}"
-            )
+            # ── 9. Bot F: Claude Haiku (DÉSACTIVÉ — coût tokens) ─────────────
+            log(f"[F] Bot F Claude Haiku — désactivé (coût tokens)")
 
             # ── 10. Bot G: Trend Following Multi-Asset ────────────────────────
             log(f"\n{Fore.CYAN}--- Bot G: Trend Following Multi-Asset ---{Style.RESET_ALL}")
