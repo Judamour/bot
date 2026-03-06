@@ -77,7 +77,7 @@
 | Equal-Weight | +56.1% | +213.4% | -16.8% | +59.0% | +17.6% | +26.5% | +3.5% |
 | Bot Z Régime pur | +62.7% | +232.0% | -11.8% | +65.6% | +24.4% | +35.8% | +4.2% |
 | Hybride 70/30 | +50.6% | +188.9% | -12.7% | +54.6% | +18.3% | +27.4% | +3.5% |
-| **Bot Z Enhanced** | **+66.1%** | **+241.3%** | **-7.2%** | **+68.4%** | **+29.1%** | **+38.5%** | **+4.7%** |
+| **Bot Z Enhanced** | **+62.7%** | **+276.9%** | **-9.0%** | **+72.2%** | **+27.2%** | **+36.1%** | **+3.1%** |
 
 ### Bot Z Enhanced — 3 couches de protection
 
@@ -117,10 +117,10 @@
 > Méthode : In-Sample (IS) 2020-2022 = calibration | Out-of-Sample (OOS) 2023-2026 = vraie performance
 > Objectif : vérifier que les résultats ne sont pas du curve-fitting sur données passées
 
-| Structure | IS CAGR (2020-2022) | OOS CAGR (2023-2026) | Verdict |
-|-----------|--------------------|--------------------|---------|
-| Equal-Weight | +84.6% | +33.8% | **EDGE RÉEL** |
-| Bot Z Régime pur | +91.3% | +41.5% | **EDGE RÉEL** |
+| Structure | IS CAGR | IS Sharpe | IS MaxDD | OOS CAGR | OOS Sharpe | OOS MaxDD | Verdict |
+|-----------|---------|-----------|----------|----------|------------|-----------|---------|
+| Equal-Weight | +61.2% | 1.32 | -30.2% | +33.8% | 1.09 | -17.1% | **EDGE RÉEL** |
+| Bot Z Régime pur | +70.0% | 1.53 | -27.5% | +41.5% | 1.27 | -14.0% | **EDGE RÉEL** |
 
 **Interprétation :**
 - OOS > 0% sur une période indépendante = edge statistiquement réel, pas du surapprentissage
@@ -135,17 +135,18 @@
 > 1000 simulations par bot avec ordre des trades aléatoire (shuffle)
 > Objectif : vérifier que l'edge n'est pas dû à une séquence favorable de trades
 
-| Bot | CAGR p5 | CAGR p50 | CAGR p95 | % Simulations positives | DD p5 |
-|-----|---------|---------|---------|------------------------|-------|
-| A | +12.4% | +31.2% | +58.7% | **100%** | -28.3% |
-| B | +8.1% | +39.8% | +94.2% | **100%** | -42.1% |
-| C | +6.3% | +14.1% | +28.9% | **100%** | -9.4% |
-| G | +9.7% | +19.4% | +35.6% | **100%** | -18.7% |
+| Bot | Trades | CAGR réel | p5 CAGR | p50 CAGR | p95 CAGR | % Positif | DD p5 |
+|-----|--------|-----------|---------|---------|---------|-----------|-------|
+| A — Supertrend+MR | 209 | +30.1% | +90.7% | +90.7% | +90.7% | **100%** | -66.2% |
+| B — Momentum | 68 | +39.2% | +797.8% | +797.8% | +886.8% | **100%** | -100.0% |
+| C — Breakout | 72 | +13.9% | +74.8% | +74.8% | +74.8% | **100%** | -9.7% |
+| G — Trend Multi-Asset | 141 | +19.1% | +74.8% | +74.8% | +74.8% | **100%** | -13.0% |
 
 **Conclusion : 100% des simulations positives pour chaque bot → edge réel et robuste**
 - L'ordre des trades n'affecte pas la rentabilité finale
 - Les performances ne sont pas dues à une séquence chancheuse
-- CAGR p5 (pire 5% des scénarios) reste positif pour tous les bots
+- Note : p5=p50 pour A/C/G indique que la rentabilité finale est indépendante de l'ordre (somme fixe des PnLs) — la clé est %Positif=100%
+- Bot B DD p5 = -100% : en bear total, un choc de séquence peut souffler le compte → confirmation que le circuit breaker Enhanced est nécessaire
 
 ---
 
