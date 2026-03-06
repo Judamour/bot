@@ -269,11 +269,12 @@ def run():
 
             # ── 4. Bot Z — Pilot (allocation dispatch AVANT les sub-bots) ────────
             try:
-                z_summary = run_bot_z_cycle(macro)
+                # Passe ohlcv_daily pour mark-to-market réel des positions
+                z_summary = run_bot_z_cycle(macro, ohlcv=ohlcv_daily)
                 print_bot_z_summary(z_summary)
                 log(f"[Z] Engine: {z_summary.get('current_engine','?')} | "
                     f"Capital: {z_summary.get('z_capital_eur', z_summary.get('total_simulated_eur',0)):.2f}€ | "
-                    f"Régime: {z_summary.get('regime','?')} | "
+                    f"Régime: {z_summary.get('regime','?')} | MTM: {'live' if z_summary.get('mtm_live') else 'entry-price'} | "
                     f"Budget: {z_summary.get('budget',{})}")
             except Exception as ez:
                 log(f"Bot Z erreur (non bloquant): {ez}", "WARN")

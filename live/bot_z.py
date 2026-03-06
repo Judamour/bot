@@ -329,16 +329,24 @@ def compute_rolling_score(bot_id: str, state: dict, window: int = 20) -> float:
     """
     Score de qualité récente basé sur les N derniers trades.
     Sharpe approximatif normalisé entre 0.3 et 1.5.
-    Retourne 1.0 si pas assez de trades (neutre).
+
+    Ramp-up progressif (évite de sur-pondérer un score instable) :
+      < 5 trades  → neutre 1.0
+      5-20 trades → blend progressif entre neutre et score réel
+      >= 20 trades → score plein
     """
     trades = state.get("trades", [])[-window:]
-    if len(trades) < 5:
-        return 1.0
+    n = len(trades)
+    if n < 5:
+        return 1.0  # neutre — pas assez de data
     pnls = [t.get("pnl", 0) for t in trades]
-    avg = sum(pnls) / len(pnls)
-    std = math.sqrt(sum((p - avg) ** 2 for p in pnls) / len(pnls)) if len(pnls) > 1 else 1.0
+    avg = sum(pnls) / n
+    std = math.sqrt(sum((p - avg) ** 2 for p in pnls) / n) if n > 1 else 1.0
     sharpe = avg / std if std > 0 else 0.0
-    return max(0.3, min(1.5, 1.0 + sharpe * 0.3))
+    raw = max(0.3, min(1.5, 1.0 + sharpe * 0.3))
+    # Blend progressif : confiance croît de 0 à 1 entre 5 et 20 trades
+    confidence = min(1.0, (n - 5) / 15.0)
+    return 1.0 + confidence * (raw - 1.0)
 
 
 def compute_bot_volatility(state: dict, window: int = 20) -> float:
@@ -500,9 +508,15 @@ def analyze_cross_exposure(all_states: dict, allocation: dict) -> dict:
 
 # ── Cycle principal ──────────────────────────────────────────────────────────
 
-def run_bot_z_cycle(macro: dict) -> dict:
+def run_bot_z_cycle(macro: dict, ohlcv: dict = None) -> dict:
     """
-    Exécute un cycle Bot Z Enhanced (paper trading production).
+    Exécute un cycle Bot Z Meta v2 (paper trading production).
+
+    Args:
+        macro  : données macro (vix, qqq_regime_ok, btc_context, ...)
+        ohlcv  : dict {symbol: DataFrame} pour mark-to-market réel des positions.
+                 Si None, fallback au prix d'entrée (conservatif mais inexact).
+
     Retourne le résumé du cycle pour logging et dashboard.
     """
     ts = datetime.now().isoformat()
@@ -518,12 +532,27 @@ def run_bot_z_cycle(macro: dict) -> dict:
     state = load_state()
 
     # Valeur actuelle de chaque sub-bot (capital libre + positions mark-to-market)
+    # Si ohlcv disponible → prix live ; sinon → prix d'entrée (approximation)
     bot_values = {}
+    mtm_prices = {}  # prix utilisés pour le mark-to-market (pour logging)
     for bot_id, s in all_states.items():
-        val = s.get("capital", 1000.0) + sum(
-            p.get("entry", 0) * p.get("size", 0)
-            for p in s.get("positions", {}).values()
-        )
+        val = s.get("capital", 1000.0)
+        for sym, p in s.get("positions", {}).items():
+            entry_price = p.get("entry", 0)
+            # Mark-to-market : utilise le dernier close OHLCV si disponible
+            if ohlcv and sym in ohlcv:
+                try:
+                    df = ohlcv[sym]
+                    if df is not None and not df.empty:
+                        live_price = float(df["close"].iloc[-1])
+                        mtm_prices[sym] = round(live_price, 4)
+                        val += live_price * p.get("size", 0)
+                        continue
+                except Exception:
+                    pass
+            # Fallback : prix d'entrée
+            mtm_prices.setdefault(sym, entry_price)
+            val += entry_price * p.get("size", 0)
         bot_values[bot_id] = round(val, 2)
 
     # Retour pondéré du cycle : retours de chaque bot × poids du cycle précédent
@@ -561,19 +590,40 @@ def run_bot_z_cycle(macro: dict) -> dict:
     raw_engine     = select_engine_live(vix, btc_bearish, qqq_bearish,
                                         port_dd, regime, rolling_scores, bot_vols)
 
+    # Raisons de sélection d'engine (pour historique et debug)
+    _hard_pro = ((btc_bearish and qqq_bearish and vix > 26) or vix > 32 or port_dd < -0.12)
+    engine_reason = {
+        "hard_rule_pro":      _hard_pro,
+        "block_enhanced":     btc_bearish or qqq_bearish,
+        "btc_bearish":        btc_bearish,
+        "qqq_bearish":        qqq_bearish,
+        "vix":                round(vix, 1),
+        "port_dd_pct":        round(port_dd * 100, 2),
+        "regime":             regime,
+        "raw_engine":         raw_engine,
+        "rolling_scores":     {b: round(v, 3) for b, v in rolling_scores.items()},
+        "bot_vols":           {b: round(v, 3) for b, v in bot_vols.items()},
+    }
+
     # Hysteresis : on attend N jours de confirmation avant de switcher
     current_engine = state.get("current_engine", "OMEGA")
     pending_engine = state.get("pending_engine", raw_engine)
     days_pending   = state.get("days_pending", 0)
 
+    prev_engine = current_engine  # pour détecter les switchs
     if raw_engine != pending_engine:
         pending_engine = raw_engine
         days_pending   = 0
     else:
         days_pending += 1
 
+    engine_switched = False
     if days_pending >= META_ENGINE_HYSTERESIS.get(pending_engine, 5):
+        engine_switched = (current_engine != pending_engine)
         current_engine = pending_engine
+
+    engine_reason["engine_switched"] = engine_switched
+    engine_reason["prev_engine"]     = prev_engine
 
     # CB seuils adaptés par engine (PRO plus sensible)
     cb_tiers = {
@@ -650,6 +700,9 @@ def run_bot_z_cycle(macro: dict) -> dict:
         "pending_engine":     pending_engine,
         "days_pending":       days_pending,
         "budget":             budget,
+        "engine_reason":      engine_reason,
+        "mtm_prices":         mtm_prices,
+        "mtm_live":           (ohlcv is not None),
     }
 
     # 11. Log shadow
