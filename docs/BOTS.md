@@ -10,15 +10,15 @@ Runner : `live/multi_runner.py` — un seul processus, données macro partagées
 
 ---
 
-## Données partagées (1 seul fetch pour les 6 bots)
+## Données partagées (1 seul fetch pour les 9 bots)
 
 Avant chaque cycle, `data/market_snapshot.py` récupère tout :
 
 | Donnée | Source | Fréquence | Note |
 |--------|--------|-----------|------|
-| OHLCV crypto 4h | Binance API publique | 6×/jour | 16 symboles × 45 jours |
-| OHLCV xStocks 4h | yfinance | 6×/jour | 11 symboles × 45 jours |
-| OHLCV daily | Binance + yfinance | 6×/jour | 27 symboles × 220 jours (B & C) |
+| OHLCV crypto 4h | Binance API publique | 6×/jour | 7 crypto × 45 jours |
+| OHLCV xStocks 4h | yfinance | 6×/jour | 13 xStocks × 45 jours |
+| OHLCV daily | Binance + yfinance | 6×/jour | 20 symboles × 220 jours (B, C, G, I) |
 | BTC context | Binance → EMA200 4h | 6×/jour | Trend bull/bear |
 | VIX | yfinance `^VIX` 1h | 6×/jour | Valeur exacte |
 | Fear & Greed | alternative.me | 6×/jour | Score 0-100 + label |
@@ -309,8 +309,6 @@ Sous-performe en marchés range/choppy (2022-2023), sur-performe lors de grandes
 
 ---
 
----
-
 ## Bot H — Volatility Compression Breakout (VCB)
 
 **Fichier** : `strategies/vcb_strategy.py`
@@ -476,11 +474,12 @@ Mots-clés détectés : `credit`, `billing`, `insufficient`, `balance`, `quota`,
 
 ## Symboles tradés
 
-**Crypto (5)** : BTC/EUR, ETH/EUR, SOL/EUR, BNB/EUR, TON/EUR
-**xStocks paper Kraken (11)** : NVDAx, AAPLx, MSFTx, METAx, GOOGx, PLTRx, AMDx, AVGOx, GLDx, NFLXx, CRWDx
+**Crypto (7)** : BTC/EUR, ETH/EUR, SOL/EUR, BNB/EUR, TON/EUR, LINK/EUR, AVAX/EUR
+**xStocks paper Kraken (13)** : NVDAx, AAPLx, TSLAx, MSFTx, METAx, AMZNx, GOOGx, PLTRx, AMDx, AVGOx, GLDx, NFLXx, CRWDx
 
 **Bot C uniquement** : BTC/EUR, ETH/EUR, SOL/EUR (meilleurs trends Donchian)
-**Bot G** : tous les 16 symboles (trend following multi-actifs)
+**Bot H uniquement** : BTC/EUR, ETH/EUR, SOL/EUR, NVDAx, AMDx, METAx, PLTRx (actifs à forte volatilité)
+**Bots A, B, D, E, F, G, I** : tous les 20 symboles
 
 ---
 
@@ -491,6 +490,10 @@ Mots-clés détectés : `credit`, `billing`, `insufficient`, `balance`, `quota`,
 | Max drawdown portfolio | -15% → alerte Telegram |
 | Frais taker Kraken | 0.26% |
 | Slippage estimé | 0.10% |
-| Max drawdown individuel (B) | -12% stop |
-| Max drawdown individuel (C) | 2×ATR Turtle N-stop |
-| Max drawdown individuel (D/E/F) | 2×ATR trailing stop |
+| Stop loss Bot A | 3×ATR trailing (trend) / 1×ATR (MR) |
+| Stop loss Bot B | -12% fixe par position |
+| Stop loss Bot C | 2×ATR Turtle N-stop |
+| Stop loss Bot D/E/F | 2×ATR trailing |
+| Stop loss Bot G | 3×ATR trailing + SMA200 break |
+| Stop loss Bot H | 1.5×ATR entrée + 3×ATR trailing |
+| Stop loss Bot I | 2.5×ATR trailing + hard -10% + SMA50 break |
