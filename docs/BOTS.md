@@ -643,6 +643,24 @@ Distribution : ENHANCED 16% / BALANCED 42% / PRO 42%
 
 ---
 
+### Bot Z Omega — Portfolio Optimizer (Run 7)
+
+**Architecture différente des autres structures** : au lieu de poids régime fixes, Omega optimise dynamiquement les poids à chaque barre via un moteur ER/Risk.
+
+**Expected Return Engine** par bot (z-score cross-sectionnel) :
+- `0.35 × Sharpe_90d` + `0.25 × PF_90d` + `0.20 × equity_slope_60d` + `0.20 × regime_fit`
+
+**Risk Engine** par bot (z-score cross-sectionnel) :
+- `0.40 × vol_20d` + `0.30 × downside_vol` + `0.30 × current_dd_abs`
+
+**Score final** = `(ER_score − risk_score) × corr_penalty` → softmax(β=3) → poids
+
+**Résultats Run 7 :** CAGR +55.5% | **Sharpe 1.96** (meilleur de toutes les structures) | **MaxDD -8.7%** | 2022 bear : **+0.2%**
+
+**Statut** : backtest validé, candidat production pour capital modéré (risque-ajusté optimal).
+
+---
+
 ### Feuille de route Bot Z
 
 | Phase | Statut | Description |
@@ -650,6 +668,7 @@ Distribution : ENHANCED 16% / BALANCED 42% / PRO 42%
 | ~~Shadow Mode~~ | ✅ Terminé | Observation sans exécution |
 | **Paper Trading Enhanced** | 🟢 En cours | 10 000€, démarré 2026-03-06 |
 | Revue résultats | 📅 2026-04-30 | Analyse 55 jours de data live |
+| Bot Z Omega backtest | ✅ Terminé | Sharpe 1.96, MaxDD -8.7%, 2022 +0.2% |
 | Bot Z Adaptive v2 | 🔲 Prévu | Seuils PRO ajustés + backtest |
 | Live Trading | 🔲 Futur | Après validation ~6 mois paper |
 
@@ -668,18 +687,20 @@ Distribution : ENHANCED 16% / BALANCED 42% / PRO 42%
 python backtest/multi_backtest.py
 ```
 
-Durée : ~35s (fetch 16 symboles × 6 ans + 6 bots + 6 structures Bot Z + MC 5000)
+Durée : ~42s (fetch 16 symboles × 6 ans + 6 bots + 7 structures Bot Z + MC 5000)
 
-### 6 structures Bot Z simulées
+### 7 structures Bot Z simulées
 
 | Structure | CAGR | Sharpe | MaxDD | Clé résultats |
 |-----------|------|--------|-------|---------------|
 | Equal-Weight | +46.4% | 1.20 | -31.1% | Baseline |
 | Régime pur | +54.6% | 1.40 | -27.5% | Calibration v2 |
 | Hybride 70/30 | +44.2% | 1.30 | -25.3% | Base fixe + overlay |
+| **Omega** | **+55.5%** | **1.96** | **-8.7%** | ER+Risk+Corr dynamique |
 | **Enhanced** (prod) | **+59.8%** | **1.61** | **-18.9%** | MO + CB single |
-| Pro | +29.9% | **1.90** | **-9.1%** | VT + multi-CB |
+| Pro | +29.9% | 1.90 | -9.1% | VT + multi-CB |
 | Adaptive | +29.4% | 1.60 | -11.7% | Meta-switch E/B/P |
+| **Omega** | +55.5% | **1.96** | **-8.7%** | ER+Risk+Corr+softmax |
 
 ### Validations statistiques incluses
 

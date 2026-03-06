@@ -1,7 +1,7 @@
 # Résultats Backtests — Multi-Bots
 
 > Script : `backtest/multi_backtest.py`
-> Dernier run : 2026-03-06 (Run 5 — Bot Z Pro + MC 5000)
+> Dernier run : 2026-03-06 (Run 7 — Bot Z Omega + MC 5000)
 > Graphique : `backtest/results/multi_equity.png`
 > CSV détaillé : `backtest/results/multi_summary.csv`
 > CSV Bot Z : `backtest/results/bot_z_comparison.csv`
@@ -127,22 +127,24 @@
 
 ### Conclusions
 
-**1. Deux structures optimales selon l'objectif**
+**1. Trois structures optimales selon l'objectif**
 
 | Objectif | Structure | CAGR | Sharpe | MaxDD |
 |----------|-----------|------|--------|-------|
 | Max croissance | Bot Z Enhanced | +59.8% | 1.61 | -18.9% |
-| Max risque-ajusté | Bot Z Pro | +29.9% | **1.90** | **-9.1%** |
+| Équilibre optimal | **Bot Z Omega** | **+55.5%** | **1.96** | **-8.7%** |
+| Max protection (faible capital) | Bot Z Pro | +29.9% | 1.90 | -9.1% |
 
 **2. Pourquoi Bot Z Pro est moins en CAGR**
 - Volatility Targeting réduit drastiquement l'expo aux bots très volatils (Bot A vol ~80%/an → factor ×0.25)
 - Résultat : moins de capture des bull runs 2020-2021, mais stabilité maximale
 - 2022 (bear) : seulement **-5.5%** (Bot Pro) vs -9.0% (Enhanced) vs -16.8% (Equal)
 
-**3. Bot Z Pro : Sharpe 1.90 = meilleur de tous les systèmes**
-- Le ratio risque/rendement est supérieur sur l'ensemble de la période
-- MaxDD -9.1% = quasiment au niveau de Bot C défensif (-6.0%)
-- Pour un capital en production (20-100k€), Bot Z Pro est le choix rationnel
+**3. Bot Z Omega : Sharpe 1.96 + MaxDD -8.7% = meilleur risque-ajusté global**
+- Meilleur Sharpe de TOUTES les structures (1.96 > Pro 1.90 > Enhanced 1.61)
+- MaxDD -8.7% = légèrement meilleur que Pro (-9.1%)
+- 2022 (bear) : **+0.2%** — quasi-flat, meilleure protection bear de toutes les structures
+- CAGR +55.5% vs Enhanced +59.8% : sacrifice de seulement 4.3%/an pour drastiquement moins de risque
 
 ### Bot Z Adaptive — Analyse Run 6
 
@@ -165,6 +167,49 @@
 **Interprétation :** Les seuils PRO (VIX>28) déclenchent trop souvent le mode défensif. Sur 6 ans majoritairement haussiers, l'Adaptive passe 84% du temps en BALANCED/PRO → perd la capture des hausses. En 2022 (la seule vraie bear), Adaptive **outperforme Enhanced** (-7.5% vs -9.0%).
 
 **Ajustement recommandé pour l'Adaptive v2 :** Relever le seuil PRO de VIX>28 à VIX>30, exiger 2+ conditions simultanées (au lieu d'une seule). Objectif : réduire le temps PRO de 42% à ~20-25%, et augmenter ENHANCED à ~35%.
+
+### Bot Z Omega — Analyse Run 7
+
+**Architecture : remplace les poids régime fixes par un optimiseur dynamique**
+
+Au lieu de `REGIME_WEIGHTS_Z[regime]`, Omega calcule à chaque barre :
+
+1. **Expected Return Engine** (mesure la qualité récente de chaque bot) :
+   - Sharpe 90j × 0.35 + Profit Factor 90j × 0.25 + Slope equity 60j × 0.20 + Regime Fit × 0.20
+   - Composantes normalisées en z-score cross-sectionnel entre les 4 bots
+
+2. **Risk Engine** (mesure le risque courant de chaque bot) :
+   - Vol 20j × 0.40 + Downside vol 20j × 0.30 + Current DD × 0.30
+   - Bots risqués reçoivent un poids réduit automatiquement
+
+3. **Score net** = ER_score − risk_score (quality-per-unit-risk)
+
+4. **Correlation Penalty** : pénalise les bots redondants (corr > 50% avec ses paires)
+
+5. **Softmax(β=3)** → poids normalisés dynamiques (remplacent REGIME_WEIGHTS_Z)
+
+6. **Circuit Breaker** identique à Enhanced (DD > -25% → expo 30%)
+
+**Résultat Run 7 (2020-2026) :**
+
+| Métrique | Bot Z Omega | Bot Z Enhanced | Différence |
+|----------|-------------|----------------|-----------|
+| CAGR | +55.5% | +59.8% | -4.3%/an |
+| Sharpe | **1.96** | 1.61 | **+0.35** ✓ |
+| MaxDD | **-8.7%** | -18.9% | **+10.2% meilleur** ✓ |
+| 2022 (bear) | **+0.2%** | -9.0% | **+9.2% meilleur** ✓ |
+| Capital final | 60 422€ | 71 421€ | -10 999€ |
+
+**Performance annuelle Omega :**
+
+| 2020 | 2021 | 2022 | 2023 | 2024 | 2025 | 2026 YTD |
+|------|------|------|------|------|------|----------|
+| +56.4% | +267.2% | **+0.2%** | +60.8% | +22.6% | +28.0% | +1.6% |
+
+**Interprétation :**
+- En 2022 (bear crypto -65%), Omega fait **+0.2%** → le Risk Engine a automatiquement réduit l'expo aux bots dangereux (A et B volatils) et sur-pondéré C et G (stables)
+- En 2021 (bull explosif), Omega fait +267% → le ER Engine a correctement identifié A/B comme performants et sur-pondéré
+- La corrélation penalty a protégé en détectant quand les 4 bots convergeaient
 
 **4. Règle des fonds multi-stratégies confirmée :**
 > *"Plusieurs stratégies moyennes ensemble battent souvent une excellente stratégie seule."*
@@ -279,6 +324,7 @@ La calibration actuelle pour le régime BEAR (`a=1.5, g=0.2`) est **fausse** :
 - [x] Monte Carlo 5000 simulations — 100% positif tous les bots
 - [x] Bot Z Pro : Vol Targeting + Adaptive Score + Corr Spike + Multi-tier CB (Sharpe 1.90, MaxDD -9.1%)
 - [x] Bot Z Adaptive : Meta-switch E/B/P + hysteresis 7/5/3j (CAGR +29.4%, MaxDD -11.7%)
+- [x] Bot Z Omega : ER Engine + Risk Engine + Corr Penalty + softmax (CAGR +55.5%, Sharpe 1.96, MaxDD -8.7%)
 - [ ] Bot Z Adaptive v2 : relever seuil PRO (VIX>30, 2+ conditions) — cible ENHANCED 35% du temps
 - [ ] Corriger le churn Bot I (REBAL_DAYS=10, filtre re-entry)
 - [ ] Exclure Bot H du backtest daily (0 trades)
@@ -296,6 +342,7 @@ La calibration actuelle pour le régime BEAR (`a=1.5, g=0.2`) est **fausse** :
 | 2026-03-06 | Jan 2020 → Mar 2026 (6 ans) | **Run 4** : Enhanced (MO+CB) + Sharpe fix + Walk-Forward + Monte Carlo | **Equal +46.4% / Bot Z Enhanced +59.8%** | bot_z_comparison.csv |
 | 2026-03-06 | Jan 2020 → Mar 2026 (6 ans) | **Run 5** : Bot Z Pro (VT+AS+CS+MultiCB) + MC 5000 | **Enhanced +59.8% / Pro +29.9% Sharpe 1.90** | bot_z_comparison.csv |
 | 2026-03-06 | Jan 2020 → Mar 2026 (6 ans) | **Run 6** : Bot Z Adaptive meta-switch E/B/P + hysteresis | **Adaptive +29.4% MaxDD -11.7% (ENHANCED 16%/BALANCED 42%/PRO 42%)** | bot_z_comparison.csv |
+| 2026-03-06 | Jan 2020 → Mar 2026 (6 ans) | **Run 7** : Bot Z Omega ER+Risk+Corr+Softmax | **Omega +55.5% Sharpe 1.96 MaxDD -8.7% (meilleur risque-ajusté)** | bot_z_comparison.csv |
 
 ---
 

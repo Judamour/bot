@@ -1477,6 +1477,221 @@ def backtest_bot_z_adaptive(results: dict, vix_s: pd.Series, qqq_df: pd.DataFram
     }
 
 
+# ── 13d. BOT Z OMEGA — Dynamic Portfolio Optimizer (ER + Risk + Corr) ─────────
+
+def backtest_bot_z_omega(results: dict, vix_s: pd.Series, qqq_df: pd.DataFrame,
+                         daily_cache: dict) -> dict:
+    """
+    Bot Z Omega — Portfolio Optimizer dynamique (remplace les poids régime fixes) :
+      1. Expected Return Engine  : ER_score = 0.35×Sharpe_90d + 0.25×PF_90d
+                                             + 0.20×equity_slope_60d + 0.20×regime_fit
+      2. Risk Engine             : risk_score = 0.4×vol_20d + 0.3×downside_vol
+                                               + 0.3×current_dd_abs
+      3. Correlation Penalty     : pénalise les bots redondants (marginal corr)
+      4. Softmax weights         : final_score = (ER - Risk) × corr_penalty → softmax
+      5. Momentum Overlay        : BTC EMA200 + QQQ SMA200 → scale expo globale en BEAR
+      6. Circuit Breaker         : DD > -25% → expo × 0.30 (single-tier comme Enhanced)
+    """
+    log("Bot Z Omega — Expected Return Engine + Risk Engine + Corr Penalty...")
+
+    valid = {k: results[k] for k in VALID_BOTS_Z if k in results and results[k]["equity"]}
+    if len(valid) < 2:
+        return {}
+
+    date_sets = [set(r["dates"]) for r in valid.values()]
+    common_dates = sorted(set.intersection(*date_sets))
+    if not common_dates:
+        return {}
+
+    n_bots        = len(valid)
+    initial_total = INITIAL * n_bots
+
+    bot_norm = {}
+    for k, r in valid.items():
+        bot_norm[k] = {d: v / INITIAL for d, v in zip(r["dates"], r["equity"])}
+
+    # BTC EMA200 (momentum overlay)
+    btc_df = daily_cache.get("BTC/EUR")
+    btc_norm = {}
+    if btc_df is not None and "ema200" in btc_df.columns:
+        for dt, row in btc_df.iterrows():
+            btc_norm[dt] = {"close": row["close"], "ema200": row["ema200"]}
+
+    SHARPE_WIN   = 90
+    VOL_WIN      = 20
+    SLOPE_WIN    = 60
+    CORR_WIN     = 20
+    SOFTMAX_BETA = 3.0   # concentration des poids (plus élevé = plus concentré)
+    CB_THRESHOLD = -0.25
+    CB_MIN_FACTOR = 0.30
+    CB_RECOVERY  = 0.005
+
+    ret_history = {k: [] for k in valid}
+    eq_history  = {k: [] for k in valid}   # equity normalisée pour le slope
+    bot_peaks   = {k: 1.0 for k in valid}  # peak individuel pour dd par bot
+
+    cb_peak   = initial_total
+    cb_factor = 1.0
+
+    eq_omega  = [initial_total]
+    dates_out = [common_dates[0]]
+
+    for i in range(1, len(common_dates)):
+        dt      = common_dates[i]
+        prev_dt = common_dates[i - 1]
+
+        # ── Retours quotidiens + historique ─────────────────────────────────
+        bot_r = {}
+        for k in valid:
+            p = bot_norm[k].get(prev_dt, 1.0)
+            c = bot_norm[k].get(dt, p)
+            bot_r[k] = (c / p - 1) if p > 0 else 0.0
+            ret_history[k].append(bot_r[k])
+            eq_val = bot_norm[k].get(dt, 1.0)
+            eq_history[k].append(eq_val)
+            if eq_val > bot_peaks[k]:
+                bot_peaks[k] = eq_val
+
+        # ── Régime + Momentum Overlay ────────────────────────────────────────
+        regime = _get_regime_at_dt(dt, vix_s, qqq_df)
+        try:
+            dt_norm    = pd.Timestamp(dt).normalize().tz_localize(None)
+            qqq_close  = float(qqq_df["Close"].asof(dt_norm))
+            qqq_sma200 = float(qqq_df["sma200"].asof(dt_norm))
+            qqq_bearish = qqq_close < qqq_sma200
+        except Exception:
+            qqq_bearish = False
+
+        btc_row = btc_norm.get(dt) or btc_norm.get(prev_dt)
+        btc_bearish = (btc_row is not None and btc_row["ema200"] > 0
+                       and btc_row["close"] < btc_row["ema200"])
+
+        if btc_bearish and qqq_bearish:
+            regime = "BEAR"
+        elif btc_bearish or qqq_bearish:
+            regime = "HIGH_VOL" if regime in ("BULL", "RANGE") else regime
+
+        raw_regime_w = REGIME_WEIGHTS_Z.get(regime, REGIME_WEIGHTS_Z["RANGE"])
+
+        # ── Calcul ER + Risk par bot ─────────────────────────────────────────
+        warmup = min(len(ret_history[k]) for k in valid)
+        ks = list(valid.keys())
+
+        er_comp   = {k: {} for k in ks}
+        risk_comp = {k: {} for k in ks}
+
+        for k in ks:
+            hist = ret_history[k]
+            eq_h = eq_history[k]
+
+            if warmup >= SHARPE_WIN:
+                # Sharpe 90j
+                r90 = np.array(hist[-SHARPE_WIN:])
+                sharpe_90 = (float(r90.mean() / r90.std() * math.sqrt(252))
+                             if r90.std() > 1e-8 else 0.0)
+
+                # Profit Factor 90j
+                pos_sum = sum(r for r in hist[-SHARPE_WIN:] if r > 0)
+                neg_sum = abs(sum(r for r in hist[-SHARPE_WIN:] if r < 0))
+                pf_90 = min((pos_sum / neg_sum) if neg_sum > 1e-8 else 3.0, 5.0)
+
+                # Slope equity 60j (annualisé, normalisé par niveau de départ)
+                if len(eq_h) >= SLOPE_WIN:
+                    eq_s = np.array(eq_h[-SLOPE_WIN:])
+                    x = np.arange(len(eq_s))
+                    slope = (float(np.polyfit(x, eq_s / max(eq_s[0], 1e-8), 1)[0]) * 252
+                             if eq_s.std() > 1e-8 else 0.0)
+                else:
+                    slope = 0.0
+
+                # Regime fit : poids régime normalisé par moyenne equal-weight
+                total_rw = sum(raw_regime_w.values()) or 1.0
+                regime_fit = raw_regime_w.get(k, 0) / (total_rw / n_bots)
+
+                er_comp[k] = {"sharpe": sharpe_90, "pf": pf_90,
+                              "slope": slope, "regime_fit": regime_fit}
+
+                # Risque 20j
+                r20 = np.array(hist[-VOL_WIN:])
+                vol_20 = float(r20.std() * math.sqrt(252)) if r20.std() > 1e-8 else 0.01
+                down_r = r20[r20 < 0]
+                down_vol = (float(down_r.std() * math.sqrt(252))
+                            if len(down_r) > 1 and down_r.std() > 1e-8 else vol_20)
+                dd_k = abs(eq_history[k][-1] / bot_peaks[k] - 1) if bot_peaks[k] > 0 else 0.0
+
+                risk_comp[k] = {"vol": vol_20, "down_vol": down_vol, "dd": dd_k}
+            else:
+                # Warm-up : composantes neutres → equal-weight via softmax(0)
+                er_comp[k]   = {"sharpe": 0.0, "pf": 1.0, "slope": 0.0, "regime_fit": 1.0}
+                risk_comp[k] = {"vol": 0.3, "down_vol": 0.3, "dd": 0.0}
+
+        # ── Normalisation cross-sectionnelle (z-score par composante) ────────
+        def _z(vals):
+            arr = np.array(vals, dtype=float)
+            m, s = arr.mean(), arr.std()
+            return list((arr - m) / s) if s > 1e-8 else [0.0] * len(vals)
+
+        sharpe_z  = dict(zip(ks, _z([er_comp[k]["sharpe"]     for k in ks])))
+        pf_z      = dict(zip(ks, _z([er_comp[k]["pf"]         for k in ks])))
+        slope_z   = dict(zip(ks, _z([er_comp[k]["slope"]      for k in ks])))
+        regime_z  = dict(zip(ks, _z([er_comp[k]["regime_fit"] for k in ks])))
+        vol_z     = dict(zip(ks, _z([risk_comp[k]["vol"]      for k in ks])))
+        dvol_z    = dict(zip(ks, _z([risk_comp[k]["down_vol"] for k in ks])))
+        dd_z      = dict(zip(ks, _z([risk_comp[k]["dd"]       for k in ks])))
+
+        er_score   = {k: 0.35*sharpe_z[k] + 0.25*pf_z[k]
+                        + 0.20*slope_z[k] + 0.20*regime_z[k] for k in ks}
+        risk_score = {k: 0.4*vol_z[k] + 0.3*dvol_z[k] + 0.3*dd_z[k] for k in ks}
+        net_score  = {k: er_score[k] - risk_score[k] for k in ks}
+
+        # ── Correlation Penalty ──────────────────────────────────────────────
+        corr_penalty = {k: 1.0 for k in ks}
+        if warmup >= CORR_WIN:
+            rets_mat = np.array([ret_history[k][-CORR_WIN:] for k in ks])
+            try:
+                corr_m = np.corrcoef(rets_mat)
+                n = len(ks)
+                for ii, k in enumerate(ks):
+                    others = [corr_m[ii, jj] for jj in range(n) if jj != ii]
+                    avg_c  = float(np.mean(others)) if others else 0.0
+                    # Pénalité linéaire pour corrélation > 0.5
+                    corr_penalty[k] = max(0.3, 1.0 - max(0.0, avg_c - 0.5) / 0.5)
+            except Exception:
+                pass
+
+        final_scores = {k: net_score[k] * corr_penalty[k] for k in ks}
+
+        # ── Softmax → poids ──────────────────────────────────────────────────
+        max_s   = max(final_scores.values())
+        exp_s   = {k: math.exp(SOFTMAX_BETA * (final_scores[k] - max_s)) for k in ks}
+        total_e = sum(exp_s.values()) or 1.0
+        weights = {k: exp_s[k] / total_e for k in ks}
+
+        r_port = sum(weights[k] * bot_r[k] for k in ks)
+
+        # ── Circuit Breaker ──────────────────────────────────────────────────
+        current_pv = eq_omega[-1]
+        if current_pv > cb_peak:
+            cb_peak = current_pv
+        port_dd = (current_pv - cb_peak) / cb_peak if cb_peak > 0 else 0.0
+
+        if port_dd < CB_THRESHOLD:
+            cb_factor = max(CB_MIN_FACTOR, cb_factor - 0.05)
+        elif port_dd > -0.05:
+            cb_factor = min(1.0, cb_factor + CB_RECOVERY)
+
+        eq_omega.append(eq_omega[-1] * (1 + cb_factor * r_port))
+        dates_out.append(dt)
+
+    m   = _metrics_portfolio(eq_omega, dates_out, initial_total)
+    ann = annual_returns(eq_omega, dates_out)
+    return {
+        "name":    "Bot Z Omega (ER+Risk+Corr)",
+        "equity":  eq_omega, "dates": dates_out, "trades": [],
+        "metrics": m, "annual": ann, "regime": {},
+    }
+
+
 # ── 14. WALK-FORWARD TEST ─────────────────────────────────────────────────────
 
 def walk_forward_test(results: dict, vix_s: pd.Series, qqq_df: pd.DataFrame,
@@ -1788,7 +2003,7 @@ def print_report(results, vix_s, qqq_df, z_results=None, wf=None, mc=None):
     # Bot Z comparison
     if z_results:
         print(f"\n{Fore.CYAN}{'='*100}")
-        print(f"  BOT Z — 5 STRUCTURES PORTFOLIO (4 bots valides A+B+C+G | capital 4×1000€)")
+        print(f"  BOT Z — 6 STRUCTURES PORTFOLIO (4 bots valides A+B+C+G | capital 4×1000€)")
         print(f"{'='*100}{Style.RESET_ALL}")
         print(f"  {'Stratégie':<32} {'CAGR':>7} {'Sharpe':>7} {'MaxDD':>8} {'Final€':>9}  Notes")
         print("  " + "-" * 90)
@@ -1811,6 +2026,7 @@ def print_report(results, vix_s, qqq_df, z_results=None, wf=None, mc=None):
             ("enhanced", Fore.MAGENTA, "← régime + momentum overlay + circuit breaker"),
             ("pro",      Fore.YELLOW,  "← VT + adaptive score + corr spike + multi-tier CB"),
             ("adaptive", Fore.CYAN,    "← meta-switch E/B/P + hysteresis 7/5/3j"),
+            ("omega",    Fore.WHITE,   "← ER Engine + Risk Engine + Corr Penalty + softmax"),
         ]
         for key, color, note in strategy_order:
             r = z_results.get(key)
@@ -1828,7 +2044,7 @@ def print_report(results, vix_s, qqq_df, z_results=None, wf=None, mc=None):
         hdr_z = f"  {'Stratégie':<32}" + "".join(f"  {y:>8}" for y in years)
         print(hdr_z)
         print("  " + "-" * (32 + 10 * len(years)))
-        for key in ["equal", "z", "hybrid", "enhanced", "pro", "adaptive"]:
+        for key in ["equal", "z", "hybrid", "enhanced", "pro", "adaptive", "omega"]:
             r = z_results.get(key)
             if not r:
                 continue
@@ -1869,6 +2085,14 @@ def print_report(results, vix_s, qqq_df, z_results=None, wf=None, mc=None):
                   f"{ad_cagr - enhanced_cagr:+.1f}%/an{Style.RESET_ALL} CAGR | "
                   f"MaxDD={ad_dd:.1f}% | Sharpe={ad_sharpe:.2f}")
             print(f"    Profils utilisés : {ps_str}")
+        omega_r = z_results.get("omega")
+        if omega_r:
+            om_cagr   = omega_r["metrics"].get("cagr", 0)
+            om_dd     = omega_r["metrics"].get("max_dd", 0)
+            om_sharpe = omega_r["metrics"].get("sharpe", 0)
+            print(f"  • Omega vs Enhanced          : {Fore.GREEN if om_cagr > enhanced_cagr else Fore.RED}"
+                  f"{om_cagr - enhanced_cagr:+.1f}%/an{Style.RESET_ALL} CAGR | "
+                  f"MaxDD={om_dd:.1f}% | Sharpe={om_sharpe:.2f}")
         print(f"{Fore.CYAN}{'='*100}{Style.RESET_ALL}")
 
         # Walk-forward et Monte Carlo
@@ -1879,7 +2103,7 @@ def print_report(results, vix_s, qqq_df, z_results=None, wf=None, mc=None):
 
         # Save Z comparison to CSV
         z_rows = []
-        for key in ["equal", "z", "hybrid", "enhanced", "pro", "adaptive"]:
+        for key in ["equal", "z", "hybrid", "enhanced", "pro", "adaptive", "omega"]:
             r = z_results.get(key)
             if r:
                 m = r["metrics"]
@@ -1929,6 +2153,7 @@ def plot_equity_curves(results, z_results=None):
                 ("enhanced", "-",   2.8, "#ffffff"),
                 ("pro",      "-",   2.5, "#ffd700"),
                 ("adaptive", "-",   3.2, "#00d9ff"),
+                ("omega",    "-",   3.0, "#ff6e96"),
             ]
             for key, style, lw, color in z_styles:
                 r = z_results.get(key)
@@ -2013,6 +2238,11 @@ def main():
         z_adaptive = backtest_bot_z_adaptive(results, vix_s, qqq_df, daily)
         if z_adaptive:
             z_results["adaptive"] = z_adaptive
+
+        log("Bot Z Omega — Expected Return Engine + Risk Engine + Corr Penalty...")
+        z_omega = backtest_bot_z_omega(results, vix_s, qqq_df, daily)
+        if z_omega:
+            z_results["omega"] = z_omega
 
         # Walk-forward test
         wf = walk_forward_test(results, vix_s, qqq_df, daily, split_year=2023)
