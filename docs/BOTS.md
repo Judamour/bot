@@ -485,93 +485,222 @@ Mots-clés détectés : `credit`, `billing`, `insufficient`, `balance`, `quota`,
 
 ---
 
-## Bot Z — Regime Engine (Shadow Mode)
+## Bot Z — Portfolio Engine (Paper Trading Production)
 
 **Fichier** : `live/bot_z.py`
 **State** : `logs/bot_z/state.json`
 **Log** : `logs/bot_z/shadow.jsonl`
 **Dashboard** : endpoint `/api/bot_z`
 
-### Concept
-
-Bot Z n'exécute aucun trade. Il observe les 6 bots actifs et simule en temps réel ce qu'un gestionnaire de portefeuille intelligent aurait décidé.
-
-**Phase actuelle : SHADOW MODE** — comparaison silencieuse. Après 3 mois de données live, on pourra comparer la performance réelle (1000€ séparés) vs la performance simulée par Bot Z pour décider de basculer.
-
-### Détection du régime
-
-| Régime | Conditions |
-|--------|-----------|
-| BULL | QQQ > SMA200 + VIX < 18 |
-| RANGE | QQQ > SMA200 + VIX 18-30 |
-| BEAR | QQQ < SMA200 |
-| HIGH_VOL | VIX > 30 |
-
-### Poids d'allocation par régime
-
-| Bot | BULL | RANGE | BEAR | HIGH_VOL |
-|-----|------|-------|------|----------|
-| A — Supertrend | 0.5 | 1.2 | 1.5 | 0.8 |
-| B — Momentum | 1.0 | 0.8 | 0.0 | 0.3 |
-| C — Breakout | 0.8 | 0.5 | 0.0 | 0.3 |
-| G — Trend | 1.3 | 0.7 | 0.2 | 0.3 |
-| H — VCB | 1.0 | 0.5 | 0.0 | 0.3 |
-| I — RS Leaders | 1.2 | 1.0 | 0.0 | 0.3 |
-
-### Allocation finale
-
-```
-budget_bot = capital_total × (weight_régime × weight_qualité) / somme_des_poids
-weight_qualité = Sharpe rolling 20 derniers trades (normalisé 0.3 → 1.5)
-```
-
-### Contraintes portefeuille
-
-- Max 30% du capital total sur un même actif
-- Max 2 bots simultanés long sur le même actif → warning si dépassé
-
-### Feuille de route Bot Z
-
-| Phase | Condition | Action |
-|-------|-----------|--------|
-| A — Shadow (maintenant) | Toujours | Observe + log, n'exécute rien |
-| B — Comparaison | 3 mois de data | Comparer perf réelle vs simulée Z |
-| C — Capital mutualisé | Backtests validés | Basculer vers capital unique géré par Z |
+**Phase actuelle : PAPER TRADING** — démarré le 2026-03-06, revue le 2026-04-30
+**Capital** : 10 000€ (4 bots validés : A, B, C, G — 2 500€ chacun en base)
+**Structure** : Bot Z Enhanced (régime pur 100% dynamique + MO + CB)
 
 ---
 
-## Backtests 3 ans
+### Architecture Bot Z Enhanced
+
+```
+Bots A, B, C, G (state files + signaux live)
+    ↓
+Regime Engine (VIX + QQQ SMA200 + BTC trend)
+    ↓
+Momentum Overlay (BTC EMA200 + QQQ SMA200)
+    ↓
+Allocation Régime Pur (calibration BEAR v2)
+    ↓
+Circuit Breaker (DD < -25% → expo 30%)
+    ↓
+logs/bot_z/ + dashboard
+```
+
+---
+
+### Détection du régime + Momentum Overlay
+
+**Régime de base :**
+
+| Régime | Conditions |
+|--------|-----------|
+| HIGH_VOL | VIX > 35 (prioritaire) |
+| BEAR | QQQ < SMA200 ou VIX > 30 |
+| BULL | QQQ > SMA200 + BTC bull + VIX < 25 |
+| RANGE | Tout le reste |
+
+**Momentum Overlay (couche supplémentaire) :**
+- BTC trend bear **ET** QQQ < SMA200 → force **BEAR** (indépendamment du VIX)
+- Un seul indicateur bearish → force **HIGH_VOL** si régime était BULL/RANGE
+- Réagit avant le VIX (plus proactif, capte les retournements tôt)
+
+---
+
+### Calibration BEAR v2 — Poids par régime
+
+Validée sur backtest 2020-2026 (2022 bear : -9.0% avec Enhanced vs -16.8% equal-weight)
+
+| Bot | BULL | RANGE | BEAR | HIGH_VOL |
+|-----|------|-------|------|----------|
+| A — Supertrend | 0.8 | 1.0 | **0.3** | 0.5 |
+| B — Momentum | 1.0 | 0.8 | **0.0** | 0.3 |
+| C — Breakout | 0.5 | 0.7 | **1.5** | 1.0 |
+| G — Trend Multi-Asset | 1.2 | 0.8 | **1.2** | 0.8 |
+
+**Logique BEAR :** C (-2.5% en 2022) et G (-3.4%) sont les seuls défensifs prouvés.
+A (-49.3%) et B (-43.5%) sont désactivés/réduits au minimum.
+
+Les poids bruts sont normalisés → somme = 1.0, puis modulés par le Circuit Breaker.
+
+---
+
+### Circuit Breaker
+
+```
+port_dd = (capital_courant - peak_historique) / peak_historique
+
+Si port_dd < -25% → cb_factor réduit à 0.30 (70% cash)
+Si port_dd > -10% → cb_factor récupère +0.5%/cycle
+
+exposition_effective = capital_total × cb_factor
+budget_bot = exposition_effective × weight_bot
+```
+
+---
+
+### Allocation finale par bot
+
+```
+weight_brut  = regime_weight[bot] × quality_score[bot]
+quality_score = Sharpe rolling 20 derniers trades (normalisé 0.3-1.5)
+
+weight_norm  = weight_brut / sum(weight_bruts)
+budget_eur   = exposition_effective × weight_norm
+budget_eur   = min(budget_eur, capital_total × 0.40)  # cap 40% par bot
+```
+
+**Exemple en BULL à 10 000€ (cb_factor = 1.0) :**
+
+| Bot | Poids brut | Poids norm | Budget |
+|-----|-----------|------------|--------|
+| A | 0.8 | 22.9% | 2 290€ |
+| B | 1.0 | 28.6% | 2 860€ |
+| C | 0.5 | 14.3% | 1 430€ |
+| G | 1.2 | 34.2% | 3 420€ |
+
+**Exemple en BEAR à 10 000€ (cb_factor = 1.0) :**
+
+| Bot | Poids brut | Poids norm | Budget |
+|-----|-----------|------------|--------|
+| A | 0.3 | 10.0% | 1 000€ |
+| B | 0.0 | 0.0% | 0€ |
+| C | 1.5 | 50.0% | 5 000€ |
+| G | 1.2 | 40.0% | 4 000€ |
+
+---
+
+### Contraintes portefeuille
+
+| Limite | Valeur |
+|--------|--------|
+| Max par bot | 40% du capital |
+| Max par actif | 30% du capital |
+| Max bots simultanés sur même actif | 2 |
+| Cash forcé si VIX > 35 | 30% minimum |
+
+---
+
+### Résultats backtest (référence)
+
+| Métrique | Bot Z Enhanced | Equal-Weight |
+|----------|---------------|-------------|
+| CAGR (2020-2026) | **+59.8%** | +46.4% |
+| Sharpe | **1.61** | 1.20 |
+| MaxDD | **-18.9%** | -31.1% |
+| 2022 (bear) | **-9.0%** | -16.8% |
+| Walk-Forward OOS | **+41.5%** | +33.8% |
+
+*Voir `docs/BACKTEST_RESULTS.md` pour le détail complet des 6 runs.*
+
+---
+
+### Évolution prévue — Bot Z Adaptive
+
+**Version future : Bot Z Adaptive (backtest Run 6 effectué)**
+
+Un meta-switch sélectionne automatiquement le profil de risk management selon le régime :
+
+| Profil | Condition d'activation | Comportement |
+|--------|----------------------|-------------|
+| **ENHANCED** | Bull propre : BTC+QQQ bull + VIX<22 + DD>-5% + corr<60% | Max CAGR, CB single-tier |
+| **BALANCED** | Transition / bull fragile | Compromis, CB 2-tiers, vol 25% |
+| **PRO** | Bear/stress : VIX>30 ou corr>70% ou DD<-12% | Max protection, CB 3-tiers, vol 20% |
+
+Hysteresis : délai de confirmation avant switch (ENHANCED→switch 7j / BALANCED 5j / PRO 3j)
+
+**Résultat Run 6 (2020-2026) :** CAGR +29.4%, Sharpe 1.60, MaxDD -11.7%
+Distribution : ENHANCED 16% / BALANCED 42% / PRO 42%
+
+**Statut** : seuils PRO trop sensibles (VIX>28) → v2 avec VIX>30 + 2 conditions simultanées prévue.
+
+---
+
+### Feuille de route Bot Z
+
+| Phase | Statut | Description |
+|-------|--------|-------------|
+| ~~Shadow Mode~~ | ✅ Terminé | Observation sans exécution |
+| **Paper Trading Enhanced** | 🟢 En cours | 10 000€, démarré 2026-03-06 |
+| Revue résultats | 📅 2026-04-30 | Analyse 55 jours de data live |
+| Bot Z Adaptive v2 | 🔲 Prévu | Seuils PRO ajustés + backtest |
+| Live Trading | 🔲 Futur | Après validation ~6 mois paper |
+
+---
+
+## Backtests 6 ans (2020-2026)
 
 **Script** : `backtest/multi_backtest.py`
-**Résultats** : `docs/BACKTEST_RESULTS.md` (mis à jour manuellement après chaque run)
+**Résultats** : `docs/BACKTEST_RESULTS.md`
 **Graphique** : `backtest/results/multi_equity.png`
-**CSV** : `backtest/results/multi_summary.csv`
+**CSV** : `backtest/results/multi_summary.csv`, `bot_z_comparison.csv`
 
 ### Lancer le backtest
 
 ```bash
-# Dans le répertoire du projet
 python backtest/multi_backtest.py
 ```
 
-Durée estimée : 5-15 minutes (fetch 20 symboles × 3 ans + simulation 6 bots).
+Durée : ~35s (fetch 16 symboles × 6 ans + 6 bots + 6 structures Bot Z + MC 5000)
+
+### 6 structures Bot Z simulées
+
+| Structure | CAGR | Sharpe | MaxDD | Clé résultats |
+|-----------|------|--------|-------|---------------|
+| Equal-Weight | +46.4% | 1.20 | -31.1% | Baseline |
+| Régime pur | +54.6% | 1.40 | -27.5% | Calibration v2 |
+| Hybride 70/30 | +44.2% | 1.30 | -25.3% | Base fixe + overlay |
+| **Enhanced** (prod) | **+59.8%** | **1.61** | **-18.9%** | MO + CB single |
+| Pro | +29.9% | **1.90** | **-9.1%** | VT + multi-CB |
+| Adaptive | +29.4% | 1.60 | -11.7% | Meta-switch E/B/P |
+
+### Validations statistiques incluses
+
+- **Walk-Forward** : IS 2020-2022 / OOS 2023-2026 → Bot Z OOS +41.5% (**EDGE RÉEL**)
+- **Monte Carlo** : 5000 simulations ordre trades aléatoire → 100% positif tous bots
+- **Sharpe corrigé** : calculé sur retours actifs uniquement (|r| > 1e-8)
 
 ### Métriques calculées
 
 - **CAGR** : rendement annualisé composé
-- **Sharpe** : return / volatilité × √252 (> 1.0 = bon, > 1.5 = excellent)
-- **Max DD** : pire drawdown depuis le pic (< -20% = risque élevé)
+- **Sharpe** : return / volatilité × √252 sur retours actifs (> 1.5 = excellent)
+- **Max DD** : pire drawdown depuis le pic
 - **Profit Factor** : gains bruts / pertes brutes (> 1.5 = stratégie rentable)
-- **Trades** : nombre total (< 20 = pas statistiquement fiable)
-- **Performance par année** : 2022 (bear) / 2023 (bull lent) / 2024 (bull fort)
-- **Performance par régime** : BULL / RANGE / BEAR / HIGH_VOL → base pour Bot Z
+- **Performance par année** : 2020→2026 (inclut bull 2021, bear 2022, rebond 2023)
 
 ### Note méthodologique
 
-- Bot A simulé sur daily (live = 4h) — légère surestimation des trades
-- Pas de filtre Claude sur Bot A en backtest (assume toujours CONFIRME)
+- Crypto : Binance depuis 2020 (6 ans) | xStocks : yfinance depuis 2022 (4 ans)
 - Frais et slippage appliqués : 0.26% + 0.10% par trade
-- Pas de survivorship bias : tous les 20 symboles actuels testés
+- Simulation Bot Z : retours quotidiens composés (correct) — pas de ratios cumulés
+- Pas de filtre Claude sur Bot A en backtest (assume toujours CONFIRME)
 
 ---
 
