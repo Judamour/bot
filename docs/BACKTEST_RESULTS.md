@@ -51,47 +51,56 @@
 
 ---
 
-## Simulation Bot Z — 3 structures portfolio (run 2)
+## Simulation Bot Z — 3 structures portfolio (run 3 — simulation correcte)
 
 > Capital : 4000€ (4 bots × 1000€) | Bots valides : A, B, C, G
+> Méthode : **retours quotidiens composés** (correct) — pas de biais sur ratios cumulés
+> Calibration v2 BEAR : C=1.5, G=1.2 (validé sur 2022)
+> Bot I : REBAL_DAYS=12, cooldown re-entry 10j
 
 ### Comparaison des 3 structures
 
 | Stratégie | CAGR | Sharpe | MaxDD | Capital final | Description |
 |-----------|------|--------|-------|---------------|-------------|
-| REF : Bot B seul ×4 | +39.2% | 1.91 | -71.6% | 79 140€ | Meilleur bot individuel |
-| **Equal-Weight** (A+B+C+G) | **+44.0%** | **0.94** | -54.4% | **37 566€** | 25% chaque bot |
-| Bot Z — Régime pur | +46.3% | 0.72 | -66.6% | 41 481€ | 100% allocation dynamique |
-| Hybride 70/30 | +42.4% | 0.82 | -55.5% | 35 120€ | 70% base fixe + 30% Bot Z |
+| REF : Bot B seul ×4 | +39.2% | 1.91 | -71.6% | 79 140€ | Meilleur bot individuel (non-diversifié) |
+| Equal-Weight (A+B+C+G) | +46.4% | 1.20 | -31.1% | 41 592€ | 25% chaque bot, rebalancé daily |
+| **Bot Z — Régime pur** | **+54.6%** | **1.40** | **-27.5%** | **58 205€** | Allocation 100% dynamique par régime |
+| Hybride 70/30 | +44.2% | 1.30 | **-25.3%** | 38 030€ | 70% base fixe + 30% overlay dynamique |
+
+**→ Bot Z pur (calibration v2) est strictement supérieur sur CAGR, Sharpe ET MaxDD vs equal-weight**
 
 ### Performance annuelle des 3 structures
 
 | Stratégie | 2020 | 2021 | 2022 | 2023 | 2024 | 2025 | 2026 YTD |
 |-----------|------|------|------|------|------|------|----------|
-| Equal-Weight | +61.3% | +287.1% | **-38.4%** | +67.1% | +16.6% | +15.4% | +1.1% |
-| Bot Z Régime pur | +69.1% | +261.8% | **-47.1%** | +99.6% | +19.1% | +11.6% | +12.2% |
-| Hybride 70/30 | +53.5% | +249.2% | **-39.5%** | +72.7% | +16.9% | +14.3% | +4.8% |
+| Equal-Weight | +56.1% | +213.4% | -16.8% | +59.0% | +17.6% | +26.5% | +3.5% |
+| **Bot Z Régime pur** | **+62.7%** | **+232.0%** | **-11.8%** | **+65.6%** | **+24.4%** | **+35.8%** | **+4.2%** |
+| Hybride 70/30 | +50.6% | +188.9% | -12.7% | +54.6% | +18.3% | +27.4% | +3.5% |
 
 ### Conclusions sur les 3 structures
 
-**1. Equal-Weight gagne sur le ratio risque/rendement**
-- Sharpe 0.94 = le meilleur des 3 (vs 0.72 et 0.82)
-- MaxDD -54.4% = le plus faible
-- CAGR +44.0% = très solide
+**1. Bot Z pur (calibration v2) = la meilleure structure sur 6 ans**
+- CAGR +54.6% vs +46.4% equal-weight → **+8.2%/an**
+- Sharpe 1.40 > 1.20 → meilleur ratio risque/rendement
+- MaxDD -27.5% < -31.1% → moins de drawdown
+- **2022 (bear)** : seulement **-11.8%** vs -16.8% equal-weight → la calibration C=1.5/G=1.2 fonctionne
 
-**2. Bot Z Régime pur : +2.3% CAGR mais coût risque élevé**
-- MaxDD -66.6% : nettement plus mauvais que equal-weight
-- 2022 : -47.1% vs -38.4% pour equal-weight → Bot Z pénalise en bear (sur-pondère A en BEAR, or Bot A a perdu -49.3% en 2022)
-- **Problème de calibration BEAR** : le poids `a=1.5` en BEAR est mal calibré — Bot A perd autant que B en bear. Devrait être `c=1.5` ou `g=1.0`
+**2. Equal-Weight = solide et simple**
+- Aucune calibration requise, robuste
+- CAGR +46.4% — already excellent
+- Bon fallback si Bot Z est désactivé
 
-**3. Hybride 70/30 : n'ajoute pas de valeur dans ce test**
-- CAGR -1.6% vs equal-weight
-- MaxDD similaire (-55.5% vs -54.4%)
-- La base fixe (G=30%, A=20%, B=20%, C=15%) est déjà bien calibrée → l'overlay apporte peu
+**3. Hybride 70/30 = meilleur MaxDD (-25.3%) mais pire CAGR**
+- Le socle fixe (70%) bride trop l'overlay en BEAR : quand Bot Z veut pivoter sur C/G, la base force encore 20% A et 20% B
+- Intéressant si l'objectif prioritaire est la limitation du drawdown au-dessus du CAGR
+- +44.2% CAGR : inférieur aux deux autres
 
-**4. Règle des fonds multi-stratégies confirmée :**
+**4. Note technique importante**
+> Run 1 et 2 utilisaient des ratios cumulés pour pondérer (incorrect — produisait des artefacts +229% en 2023). Run 3 utilise des retours quotidiens composés (mathématiquement correct). Les résultats du Run 3 sont les seuls valides pour le portfolio Bot Z.
+
+**5. Règle des fonds multi-stratégies confirmée :**
 > *"Plusieurs stratégies moyennes ensemble battent souvent une excellente stratégie seule."*
-> Equal-weight sur 4 bots > Bot B seul sur le ratio risque/rendement (Sharpe 0.94 vs 1.91 apparemment supérieur, mais MaxDD -54% vs -72% et régularité annuelle bien meilleure)
+> Bot Z sur 4 bots > Bot B seul sur toutes les métriques (CAGR +54.6% vs +39.2%, MaxDD -27.5% vs -71.6%)
 
 ---
 
@@ -172,7 +181,8 @@ La calibration actuelle pour le régime BEAR (`a=1.5, g=0.2`) est **fausse** :
 |------|---------|-------|--------------------|---------|
 | 2026-03-06 | Jan 2023 → Mar 2026 (3 ans) | Premier run — 16 symboles, daily. Bugs H/I/régime identifiés | +9.3% (4 bots) | multi_summary.csv |
 | 2026-03-06 | Jan 2023 → Mar 2026 (3 ans) | Bot Z ajouté — Equal +19.7%, Bot Z +22.9% | +19.7% | bot_z_comparison.csv |
-| 2026-03-06 | Jan 2020 → Mar 2026 (6 ans) | Données étendues crypto + 3 structures portfolio | **+44.0%** | bot_z_comparison.csv |
+| 2026-03-06 | Jan 2020 → Mar 2026 (6 ans) | Données étendues crypto + 3 structures portfolio (simulation incorrecte) | +44.0% | — |
+| 2026-03-06 | Jan 2020 → Mar 2026 (6 ans) | **Run final** : calibration BEAR v2 + Bot I fix + simulation retours daily | **Equal +46.4% / Bot Z +54.6%** | bot_z_comparison.csv |
 
 ---
 

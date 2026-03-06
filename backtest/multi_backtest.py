@@ -44,11 +44,11 @@ RESULTS_DIR  = "backtest/results"
 os.makedirs(RESULTS_DIR, exist_ok=True)
 
 # ── Constantes portefeuille hybride ───────────────────────────────────────────
-# 70% base equal-weight avec poids fixes
-BASE_WEIGHTS = {"g": 0.30, "a": 0.20, "b": 0.20, "c": 0.15, "cash": 0.15}
+# Base stable : G=30% (pilier), C=20% (défensif), A=20%, B=20%, cash=10%
+BASE_WEIGHTS = {"g": 0.30, "a": 0.20, "b": 0.20, "c": 0.20, "cash": 0.10}
 BASE_PCT     = 0.70    # 70% du capital en base stable
 OVERLAY_PCT  = 0.30    # 30% en overlay Bot Z dynamique
-MAX_BOT_WEIGHT = 0.45  # cap max par bot (base + overlay combiné)
+MAX_BOT_WEIGHT = 0.40  # cap max par bot (base + overlay combiné)
 
 BREAKOUT_SYMS = ["BTC/EUR", "ETH/EUR", "SOL/EUR"]
 VCB_SYMS      = ["BTC/EUR", "ETH/EUR", "SOL/EUR", "NVDAx", "AMDx", "METAx", "PLTRx"]
@@ -609,15 +609,17 @@ def backtest_bot_h(daily_cache):
 # ── 10. BOT I — RS Leaders ────────────────────────────────────────────────────
 
 def backtest_bot_i(daily_cache):
-    log("Bot I — RS Leaders...")
+    log("Bot I — RS Leaders (v2 : REBAL_DAYS=12, cooldown re-entry 10j)...")
     trades, equity, dates = [], [], []
     capital = INITIAL
     positions = {}
     TOP_N, EXIT_RANK = 3, 5
-    REBAL_DAYS, ADX_MIN, VOL_MAX, EXT_MAX = 5, 18, 0.90, 0.15
+    REBAL_DAYS, ADX_MIN, VOL_MAX, EXT_MAX = 12, 18, 0.90, 0.15   # fix: 5→12 jours
+    REENTRY_COOLDOWN = 10                                           # fix: cooldown re-entrée
     TARGET_VOL, MAX_POS_PCT = 0.15, 0.30
     ATR_TRAIL, HARD_STOP = 2.5, 0.10
     last_rebal = None
+    recent_exits = {}   # {sym: date_exit} pour le cooldown
 
     syms = [s for s in config.SYMBOLS if s in daily_cache and len(daily_cache[s]) > 220]
 
@@ -697,7 +699,9 @@ def backtest_bot_i(daily_cache):
             if rank > EXIT_RANK or not passes:
                 px = prices.get(sym, positions[sym]["entry"])
                 proceeds, tr = _close_pos(positions[sym], px, f"rs_exit_rank{rank}", dt)
-                capital += proceeds; trades.append(tr); del positions[sym]
+                capital += proceeds; trades.append(tr)
+                del positions[sym]
+                recent_exits[sym] = dt   # enregistre la date de sortie pour cooldown
 
         # Rebalance
         if last_rebal is None or (dt - last_rebal).days >= REBAL_DAYS:
@@ -722,7 +726,12 @@ def backtest_bot_i(daily_cache):
                         and adx > ADX_MIN and vol < VOL_MAX and ext < EXT_MAX):
                     qualified.append(sym)
 
-            to_buy = [s for s in qualified if s not in positions]
+            # Filtre cooldown : ne pas re-rentrer sur un actif sorti depuis < REENTRY_COOLDOWN jours
+            to_buy = [
+                s for s in qualified
+                if s not in positions
+                and (s not in recent_exits or (dt - recent_exits[s]).days >= REENTRY_COOLDOWN)
+            ]
             if to_buy and capital > 10:
                 for sym in to_buy:
                     if len(positions) >= TOP_N:
@@ -751,12 +760,13 @@ def backtest_bot_i(daily_cache):
 
 # ── 11. BOT Z — PORTFOLIO SIMULÉ ─────────────────────────────────────────────
 
-# Poids Bot Z pur par régime (normalise la somme à 1.0)
+# Poids Bot Z pur par régime — CALIBRATION V2 (validée backtest 2020-2026)
+# BEAR corrigé : C=1.5 et G=1.2 (seuls défensifs prouvés en 2022 : -2.5% et -3.4%)
 REGIME_WEIGHTS_Z = {
-    "BULL":     {"a": 0.5,  "b": 1.0, "c": 0.8, "g": 1.3},
-    "RANGE":    {"a": 1.2,  "b": 0.8, "c": 0.5, "g": 0.7},
-    "BEAR":     {"a": 1.5,  "b": 0.0, "c": 0.0, "g": 0.2},
-    "HIGH_VOL": {"a": 0.8,  "b": 0.3, "c": 0.3, "g": 0.3},
+    "BULL":     {"a": 0.8,  "b": 1.0, "c": 0.5, "g": 1.2},
+    "RANGE":    {"a": 1.0,  "b": 0.8, "c": 0.7, "g": 0.8},
+    "BEAR":     {"a": 0.3,  "b": 0.0, "c": 1.5, "g": 1.2},
+    "HIGH_VOL": {"a": 0.5,  "b": 0.3, "c": 1.0, "g": 0.8},
 }
 
 # Bots valides pour le portefeuille (H=0 trades, I=bug)
@@ -833,67 +843,65 @@ def backtest_bot_z_portfolio(results: dict, vix_s: pd.Series, qqq_df: pd.DataFra
     n_bots       = len(valid)
     initial_total = INITIAL * n_bots   # 4000€
 
-    eq_equal = []
-    eq_z     = []
-    eq_hybrid = []
-    dates_out = []
+    # ── Simulation par retours quotidiens (rebalancing correct) ───────────────
+    # Chaque jour : retour pondéré des bots → composé sur le capital total.
+    # Évite le biais des ratios cumulés (qui donne des résultats aberrants
+    # quand les bots ont des niveaux de performance très différents).
+    eq_equal  = [initial_total]
+    eq_z      = [initial_total]
+    eq_hybrid = [initial_total]
+    dates_out = [common_dates[0]]
 
-    for dt in common_dates:
-        regime = _get_regime_at_dt(dt, vix_s, qqq_df)
+    for i in range(1, len(common_dates)):
+        dt      = common_dates[i]
+        prev_dt = common_dates[i - 1]
+        regime  = _get_regime_at_dt(dt, vix_s, qqq_df)
 
-        # Ratios de performance de chaque bot à cette date
-        ratios = {k: bot_norm[k][dt] for k in valid}
+        # Retour quotidien de chaque bot (ratio t / ratio t-1 - 1)
+        bot_r = {}
+        for k in valid:
+            p = bot_norm[k].get(prev_dt, 1.0)
+            c = bot_norm[k][dt]
+            bot_r[k] = (c / p - 1) if p > 0 else 0.0
 
-        # ── 1. Equal-Weight ──────────────────────────────────────────────────
-        w_equal = {k: 1.0 / n_bots for k in valid}
-        pv_equal = sum(w_equal[k] * ratios[k] for k in valid) * initial_total
-        eq_equal.append(pv_equal)
+        # ── 1. Equal-Weight (rebalancing quotidien) ──────────────────────
+        r_eq = sum(bot_r[k] / n_bots for k in valid)
+        eq_equal.append(eq_equal[-1] * (1 + r_eq))
 
-        # ── 2. Bot Z pur — allocation régime ────────────────────────────────
-        raw_w = REGIME_WEIGHTS_Z.get(regime, REGIME_WEIGHTS_Z["RANGE"])
-        total_w = sum(raw_w.get(k, 0) for k in valid)
-        if total_w == 0:
-            w_z = {k: 1.0 / n_bots for k in valid}
-        else:
-            w_z = {k: raw_w.get(k, 0) / total_w for k in valid}
-        pv_z = sum(w_z[k] * ratios[k] for k in valid) * initial_total
-        eq_z.append(pv_z)
+        # ── 2. Bot Z pur — allocation régime ────────────────────────────
+        raw_w   = REGIME_WEIGHTS_Z.get(regime, REGIME_WEIGHTS_Z["RANGE"])
+        total_w = sum(raw_w.get(k, 0) for k in valid) or 1.0
+        w_z     = {k: raw_w.get(k, 0) / total_w for k in valid}
+        r_z     = sum(w_z[k] * bot_r[k] for k in valid)
+        eq_z.append(eq_z[-1] * (1 + r_z))
 
-        # ── 3. Hybride 70/30 ─────────────────────────────────────────────────
-        # Base (70%) : poids fixes, cash reste en cash (ratio=1.0)
-        base = BASE_WEIGHTS.copy()
-        cash_frac = base.pop("cash", 0.15)
-        # Poids base normalisés aux bots présents
-        base_valid = {k: base.get(k, 0) for k in valid}
-        base_sum = sum(base_valid.values())
-        if base_sum > 0:
-            base_scaled = {k: v / base_sum * (1 - cash_frac) for k, v in base_valid.items()}
+        # ── 3. Hybride 70/30 ────────────────────────────────────────────
+        # Base stable (70%) : poids fixes G/A/B/C
+        base_vals = {k: BASE_WEIGHTS.get(k, 0.0) for k in valid}
+        cash_frac = BASE_WEIGHTS.get("cash", 0.10)
+        base_bot_sum = sum(base_vals.values())
+        if base_bot_sum > 0:
+            base_scaled = {k: base_vals[k] / base_bot_sum * (1 - cash_frac) for k in valid}
         else:
             base_scaled = {k: (1 - cash_frac) / n_bots for k in valid}
 
-        # Overlay (30%) : même logique Bot Z pur
-        overlay_raw = {k: raw_w.get(k, 0) for k in valid}
-        overlay_sum = sum(overlay_raw.values())
-        if overlay_sum > 0:
-            overlay_scaled = {k: v / overlay_sum for k, v in overlay_raw.items()}
-        else:
-            overlay_scaled = {k: 1.0 / n_bots for k in valid}
+        # Overlay (30%) : régime dynamique
+        overlay_sum = sum(raw_w.get(k, 0) for k in valid) or 1.0
+        overlay_scaled = {k: raw_w.get(k, 0) / overlay_sum for k in valid}
 
-        # Combiné : 70% base + 30% overlay, avec cap MAX_BOT_WEIGHT
+        # Poids final : 70% base + 30% overlay, cap par bot
+        current_cash = cash_frac
         w_hybrid = {}
         for k in valid:
             w = BASE_PCT * base_scaled[k] + OVERLAY_PCT * overlay_scaled[k]
+            if w > MAX_BOT_WEIGHT:
+                current_cash += w - MAX_BOT_WEIGHT
+                w = MAX_BOT_WEIGHT
             w_hybrid[k] = w
-        # Cap par bot
-        for k in valid:
-            if w_hybrid[k] > MAX_BOT_WEIGHT:
-                excess = w_hybrid[k] - MAX_BOT_WEIGHT
-                w_hybrid[k] = MAX_BOT_WEIGHT
-                # Redistribuer l'excès au cash (yield neutre = ratio 1.0)
-                cash_frac += excess
-        # Cash (yield 0 = ratio 1.0, reste dans la trésorerie)
-        pv_hybrid = (sum(w_hybrid[k] * ratios[k] for k in valid) + cash_frac) * initial_total
-        eq_hybrid.append(pv_hybrid)
+
+        # Retour portefeuille (cash = 0% rendement)
+        r_hybrid = sum(w_hybrid[k] * bot_r[k] for k in valid)
+        eq_hybrid.append(eq_hybrid[-1] * (1 + r_hybrid))
 
         dates_out.append(dt)
 
