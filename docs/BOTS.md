@@ -671,6 +671,7 @@ Distribution : ENHANCED 16% / BALANCED 42% / PRO 42%
 | Bot Z Omega backtest | ✅ Terminé | Sharpe 1.96, MaxDD -8.7%, 2022 +0.2% |
 | Bot J Mean Reversion | ✅ Backtest | MaxDD -1.7%, WinRate 70.8%, corr basse avec trend |
 | Bot Z Omega v2 (RP+ML) | ✅ Backtest | Sharpe 2.03 (record), MaxDD -7.6% |
+| Bot Z Meta | ✅ Backtest | 2022 +1.2%, OMEGA 51%/PRO 21% — calibration v2 prévue |
 | Bot Z Adaptive v2 | 🔲 Prévu | Seuils PRO ajustés + backtest |
 | Live Trading | 🔲 Futur | Après validation ~6 mois paper |
 
@@ -704,6 +705,7 @@ Durée : ~45s (fetch 16 symboles × 6 ans + 7 bots + 8 structures Bot Z + MC 500
 | Adaptive | +29.4% | 1.60 | -11.7% | Meta-switch E/B/P |
 | **Omega** | +55.5% | **1.96** | **-8.7%** | ER+Risk+Corr+softmax |
 | Omega v2 | +26.1% | **2.03** | **-7.6%** | Omega + Risk Parity + Meta-Learning |
+| **Meta** | +38.6% | 1.54 | -15.1% | Méta-sélecteur ENHANCED/OMEGA/OMEGA_V2/PRO |
 
 ### Validations statistiques incluses
 

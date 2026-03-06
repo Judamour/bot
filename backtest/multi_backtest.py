@@ -2069,6 +2069,331 @@ def backtest_bot_z_omega_v2(results: dict, vix_s: pd.Series, qqq_df: pd.DataFram
     }
 
 
+# ── 13f. BOT Z META — Méta-sélecteur dynamique des 4 engines ─────────────────
+
+# Seuils de sélection d'engine
+META_ENGINE_HYSTERESIS = {
+    "ENHANCED": 7,   # bull → on attend 7 jours avant de confirmer
+    "OMEGA":    5,
+    "OMEGA_V2": 4,
+    "PRO":      3,   # bear → on sort vite (protection rapide)
+}
+
+
+def _select_engine_raw(vix: float, btc_bearish: bool, qqq_bearish: bool,
+                       port_dd: float, avg_corr: float = 0.0) -> str:
+    """Engine brut sans hysteresis — logique de sélection."""
+    # PRO : conditions défensives sévères
+    if (btc_bearish and qqq_bearish) or vix > 30 or port_dd < -0.15:
+        return "PRO"
+    # OMEGA_V2 : stress modéré — risk parity requis
+    if vix > 24 or port_dd < -0.08 or avg_corr > 0.65:
+        return "OMEGA_V2"
+    # ENHANCED : bull propre sur tous les critères
+    if not btc_bearish and not qqq_bearish and vix < 20 and port_dd > -0.03:
+        return "ENHANCED"
+    # OMEGA : default — ER/Risk engine standard
+    return "OMEGA"
+
+
+def backtest_bot_z_meta(results: dict, vix_s: pd.Series, qqq_df: pd.DataFrame,
+                        daily_cache: dict) -> dict:
+    """
+    Bot Z Meta — Méta-sélecteur dynamique entre 4 engines selon le régime :
+
+      ENHANCED  : bull propre (VIX<20, BTC+QQQ bull, DD>-3%)
+                  → poids régime purs v2 (max CAGR)
+      OMEGA     : conditions normales
+                  → ER Engine + Risk Engine + Corr Penalty + softmax
+      OMEGA_V2  : stress modéré (VIX>24, DD>-8%, corr>65%)
+                  → Omega + Risk Parity 50% + Meta-Learning
+      PRO       : bear/crise (BTC+QQQ all bearish, VIX>30, DD>-15%)
+                  → Omega + Vol Targeting + multi-CB
+
+    Hysteresis : 7/5/4/3 jours de confirmation avant switch d'engine.
+    """
+    log("Bot Z Meta — Méta-sélecteur ENHANCED/OMEGA/OMEGA_V2/PRO...")
+
+    valid = {k: results[k] for k in VALID_BOTS_Z if k in results and results[k]["equity"]}
+    if "j" in results and results["j"]["equity"]:
+        valid["j"] = results["j"]
+    if len(valid) < 2:
+        return {}
+
+    date_sets = [set(r["dates"]) for r in valid.values()]
+    common_dates = sorted(set.intersection(*date_sets))
+    if not common_dates:
+        return {}
+
+    n_bots_base   = len(VALID_BOTS_Z)
+    initial_total = INITIAL * n_bots_base
+
+    bot_norm = {}
+    for k, r in valid.items():
+        bot_norm[k] = {d: v / INITIAL for d, v in zip(r["dates"], r["equity"])}
+
+    btc_df = daily_cache.get("BTC/EUR")
+    btc_norm = {}
+    if btc_df is not None and "ema200" in btc_df.columns:
+        for dt, row in btc_df.iterrows():
+            btc_norm[dt] = {"close": row["close"], "ema200": row["ema200"]}
+
+    SHARPE_WIN = 90; VOL_WIN = 20; SLOPE_WIN = 60; CORR_WIN = 20; META_WIN = 30
+    SOFTMAX_BETA = 3.0; CB_RECOVERY = 0.005
+    TARGET_VOL = 0.20  # pour le mode PRO
+
+    # CB par engine (tiers différents)
+    CB_TIERS = {
+        "ENHANCED": [(-0.25, 0.30)],
+        "OMEGA":    [(-0.25, 0.30)],
+        "OMEGA_V2": [(-0.20, 0.50), (-0.30, 0.30)],
+        "PRO":      [(-0.10, 0.80), (-0.20, 0.50), (-0.30, 0.30)],
+    }
+
+    ks = list(valid.keys())
+    ret_history = {k: [] for k in ks}
+    eq_history  = {k: [] for k in ks}
+    bot_peaks   = {k: 1.0 for k in ks}
+
+    cb_peak   = initial_total
+    cb_factor = 1.0
+    current_engine   = "OMEGA"
+    pending_engine   = "OMEGA"
+    days_pending     = 0
+    engine_log       = []
+
+    eq_meta   = [initial_total]
+    dates_out = [common_dates[0]]
+
+    for i in range(1, len(common_dates)):
+        dt      = common_dates[i]
+        prev_dt = common_dates[i - 1]
+
+        # ── Retours + historique ─────────────────────────────────────────────
+        bot_r = {}
+        for k in ks:
+            p = bot_norm[k].get(prev_dt, 1.0)
+            c = bot_norm[k].get(dt, p)
+            bot_r[k] = (c / p - 1) if p > 0 else 0.0
+            ret_history[k].append(bot_r[k])
+            eq_val = bot_norm[k].get(dt, 1.0)
+            eq_history[k].append(eq_val)
+            if eq_val > bot_peaks[k]:
+                bot_peaks[k] = eq_val
+
+        # ── Régime + Momentum Overlay ────────────────────────────────────────
+        regime = _get_regime_at_dt(dt, vix_s, qqq_df)
+        try:
+            dt_norm    = pd.Timestamp(dt).normalize().tz_localize(None)
+            vix_val    = float(vix_s.asof(dt_norm)) if not vix_s.empty else 15.0
+            qqq_close  = float(qqq_df["Close"].asof(dt_norm))
+            qqq_sma200 = float(qqq_df["sma200"].asof(dt_norm))
+            qqq_bearish = qqq_close < qqq_sma200
+        except Exception:
+            vix_val = 15.0; qqq_bearish = False
+
+        btc_row = btc_norm.get(dt) or btc_norm.get(prev_dt)
+        btc_bearish = (btc_row is not None and btc_row["ema200"] > 0
+                       and btc_row["close"] < btc_row["ema200"])
+
+        if btc_bearish and qqq_bearish:
+            regime = "BEAR"
+        elif btc_bearish or qqq_bearish:
+            regime = "HIGH_VOL" if regime in ("BULL", "RANGE") else regime
+
+        raw_regime_w = REGIME_WEIGHTS_Z.get(regime, REGIME_WEIGHTS_Z["RANGE"])
+
+        warmup = min(len(ret_history[k]) for k in ks)
+
+        # ── Corrélation inter-bots ───────────────────────────────────────────
+        avg_corr = 0.0
+        if warmup >= CORR_WIN:
+            rets_mat = np.array([ret_history[k][-CORR_WIN:] for k in ks])
+            try:
+                corr_m = np.corrcoef(rets_mat)
+                n = len(ks)
+                off_d = [corr_m[ii, jj] for ii in range(n) for jj in range(ii+1, n)]
+                avg_corr = float(np.mean(off_d)) if off_d else 0.0
+            except Exception:
+                pass
+
+        # ── Drawdown portefeuille ────────────────────────────────────────────
+        current_pv = eq_meta[-1]
+        if current_pv > cb_peak:
+            cb_peak = current_pv
+        port_dd = (current_pv - cb_peak) / cb_peak if cb_peak > 0 else 0.0
+
+        # ── Sélection d'engine avec hysteresis ───────────────────────────────
+        raw_engine = _select_engine_raw(vix_val, btc_bearish, qqq_bearish, port_dd, avg_corr)
+        if raw_engine != pending_engine:
+            pending_engine = raw_engine
+            days_pending   = 0
+        else:
+            days_pending += 1
+
+        if days_pending >= META_ENGINE_HYSTERESIS.get(pending_engine, 5):
+            current_engine = pending_engine
+        engine_log.append((dt, current_engine))
+
+        # ── Calcul des poids selon l'engine actif ────────────────────────────
+        # Composantes communes ER + Risk
+        er_comp   = {k: {} for k in ks}
+        risk_comp = {k: {} for k in ks}
+        for k in ks:
+            hist = ret_history[k]
+            eq_h = eq_history[k]
+            if warmup >= SHARPE_WIN:
+                r90 = np.array(hist[-SHARPE_WIN:])
+                sharpe_90 = (float(r90.mean() / r90.std() * math.sqrt(252))
+                             if r90.std() > 1e-8 else 0.0)
+                pos_s = sum(r for r in hist[-SHARPE_WIN:] if r > 0)
+                neg_s = abs(sum(r for r in hist[-SHARPE_WIN:] if r < 0))
+                pf_90 = min((pos_s / neg_s) if neg_s > 1e-8 else 3.0, 5.0)
+                if len(eq_h) >= SLOPE_WIN:
+                    eq_s = np.array(eq_h[-SLOPE_WIN:])
+                    x = np.arange(len(eq_s))
+                    slope = (float(np.polyfit(x, eq_s / max(eq_s[0], 1e-8), 1)[0]) * 252
+                             if eq_s.std() > 1e-8 else 0.0)
+                else:
+                    slope = 0.0
+                total_rw = sum(raw_regime_w.values()) or 1.0
+                regime_fit = raw_regime_w.get(k, 0) / (total_rw / max(len(VALID_BOTS_Z), 1))
+                er_comp[k] = {"sharpe": sharpe_90, "pf": pf_90,
+                              "slope": slope, "regime_fit": regime_fit}
+                r20 = np.array(hist[-VOL_WIN:])
+                vol_20 = float(r20.std() * math.sqrt(252)) if r20.std() > 1e-8 else 0.01
+                down_r = r20[r20 < 0]
+                down_vol = (float(down_r.std() * math.sqrt(252))
+                            if len(down_r) > 1 and down_r.std() > 1e-8 else vol_20)
+                dd_k = abs(eq_history[k][-1] / bot_peaks[k] - 1) if bot_peaks[k] > 0 else 0.0
+                risk_comp[k] = {"vol": vol_20, "down_vol": down_vol, "dd": dd_k}
+            else:
+                er_comp[k]   = {"sharpe": 0.0, "pf": 1.0, "slope": 0.0, "regime_fit": 1.0}
+                risk_comp[k] = {"vol": 0.3, "down_vol": 0.3, "dd": 0.0}
+
+        def _z(vals):
+            arr = np.array(vals, dtype=float)
+            m, s = arr.mean(), arr.std()
+            return list((arr - m) / s) if s > 1e-8 else [0.0] * len(vals)
+
+        if current_engine == "ENHANCED":
+            # Poids régime purs v2 (même logique que backtest_bot_z_enhanced)
+            total_w = sum(raw_regime_w.get(k, 0) for k in ks) or 1.0
+            weights = {k: raw_regime_w.get(k, 0) / total_w for k in ks}
+            corr_factor = 1.0
+
+        else:
+            # ER/Risk softmax commun à OMEGA, OMEGA_V2, PRO
+            sharpe_z = dict(zip(ks, _z([er_comp[k]["sharpe"]     for k in ks])))
+            pf_z     = dict(zip(ks, _z([er_comp[k]["pf"]         for k in ks])))
+            slope_z  = dict(zip(ks, _z([er_comp[k]["slope"]      for k in ks])))
+            regime_z = dict(zip(ks, _z([er_comp[k]["regime_fit"] for k in ks])))
+            vol_z    = dict(zip(ks, _z([risk_comp[k]["vol"]      for k in ks])))
+            dvol_z   = dict(zip(ks, _z([risk_comp[k]["down_vol"] for k in ks])))
+            dd_z     = dict(zip(ks, _z([risk_comp[k]["dd"]       for k in ks])))
+
+            er_s   = {k: 0.35*sharpe_z[k] + 0.25*pf_z[k]
+                        + 0.20*slope_z[k] + 0.20*regime_z[k] for k in ks}
+            risk_s = {k: 0.4*vol_z[k] + 0.3*dvol_z[k] + 0.3*dd_z[k] for k in ks}
+
+            # Corr penalty
+            corr_penalty = {k: 1.0 for k in ks}
+            if warmup >= CORR_WIN:
+                rets_mat = np.array([ret_history[k][-CORR_WIN:] for k in ks])
+                try:
+                    corr_m = np.corrcoef(rets_mat)
+                    n = len(ks)
+                    for ii, k in enumerate(ks):
+                        others = [corr_m[ii, jj] for jj in range(n) if jj != ii]
+                        ac = float(np.mean(others)) if others else 0.0
+                        corr_penalty[k] = max(0.3, 1.0 - max(0.0, ac - 0.5) / 0.5)
+                except Exception:
+                    pass
+
+            net_score = {k: (er_s[k] - risk_s[k]) * corr_penalty[k] for k in ks}
+
+            # Vol targeting (PRO uniquement)
+            if current_engine == "PRO":
+                vol_scale = {}
+                for k in ks:
+                    if len(ret_history[k]) >= VOL_WIN:
+                        v = float(np.std(ret_history[k][-VOL_WIN:]) * math.sqrt(252))
+                        vol_scale[k] = min(TARGET_VOL / max(v, 1e-8), 3.0)
+                    else:
+                        vol_scale[k] = 1.0
+                net_score = {k: net_score[k] * vol_scale[k] for k in ks}
+
+            # Softmax
+            max_s = max(net_score.values())
+            exp_s = {k: math.exp(SOFTMAX_BETA * (net_score[k] - max_s)) for k in ks}
+            tot_e = sum(exp_s.values()) or 1.0
+            omega_w = {k: exp_s[k] / tot_e for k in ks}
+
+            # Risk Parity blend (OMEGA_V2 50%, PRO 30%)
+            rp_blend = 0.5 if current_engine == "OMEGA_V2" else (0.3 if current_engine == "PRO" else 0.0)
+            if rp_blend > 0:
+                inv_v = {k: 1.0 / max(risk_comp[k]["vol"], 0.01) for k in ks}
+                tot_iv = sum(inv_v.values()) or 1.0
+                rp_w = {k: inv_v[k] / tot_iv for k in ks}
+                blended = {k: (1-rp_blend) * omega_w[k] + rp_blend * rp_w[k] for k in ks}
+            else:
+                blended = omega_w
+
+            # Meta-Learning (OMEGA_V2 + PRO)
+            if current_engine in ("OMEGA_V2", "PRO") and warmup >= max(SHARPE_WIN, META_WIN+1):
+                confidence = {}
+                for k in ks:
+                    fh = np.array(ret_history[k])
+                    ls = (float(fh.mean() / fh.std() * math.sqrt(252))
+                          if fh.std() > 1e-8 else 0.0)
+                    exp_daily = ls / math.sqrt(252)
+                    exp_30d   = (1 + exp_daily) ** META_WIN - 1
+                    r30 = np.array(ret_history[k][-META_WIN:])
+                    act_30d = float(np.prod(1 + r30) - 1)
+                    confidence[k] = max(0.4, min(1.5, 1.0 + (act_30d - exp_30d) / 0.05))
+                adj = {k: blended[k] * confidence[k] for k in ks}
+                tot_adj = sum(adj.values()) or 1.0
+                weights = {k: adj[k] / tot_adj for k in ks}
+            else:
+                weights = blended
+
+            corr_factor = 1.0  # corr déjà géré dans corr_penalty
+
+        r_port = sum(weights[k] * bot_r[k] for k in ks)
+
+        # ── Circuit Breaker selon l'engine actif ─────────────────────────────
+        tiers = CB_TIERS.get(current_engine, [(-0.25, 0.30)])
+        target_factor = 1.0
+        for threshold, floor in sorted(tiers, key=lambda x: x[0]):
+            if port_dd < threshold:
+                target_factor = floor
+
+        if target_factor < cb_factor:
+            cb_factor = max(target_factor, cb_factor - 0.05)
+        elif port_dd > -0.05:
+            cb_factor = min(1.0, cb_factor + CB_RECOVERY)
+
+        eq_meta.append(eq_meta[-1] * (1 + cb_factor * r_port))
+        dates_out.append(dt)
+
+    # Stats engines
+    engine_counts = {}
+    for _, e in engine_log:
+        engine_counts[e] = engine_counts.get(e, 0) + 1
+    total_days = len(engine_log) or 1
+    engine_pct = {e: round(engine_counts.get(e, 0) / total_days * 100, 1)
+                  for e in ["ENHANCED", "OMEGA", "OMEGA_V2", "PRO"]}
+
+    m   = _metrics_portfolio(eq_meta, dates_out, initial_total)
+    ann = annual_returns(eq_meta, dates_out)
+    return {
+        "name":         "Bot Z Meta (E/Ω/Ω2/P)",
+        "equity":       eq_meta, "dates": dates_out, "trades": [],
+        "metrics":      m, "annual": ann, "regime": {},
+        "engine_stats": engine_pct,
+    }
+
+
 # ── 14. WALK-FORWARD TEST ─────────────────────────────────────────────────────
 
 def walk_forward_test(results: dict, vix_s: pd.Series, qqq_df: pd.DataFrame,
@@ -2405,6 +2730,7 @@ def print_report(results, vix_s, qqq_df, z_results=None, wf=None, mc=None):
             ("adaptive", Fore.CYAN,    "← meta-switch E/B/P + hysteresis 7/5/3j"),
             ("omega",    Fore.WHITE,   "← ER Engine + Risk Engine + Corr Penalty + softmax"),
             ("omega_v2", Fore.GREEN,   "← Omega + Risk Parity + Meta-Learning"),
+            ("meta",     Fore.WHITE,   "← Méta-sélecteur ENHANCED/OMEGA/OMEGA_V2/PRO"),
         ]
         for key, color, note in strategy_order:
             r = z_results.get(key)
@@ -2422,7 +2748,7 @@ def print_report(results, vix_s, qqq_df, z_results=None, wf=None, mc=None):
         hdr_z = f"  {'Stratégie':<32}" + "".join(f"  {y:>8}" for y in years)
         print(hdr_z)
         print("  " + "-" * (32 + 10 * len(years)))
-        for key in ["equal", "z", "hybrid", "enhanced", "pro", "adaptive", "omega", "omega_v2"]:
+        for key in ["equal", "z", "hybrid", "enhanced", "pro", "adaptive", "omega", "omega_v2", "meta"]:
             r = z_results.get(key)
             if not r:
                 continue
@@ -2476,10 +2802,20 @@ def print_report(results, vix_s, qqq_df, z_results=None, wf=None, mc=None):
             ov2_cagr   = omega_v2_r["metrics"].get("cagr", 0)
             ov2_dd     = omega_v2_r["metrics"].get("max_dd", 0)
             ov2_sharpe = omega_v2_r["metrics"].get("sharpe", 0)
-            base = om_cagr if omega_r else enhanced_cagr
             print(f"  • Omega v2 vs Omega          : {Fore.GREEN if ov2_cagr > (om_cagr if om_cagr else 0) else Fore.RED}"
                   f"{ov2_cagr - (om_cagr if om_cagr else 0):+.1f}%/an{Style.RESET_ALL} CAGR | "
                   f"MaxDD={ov2_dd:.1f}% | Sharpe={ov2_sharpe:.2f}")
+        meta_r = z_results.get("meta")
+        if meta_r:
+            mt_cagr   = meta_r["metrics"].get("cagr", 0)
+            mt_dd     = meta_r["metrics"].get("max_dd", 0)
+            mt_sharpe = meta_r["metrics"].get("sharpe", 0)
+            es = meta_r.get("engine_stats", {})
+            es_str = " | ".join(f"{e}:{v:.0f}%" for e, v in es.items() if v > 0)
+            print(f"  • Meta vs Enhanced           : {Fore.GREEN if mt_cagr > enhanced_cagr else Fore.RED}"
+                  f"{mt_cagr - enhanced_cagr:+.1f}%/an{Style.RESET_ALL} CAGR | "
+                  f"MaxDD={mt_dd:.1f}% | Sharpe={mt_sharpe:.2f}")
+            print(f"    Engines utilisés : {es_str}")
         print(f"{Fore.CYAN}{'='*100}{Style.RESET_ALL}")
 
         # Walk-forward et Monte Carlo
@@ -2490,7 +2826,7 @@ def print_report(results, vix_s, qqq_df, z_results=None, wf=None, mc=None):
 
         # Save Z comparison to CSV
         z_rows = []
-        for key in ["equal", "z", "hybrid", "enhanced", "pro", "adaptive", "omega", "omega_v2"]:
+        for key in ["equal", "z", "hybrid", "enhanced", "pro", "adaptive", "omega", "omega_v2", "meta"]:
             r = z_results.get(key)
             if r:
                 m = r["metrics"]
@@ -2542,6 +2878,7 @@ def plot_equity_curves(results, z_results=None):
                 ("adaptive", "-",   3.2, "#00d9ff"),
                 ("omega",    "-",   3.0, "#ff6e96"),
                 ("omega_v2", "-",   3.5, "#00ff88"),
+                ("meta",     "-",   4.0, "#ff00ff"),
             ]
             for key, style, lw, color in z_styles:
                 r = z_results.get(key)
@@ -2637,6 +2974,11 @@ def main():
         z_omega_v2 = backtest_bot_z_omega_v2(results, vix_s, qqq_df, daily)
         if z_omega_v2:
             z_results["omega_v2"] = z_omega_v2
+
+        log("Bot Z Meta — Méta-sélecteur ENHANCED/OMEGA/OMEGA_V2/PRO...")
+        z_meta = backtest_bot_z_meta(results, vix_s, qqq_df, daily)
+        if z_meta:
+            z_results["meta"] = z_meta
 
         # Walk-forward test
         wf = walk_forward_test(results, vix_s, qqq_df, daily, split_year=2023)
