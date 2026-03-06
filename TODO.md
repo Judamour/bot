@@ -89,46 +89,32 @@
 
 ### A implémenter — par priorité
 
-- [ ] **[CRITIQUE avant live] Allocation drift tracking**
-      Mesurer l'écart entre allocation cible (Bot Z) et allocation réelle (positions sub-bots).
-      `drift = sum(|poids_cible[b] - poids_reel[b]|) for b in VALID_BOTS`
-      Si drift > 0.20 → warning log + Telegram. Valide que backtest ≈ paper live.
-      Sans ça, le Sharpe 1.70 du backtest n'a pas de valeur opérationnelle.
+- [x] **[CRITIQUE avant live] Allocation drift tracking**
+      `drift = sum(|target_weight[b] - actual_weight[b]|)` — warning si > 20%
+      Implémenté dans `compute_allocation_drift()` — loggé dans shadow.jsonl
 
-- [ ] **[PRIORITE 1] Volatility targeting global du portefeuille**
-      `portfolio_vol = std(z_capital_returns_20d) * sqrt(252)`
-      `vol_factor = clip(TARGET_VOL / portfolio_vol, 0.3, 1.5)`
-      `exposition = z_capital * cb_factor * vol_factor`  (avant calcul budgets)
-      Effet estimé : Sharpe 1.70 → ~1.9 | MaxDD -9.6% → ~-7%
-      Référence : AQR, Man AHL, Winton — tous utilisent VT comme brique de base.
-      TARGET_VOL = 0.20 (20% annualisé — adapté crypto+stocks)
+- [x] **[PRIORITE 1] Volatility targeting global du portefeuille**
+      `vol_factor = clip(TARGET_PORTFOLIO_VOL / portfolio_vol_20d, 0.3, 1.5)`
+      Appliqué sur cb_factor avant budget dispatch
+      Nouvelles constantes : TARGET_PORTFOLIO_VOL=0.20
 
-- [ ] **[PRIORITE 2] Switch cost penalty dans le scoring**
-      Ajouter `-0.05` au score d'un engine différent du current_engine.
-      `if candidate != current_engine: score -= SWITCH_PENALTY`
-      Evite les micro-switchs sur signaux marginaux. Moins de friction de performance.
+- [x] **[PRIORITE 2] Switch cost penalty dans le scoring**
+      `-SWITCH_PENALTY (0.05)` si engine candidat ≠ current_engine
 
-- [ ] **[PRIORITE 3] Regime confidence dans le scoring** (trivial — déjà calculé)
-      Utiliser `regime_confidence` dans la formule :
-      `score = 0.50 * regime_fit * regime_confidence + 0.30 * quality + 0.20 * inv_risk`
-      En transition de régime (confidence 0.6), pondère moins le regime_fit → privilégie OMEGA.
+- [x] **[PRIORITE 3] Regime confidence dans le scoring**
+      `rf = regime_fit × regime_confidence × regime_strength`
 
-- [ ] **[PRIORITE 4] Regime persistence factor**
-      `regime_strength = min(1.0, days_in_current_regime / 7.0)`
-      facteurs : 1j→0.6 | 3j→0.8 | 7j→1.0
-      `regime_fit *= regime_strength`
-      Evite les faux signaux en début de régime.
+- [x] **[PRIORITE 4] Regime persistence factor**
+      `regime_strength = min(1.0, days_in_regime / REGIME_PERSIST_DAYS)`
+      Loggé dans state.json (days_in_regime) et shadow.jsonl
 
-- [ ] **[PRIORITE 5] Crypto realized vol pour régime**
-      VIX est aveugle aux crises crypto. Ajouter :
-      `btc_vol_20d = std(btc_daily_returns_20d) * sqrt(252)`
-      Si btc_vol_20d > 0.80 ET régime BULL/RANGE → forcer HIGH_VOL
-      Capte les crashes crypto que VIX détecte avec retard.
+- [x] **[PRIORITE 5] Crypto realized vol pour régime**
+      `compute_btc_realized_vol()` → BTC 20 candles 4h annualisé
+      Si vol > BTC_HIGH_VOL_THRESHOLD (80%) et BULL/RANGE → force HIGH_VOL
 
-- [ ] **[PRIORITE 6] Corrélation dynamique des bots**
-      `avg_corr = mean(corr(returns_A,B), corr(A,C), corr(A,G), corr(B,C), corr(B,G), corr(C,G))`
-      fenêtre 20 trades. Si avg_corr > 0.70 → `portfolio_exposure *= 0.8`
-      Protection crise (liquidations simultanées = corrélations qui explosent).
+- [x] **[PRIORITE 6] Corrélation dynamique des bots**
+      `compute_bot_correlation()` — pairwise pearson sur 20 trades
+      avg_corr > CORR_REDUCE_THRESHOLD (70%) → exposition ×0.80
 
 ### Notes audit ChatGPT (2026-03-06) — A relire en debut de session
 
