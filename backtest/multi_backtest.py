@@ -1061,7 +1061,169 @@ def backtest_bot_z_enhanced(results: dict, vix_s: pd.Series, qqq_df: pd.DataFram
     }
 
 
-# ── 13. WALK-FORWARD TEST ─────────────────────────────────────────────────────
+# ── 13b. BOT Z PRO — Volatility Targeting + Adaptive Score + Corr Spike ──────
+
+def backtest_bot_z_pro(results: dict, vix_s: pd.Series, qqq_df: pd.DataFrame,
+                       daily_cache: dict) -> dict:
+    """
+    Bot Z Pro — architecture hedge fund (toutes les couches) :
+      1. Momentum Overlay    : BTC EMA200 + QQQ SMA200 → force régime
+      2. Volatility Targeting: pondère chaque bot pour une vol annuelle cible (20%)
+                               → contributions au risque égales entre bots
+      3. Adaptive Scoring    : rolling 90j Sharpe par bot → modifie les poids régime
+                               (poids × [0.5, 2.0] selon performance récente)
+      4. Correlation Spike   : si corrélation inter-bots moyenne > 70% sur 20j
+                               → réduit exposition totale (bénéfice diversification ↓)
+      5. Multi-tier CB       : DD>-10%→expo×0.80 | DD>-20%→×0.50 | DD>-30%→×0.30
+    """
+    log("Bot Z Pro — Vol Targeting + Adaptive Score + Corr Spike + Multi-tier CB...")
+
+    valid = {k: results[k] for k in VALID_BOTS_Z if k in results and results[k]["equity"]}
+    if len(valid) < 2:
+        return {}
+
+    date_sets = [set(r["dates"]) for r in valid.values()]
+    common_dates = sorted(set.intersection(*date_sets))
+    if not common_dates:
+        return {}
+
+    n_bots        = len(valid)
+    initial_total = INITIAL * n_bots
+
+    bot_norm = {}
+    for k, r in valid.items():
+        bot_norm[k] = {d: v / INITIAL for d, v in zip(r["dates"], r["equity"])}
+
+    # BTC EMA200 series (momentum overlay)
+    btc_df = daily_cache.get("BTC/EUR")
+    btc_norm = {}
+    if btc_df is not None and "ema200" in btc_df.columns:
+        for dt, row in btc_df.iterrows():
+            btc_norm[dt] = {"close": row["close"], "ema200": row["ema200"]}
+
+    TARGET_VOL  = 0.20   # vol annuelle cible pour chaque bot (20%)
+    VOL_WIN     = 20     # fenêtre vol réalisée (jours)
+    SHARPE_WIN  = 90     # fenêtre rolling Sharpe (jours)
+    CORR_WIN    = 20     # fenêtre corrélation inter-bots (jours)
+    CORR_THRESH = 0.70   # seuil corrélation → réduction expo
+    CB_RECOVERY = 0.005  # récupération CB +0.5%/jour
+
+    ret_history = {k: [] for k in valid}
+    cb_peak     = initial_total
+    cb_factor   = 1.0
+
+    eq_pro    = [initial_total]
+    dates_out = [common_dates[0]]
+
+    for i in range(1, len(common_dates)):
+        dt      = common_dates[i]
+        prev_dt = common_dates[i - 1]
+
+        # ── Régime de base + Momentum Overlay ───────────────────────────────
+        regime = _get_regime_at_dt(dt, vix_s, qqq_df)
+        try:
+            dt_norm    = pd.Timestamp(dt).normalize().tz_localize(None)
+            qqq_close  = float(qqq_df["Close"].asof(dt_norm))
+            qqq_sma200 = float(qqq_df["sma200"].asof(dt_norm))
+            qqq_bearish = qqq_close < qqq_sma200
+        except Exception:
+            qqq_bearish = False
+
+        btc_row = btc_norm.get(dt) or btc_norm.get(prev_dt)
+        btc_bearish = (btc_row is not None and btc_row["ema200"] > 0
+                       and btc_row["close"] < btc_row["ema200"])
+
+        if btc_bearish and qqq_bearish:
+            regime = "BEAR"
+        elif btc_bearish or qqq_bearish:
+            regime = "HIGH_VOL" if regime in ("BULL", "RANGE") else regime
+
+        raw_w = REGIME_WEIGHTS_Z.get(regime, REGIME_WEIGHTS_Z["RANGE"])
+
+        # Retours quotidiens
+        bot_r = {}
+        for k in valid:
+            p = bot_norm[k].get(prev_dt, 1.0)
+            c = bot_norm[k][dt]
+            bot_r[k] = (c / p - 1) if p > 0 else 0.0
+            ret_history[k].append(bot_r[k])
+
+        # ── 1. Volatility Targeting ──────────────────────────────────────────
+        vol_scale = {}
+        for k in valid:
+            if len(ret_history[k]) >= VOL_WIN:
+                daily_vol  = float(np.std(ret_history[k][-VOL_WIN:]))
+                annual_vol = daily_vol * math.sqrt(252) if daily_vol > 1e-8 else TARGET_VOL
+                vol_scale[k] = min(TARGET_VOL / annual_vol, 3.0)
+            else:
+                vol_scale[k] = 1.0
+
+        # ── 2. Adaptive Scoring (rolling Sharpe 90j) ─────────────────────────
+        score = {}
+        for k in valid:
+            if len(ret_history[k]) >= SHARPE_WIN:
+                s = np.array(ret_history[k][-SHARPE_WIN:])
+                sharpe_r = float(s.mean() / s.std() * math.sqrt(252)) if s.std() > 1e-8 else 0.0
+                # Convertit en multiplicateur [0.5, 2.0] autour de 1.0
+                score[k] = max(0.5, min(2.0, 1.0 + sharpe_r / 4))
+            else:
+                score[k] = 1.0
+
+        # ── Poids combinés : régime × vol_scale × score ─────────────────────
+        w_raw   = {k: raw_w.get(k, 0) * vol_scale[k] * score[k] for k in valid}
+        total_w = sum(w_raw.values()) or 1.0
+        w_final = {k: w_raw[k] / total_w for k in valid}
+
+        # ── 3. Correlation Spike ─────────────────────────────────────────────
+        corr_factor = 1.0
+        if len(ret_history[list(valid.keys())[0]]) >= CORR_WIN:
+            rets_mat = np.array([ret_history[k][-CORR_WIN:] for k in valid])
+            if rets_mat.shape[0] > 1:
+                try:
+                    corr_m   = np.corrcoef(rets_mat)
+                    n        = corr_m.shape[0]
+                    off_diag = [corr_m[ii, jj] for ii in range(n) for jj in range(ii + 1, n)]
+                    avg_corr = float(np.mean(off_diag)) if off_diag else 0.0
+                    if avg_corr > CORR_THRESH:
+                        excess      = (avg_corr - CORR_THRESH) / max(0.95 - CORR_THRESH, 1e-4)
+                        corr_factor = 1.0 - 0.5 * min(excess, 1.0)
+                except Exception:
+                    corr_factor = 1.0
+
+        # ── Retour portefeuille brut ─────────────────────────────────────────
+        r_port = sum(w_final[k] * bot_r[k] for k in valid)
+
+        # ── 4. Multi-tier Circuit Breaker ────────────────────────────────────
+        current_pv = eq_pro[-1]
+        if current_pv > cb_peak:
+            cb_peak = current_pv
+        port_dd = (current_pv - cb_peak) / cb_peak if cb_peak > 0 else 0.0
+
+        if port_dd < -0.30:
+            cb_factor = max(0.30, cb_factor - 0.05)   # réduction agressive
+        elif port_dd < -0.20:
+            cb_factor = max(0.50, cb_factor - 0.03)
+        elif port_dd < -0.10:
+            cb_factor = max(0.80, cb_factor - 0.01)
+        elif port_dd > -0.05:
+            cb_factor = min(1.0, cb_factor + CB_RECOVERY)  # récupération progressive
+
+        # Exposition finale : CB × corrélation × r_port
+        r_final = cb_factor * corr_factor * r_port
+
+        eq_pro.append(eq_pro[-1] * (1 + r_final))
+        dates_out.append(dt)
+
+    m   = _metrics_portfolio(eq_pro, dates_out, initial_total)
+    ann = annual_returns(eq_pro, dates_out)
+    return {
+        "name":    "Bot Z Pro (VT+AS+CS+CB)",
+        "equity":  eq_pro, "dates": dates_out, "trades": [],
+        "metrics": m, "annual": ann, "regime": {},
+    }
+
+
+# ── 14. WALK-FORWARD TEST ─────────────────────────────────────────────────────
 
 def walk_forward_test(results: dict, vix_s: pd.Series, qqq_df: pd.DataFrame,
                       daily_cache: dict, split_year: int = 2023) -> dict:
@@ -1209,8 +1371,9 @@ def monte_carlo_test(results: dict, n_simulations: int = 1000) -> dict:
         n = len(sim_cagrs)
 
         mc_results[bot_id] = {
-            "bot_name":   r["name"],
-            "n_trades":   n_trades,
+            "bot_name":     r["name"],
+            "n_simulations": n_simulations,
+            "n_trades":     n_trades,
             "real_cagr":  r["metrics"]["cagr"],
             "real_maxdd": r["metrics"]["max_dd"],
             "cagr_p5":    round(sim_cagrs[int(n * 0.05)], 1),
@@ -1269,7 +1432,8 @@ def print_monte_carlo(mc: dict):
     if not mc:
         return
     print(f"\n{Fore.CYAN}{'='*100}")
-    print(f"  MONTE CARLO — Robustesse statistique (1000 simulations / ordre des trades randomisé)")
+    n_sims = next(iter(mc.values())).get("n_simulations", 5000) if mc else 5000
+    print(f"  MONTE CARLO — Robustesse statistique ({n_sims} simulations / ordre des trades randomisé)")
     print(f"  (Si p5 CAGR > 0 → l'edge est réel et indépendant de la séquence)")
     print(f"{'='*100}{Style.RESET_ALL}")
     print(f"  {'Bot':<28} {'Trades':>7} {'CAGR réel':>10} {'p5 CAGR':>9} {'p50 CAGR':>9} {'p95 CAGR':>9} {'%Positif':>9} {'DD p5':>8}")
@@ -1370,7 +1534,7 @@ def print_report(results, vix_s, qqq_df, z_results=None, wf=None, mc=None):
     # Bot Z comparison
     if z_results:
         print(f"\n{Fore.CYAN}{'='*100}")
-        print(f"  BOT Z — 3 STRUCTURES PORTFOLIO (4 bots valides A+B+C+G | capital 4×1000€)")
+        print(f"  BOT Z — 5 STRUCTURES PORTFOLIO (4 bots valides A+B+C+G | capital 4×1000€)")
         print(f"{'='*100}{Style.RESET_ALL}")
         print(f"  {'Stratégie':<32} {'CAGR':>7} {'Sharpe':>7} {'MaxDD':>8} {'Final€':>9}  Notes")
         print("  " + "-" * 90)
@@ -1391,6 +1555,7 @@ def print_report(results, vix_s, qqq_df, z_results=None, wf=None, mc=None):
             ("z",        Fore.GREEN,   "← régime dynamique 100%"),
             ("hybrid",   Fore.WHITE,   "← 70% base stable + 30% overlay dynamique"),
             ("enhanced", Fore.MAGENTA, "← régime + momentum overlay + circuit breaker"),
+            ("pro",      Fore.YELLOW,  "← VT + adaptive score + corr spike + multi-tier CB"),
         ]
         for key, color, note in strategy_order:
             r = z_results.get(key)
@@ -1408,7 +1573,7 @@ def print_report(results, vix_s, qqq_df, z_results=None, wf=None, mc=None):
         hdr_z = f"  {'Stratégie':<32}" + "".join(f"  {y:>8}" for y in years)
         print(hdr_z)
         print("  " + "-" * (32 + 10 * len(years)))
-        for key in ["equal", "z", "hybrid", "enhanced"]:
+        for key in ["equal", "z", "hybrid", "enhanced", "pro"]:
             r = z_results.get(key)
             if not r:
                 continue
@@ -1425,6 +1590,8 @@ def print_report(results, vix_s, qqq_df, z_results=None, wf=None, mc=None):
         # Verdict
         enhanced_cagr = z_results.get("enhanced", {}).get("metrics", {}).get("cagr", 0) if z_results.get("enhanced") else 0
         enhanced_dd   = z_results.get("enhanced", {}).get("metrics", {}).get("max_dd", 0) if z_results.get("enhanced") else 0
+        pro_cagr      = z_results.get("pro",      {}).get("metrics", {}).get("cagr",   0) if z_results.get("pro") else 0
+        pro_dd        = z_results.get("pro",      {}).get("metrics", {}).get("max_dd", 0) if z_results.get("pro") else 0
         eq_cagr       = z_results.get("equal",  {}).get("metrics", {}).get("cagr", 0)
         z_cagr        = z_results.get("z",      {}).get("metrics", {}).get("cagr", 0)
         print(f"\n  Verdict :")
@@ -1433,6 +1600,9 @@ def print_report(results, vix_s, qqq_df, z_results=None, wf=None, mc=None):
         if enhanced_cagr:
             print(f"  • Enhanced vs Equal-weight   : {Fore.GREEN if enhanced_cagr > eq_cagr else Fore.RED}"
                   f"{enhanced_cagr - eq_cagr:+.1f}%/an{Style.RESET_ALL} CAGR | MaxDD Enhanced = {enhanced_dd:.1f}%")
+        if pro_cagr:
+            print(f"  • Pro vs Enhanced            : {Fore.GREEN if pro_cagr > enhanced_cagr else Fore.RED}"
+                  f"{pro_cagr - enhanced_cagr:+.1f}%/an{Style.RESET_ALL} CAGR | MaxDD Pro = {pro_dd:.1f}%")
         print(f"{Fore.CYAN}{'='*100}{Style.RESET_ALL}")
 
         # Walk-forward et Monte Carlo
@@ -1443,7 +1613,7 @@ def print_report(results, vix_s, qqq_df, z_results=None, wf=None, mc=None):
 
         # Save Z comparison to CSV
         z_rows = []
-        for key in ["equal", "z", "hybrid", "enhanced"]:
+        for key in ["equal", "z", "hybrid", "enhanced", "pro"]:
             r = z_results.get(key)
             if r:
                 m = r["metrics"]
@@ -1491,6 +1661,7 @@ def plot_equity_curves(results, z_results=None):
                 ("z",        "-.",  2.0, "#a371f7"),
                 ("hybrid",   ":",   1.5, "#8b949e"),
                 ("enhanced", "-",   2.8, "#ffffff"),
+                ("pro",      "-",   3.2, "#ffd700"),
             ]
             for key, style, lw, color in z_styles:
                 r = z_results.get(key)
@@ -1566,11 +1737,16 @@ def main():
         if z_enhanced:
             z_results["enhanced"] = z_enhanced
 
+        # Bot Z Pro (vol targeting + adaptive score + corr spike + multi-tier CB)
+        z_pro = backtest_bot_z_pro(results, vix_s, qqq_df, daily)
+        if z_pro:
+            z_results["pro"] = z_pro
+
         # Walk-forward test
         wf = walk_forward_test(results, vix_s, qqq_df, daily, split_year=2023)
 
-        # Monte Carlo (1000 simulations)
-        mc = monte_carlo_test(results, n_simulations=1000)
+        # Monte Carlo (5000 simulations — plus robuste statistiquement)
+        mc = monte_carlo_test(results, n_simulations=5000)
 
         print_report(results, vix_s, qqq_df, z_results, wf=wf, mc=mc)
         plot_equity_curves(results, z_results)

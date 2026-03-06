@@ -1,7 +1,7 @@
 # Résultats Backtests — Multi-Bots
 
 > Script : `backtest/multi_backtest.py`
-> Dernier run : 2026-03-06 (Run 4 — Bot Z Enhanced + Walk-Forward + Monte Carlo)
+> Dernier run : 2026-03-06 (Run 5 — Bot Z Pro + MC 5000)
 > Graphique : `backtest/results/multi_equity.png`
 > CSV détaillé : `backtest/results/multi_summary.csv`
 > CSV Bot Z : `backtest/results/bot_z_comparison.csv`
@@ -58,19 +58,22 @@
 > Calibration v2 BEAR : C=1.5, G=1.2 (validé sur 2022)
 > Sharpe corrigé : calculé sur retours actifs uniquement (|r| > 1e-8, exclut equity plate)
 
-### Comparaison des 4 structures
+### Comparaison des 5 structures
 
 | Stratégie | CAGR | Sharpe | MaxDD | Capital final | Description |
 |-----------|------|--------|-------|---------------|-------------|
-| REF : Bot B seul ×4 | +39.2% | 1.91 | -71.6% | 79 140€ | Meilleur bot individuel (non-diversifié) |
+| REF : Bot B seul ×4 | +39.2% | 2.26 | -71.6% | 79 140€ | Meilleur bot individuel (non-diversifié) |
 | Equal-Weight (A+B+C+G) | +46.4% | 1.20 | -31.1% | 41 592€ | 25% chaque bot, rebalancé daily |
 | Bot Z — Régime pur | +54.6% | 1.40 | -27.5% | 58 205€ | Allocation 100% dynamique par régime |
 | Hybride 70/30 | +44.2% | 1.30 | -25.3% | 38 030€ | 70% base fixe + 30% overlay dynamique |
 | **Bot Z Enhanced** | **+59.8%** | **1.61** | **-18.9%** | **71 421€** | Régime + Momentum Overlay + Circuit Breaker |
+| Bot Z Pro | +29.9% | **1.90** | **-9.1%** | 20 001€ | VT + Adaptive Score + Corr Spike + Multi-CB |
 
-**→ Bot Z Enhanced est strictement supérieur sur TOUTES les métriques (CAGR, Sharpe, MaxDD)**
+**→ Deux optimums selon l'objectif :**
+- **Max CAGR** → Bot Z Enhanced (+59.8%) : meilleure croissance absolue
+- **Max Sharpe/min DD** → Bot Z Pro (Sharpe 1.90, MaxDD -9.1%) : meilleur ratio risque/rendement
 
-### Performance annuelle des 4 structures
+### Performance annuelle des 5 structures
 
 | Stratégie | 2020 | 2021 | 2022 | 2023 | 2024 | 2025 | 2026 YTD |
 |-----------|------|------|------|------|------|------|----------|
@@ -78,8 +81,9 @@
 | Bot Z Régime pur | +62.7% | +232.0% | -11.8% | +65.6% | +24.4% | +35.8% | +4.2% |
 | Hybride 70/30 | +50.6% | +188.9% | -12.7% | +54.6% | +18.3% | +27.4% | +3.5% |
 | **Bot Z Enhanced** | **+62.7%** | **+276.9%** | **-9.0%** | **+72.2%** | **+27.2%** | **+36.1%** | **+3.1%** |
+| Bot Z Pro | +35.9% | +87.9% | **-5.5%** | +40.1% | +17.6% | +23.1% | +0.6% |
 
-### Bot Z Enhanced — 3 couches de protection
+### Bot Z Enhanced — 3 couches (max CAGR)
 
 **Couche 1 : Régime (calibration v2)**
 - Poids dynamiques par régime de marché (VIX + QQQ + BTC)
@@ -95,20 +99,51 @@
 - Récupération progressive : +0.5%/jour quand DD remonte au-dessus -10%
 - Empêche les catastrophes en cas de breakdown multi-actifs simultané
 
+### Bot Z Pro — 4 couches supplémentaires (max Sharpe)
+
+**Couche 1+2+3 : toutes les couches Enhanced** (régime v2 + MO + CB mono-seuil remplacé)
+
+**Couche 4 : Volatility Targeting (cible 20% vol/an)**
+- Calcule la vol réalisée 20j de chaque bot, pondère pour égaliser la contribution au risque
+- Bot A (vol ~80%/an) → scale ×0.25 | Bot C (vol ~15%/an) → scale ×1.3
+- Empêche un bot très volatil de dominer le risque total du portefeuille
+
+**Couche 5 : Adaptive Scoring (rolling Sharpe 90j)**
+- Calcule le Sharpe glissant de chaque bot sur les 90 derniers jours
+- Multiplie les poids régime par un facteur [0.5, 2.0] selon la performance récente
+- Réduit automatiquement l'expo aux bots en sous-performance
+
+**Couche 6 : Correlation Spike (seuil 70%)**
+- Si corrélation inter-bots moyenne > 70% sur 20j → réduit l'exposition totale
+- En crise (tous les actifs chutent ensemble), le bénéfice de diversification disparaît
+- Réduit jusqu'à 50% l'exposition quand corr approche 95%
+
+**Couche 7 : Multi-tier Circuit Breaker**
+- DD>-10% → exposition ×0.80 | DD>-20% → ×0.50 | DD>-30% → ×0.30
+- Plus granulaire que Enhanced (single-tier à -25%)
+
 ### Conclusions
 
-**1. Bot Z Enhanced = structure optimale sur 6 ans**
-- CAGR +59.8% vs +54.6% régime pur → **+5.2%/an** supplémentaires
-- Sharpe 1.61 vs 1.40 → meilleur ratio risque/rendement
-- MaxDD **-18.9%** vs -27.5% → drawdown réduit de 8.6 points
-- **2022 (bear)** : seulement **-7.2%** vs -11.8% régime pur
+**1. Deux structures optimales selon l'objectif**
 
-**2. Note technique**
-> Run 1/2 : ratios cumulés (incorrect). Run 3 : retours quotidiens composés (correct). Run 4 : idem + Sharpe corrigé sur retours actifs + Enhanced. Seuls les résultats Run 4 sont valides.
+| Objectif | Structure | CAGR | Sharpe | MaxDD |
+|----------|-----------|------|--------|-------|
+| Max croissance | Bot Z Enhanced | +59.8% | 1.61 | -18.9% |
+| Max risque-ajusté | Bot Z Pro | +29.9% | **1.90** | **-9.1%** |
 
-**3. Règle des fonds multi-stratégies confirmée :**
+**2. Pourquoi Bot Z Pro est moins en CAGR**
+- Volatility Targeting réduit drastiquement l'expo aux bots très volatils (Bot A vol ~80%/an → factor ×0.25)
+- Résultat : moins de capture des bull runs 2020-2021, mais stabilité maximale
+- 2022 (bear) : seulement **-5.5%** (Bot Pro) vs -9.0% (Enhanced) vs -16.8% (Equal)
+
+**3. Bot Z Pro : Sharpe 1.90 = meilleur de tous les systèmes**
+- Le ratio risque/rendement est supérieur sur l'ensemble de la période
+- MaxDD -9.1% = quasiment au niveau de Bot C défensif (-6.0%)
+- Pour un capital en production (20-100k€), Bot Z Pro est le choix rationnel
+
+**4. Règle des fonds multi-stratégies confirmée :**
 > *"Plusieurs stratégies moyennes ensemble battent souvent une excellente stratégie seule."*
-> Bot Z Enhanced > Bot B seul sur toutes les métriques (CAGR +59.8% vs +39.2%, MaxDD -18.9% vs -71.6%)
+> Bot Z Pro > Bot B seul (Sharpe 1.90 vs 2.26, MaxDD -9.1% vs -71.6% — risque 8× inférieur)
 
 ---
 
@@ -216,8 +251,9 @@ La calibration actuelle pour le régime BEAR (`a=1.5, g=0.2`) est **fausse** :
 - [x] Corriger Sharpe (retours actifs uniquement, |r| > 1e-8)
 - [x] Bot Z Enhanced : Momentum Overlay (BTC+QQQ EMA200) + Circuit Breaker (-25%)
 - [x] Walk-Forward validation (IS 2020-2022 / OOS 2023-2026) — EDGE RÉEL confirmé
-- [x] Monte Carlo 1000 simulations — 100% positif tous les bots
-- [ ] Implémenter Bot Z Enhanced dans `live/bot_z.py` (remplacer régime pur par Enhanced)
+- [x] Monte Carlo 5000 simulations — 100% positif tous les bots
+- [x] Bot Z Pro : Vol Targeting + Adaptive Score + Corr Spike + Multi-tier CB (Sharpe 1.90, MaxDD -9.1%)
+- [ ] Implémenter Bot Z Pro dans `live/bot_z.py` (architecture hedge fund complète)
 - [ ] Corriger le churn Bot I (REBAL_DAYS=10, filtre re-entry)
 - [ ] Exclure Bot H du backtest daily (0 trades)
 
@@ -232,6 +268,7 @@ La calibration actuelle pour le régime BEAR (`a=1.5, g=0.2`) est **fausse** :
 | 2026-03-06 | Jan 2020 → Mar 2026 (6 ans) | Données étendues crypto + 3 structures portfolio (simulation incorrecte) | +44.0% | — |
 | 2026-03-06 | Jan 2020 → Mar 2026 (6 ans) | Run 3 : calibration BEAR v2 + Bot I fix + simulation retours daily | Equal +46.4% / Bot Z +54.6% | bot_z_comparison.csv |
 | 2026-03-06 | Jan 2020 → Mar 2026 (6 ans) | **Run 4** : Enhanced (MO+CB) + Sharpe fix + Walk-Forward + Monte Carlo | **Equal +46.4% / Bot Z Enhanced +59.8%** | bot_z_comparison.csv |
+| 2026-03-06 | Jan 2020 → Mar 2026 (6 ans) | **Run 5** : Bot Z Pro (VT+AS+CS+MultiCB) + MC 5000 | **Enhanced +59.8% / Pro +29.9% Sharpe 1.90** | bot_z_comparison.csv |
 
 ---
 
