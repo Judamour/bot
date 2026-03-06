@@ -1,5 +1,5 @@
-Bot Z Meta v2 — Documentation complète (mise à jour 2026-03-06)
-================================================================
+Bot Z Meta v2+ — Documentation complète (mise à jour 2026-03-06)
+=================================================================
 
 SOURCE DE VÉRITÉ : architecture live Bot Z Meta v2
 Backtests → docs/BACKTEST_RESULTS.md | Stratégies → docs/BOTS.md
@@ -40,6 +40,10 @@ Résultats backtest (2020-2026, 6 ans, multi_backtest.py Run 10) :
   Meta v2 : CAGR +43.2% | Sharpe 1.70 | MaxDD -9.6% | 2022 +1.0%
   Distribution engines : ENHANCED 17% / OMEGA 30% / OMEGA_V2 28% / PRO 25%
 
+Améliorations Meta v2+ (implémentées 2026-03-06) :
+  Switch cost penalty, regime confidence×persistence, volatility targeting,
+  BTC realized vol override, corrélation inter-bots, allocation drift tracking.
+
 ---
 
 Entrées du cycle
@@ -70,6 +74,11 @@ Priorité :
 Momentum Overlay (couche supplémentaire) :
   - BTC bearish ET QQQ bearish → force BEAR (peu importe le régime de base)
   - BTC bearish OU QQQ bearish (un seul) → force HIGH_VOL si on était en BULL ou RANGE
+
+BTC Realized Vol Override (Meta v2+) :
+  - btc_vol_20d = std(BTC_returns_20_candles_4h) × sqrt(6×365)
+  - Si btc_vol_20d > BTC_HIGH_VOL_THRESHOLD (80%) ET régime BULL/RANGE → force HIGH_VOL
+  - Capte les crises crypto que VIX détecte avec retard
 
 Score de confiance calculé aussi (0–1) selon la force du signal :
   HIGH_VOL : min(1.0, (vix - 35) / 15 + 0.5)
@@ -136,7 +145,20 @@ Hard rules (priorité absolue)
 Scoring data-driven (si aucune hard rule)
 
   Pour chaque engine candidat :
-    score = 0.50 × regime_fit + 0.30 × quality_norm + 0.20 × inv_risk_norm
+    rf    = regime_fit × regime_confidence × regime_strength
+    score = 0.50 × rf + 0.30 × quality_norm + 0.20 × inv_risk_norm
+            - SWITCH_PENALTY (0.05) si engine ≠ current_engine
+
+  Switch cost penalty (Meta v2+) :
+    Évite les micro-switchs sur signaux marginaux. L'engine en place
+    bénéficie d'un avantage de 0.05 points, forçant un signal net pour switcher.
+
+  Regime confidence × persistence (Meta v2+) :
+    regime_confidence : score [0-1] selon la force du signal de régime
+    regime_strength   : min(1.0, days_in_current_regime / REGIME_PERSIST_DAYS)
+                        → 1j=0.14, 3j=0.43, 7j=1.0
+    rf = regime_fit × regime_confidence × regime_strength
+    En début de régime ou en transition → rf réduit → OMEGA favorisé (neutre)
 
   regime_fit — table fixe calibrée sur backtest 2020-2026 :
 
@@ -158,10 +180,10 @@ Scoring data-driven (si aucune hard rule)
     OMEGA_V2: favorisé en stress modéré → 0.3 + ((VIX-20)/20) × 0.7
     ENHANCED/OMEGA : favorisés quand vol basse → 1.0 - avg_vol / max_vol
 
-  Engine reasons loggés dans shadow.jsonl (depuis 2026-03-06) :
+  Engine reasons loggés dans shadow.jsonl :
     hard_rule_pro, block_enhanced, btc_bearish, qqq_bearish, vix,
-    port_dd_pct, regime, raw_engine, rolling_scores, bot_vols,
-    engine_switched, prev_engine
+    port_dd_pct, regime, regime_confidence, regime_strength, btc_realized_vol,
+    raw_engine, rolling_scores, bot_vols, engine_switched, prev_engine
 
 Hysteresis (confirmations requises avant switch)
 
@@ -213,8 +235,31 @@ Modulation qualité (sauf PRO) :
 
 Normalisation + caps :
   norm_weight[b] = raw_weight[b] / sum(raw_weights)
-  budget_eur[b] = min(z_capital × cb_factor × norm_weight[b], 4000€)
+  budget_eur[b] = min(z_capital × cb_factor_final × norm_weight[b], 4000€)
   Cap à 40% du capital initial (4 000€) par bot.
+
+Volatility targeting global (Meta v2+) :
+  portfolio_vol = std(z_capital_returns_20_cycles) × sqrt(2190)  # 6 cycles/jour
+  vol_factor    = clip(TARGET_PORTFOLIO_VOL / portfolio_vol, 0.3, 1.5)
+  cb_factor_vol = cb_factor × vol_factor
+  Si portfolio_vol ≈ target → vol_factor = 1.0 (pas d'impact)
+  Si portfolio_vol faible   → vol_factor > 1.0 (augmente expo progressivement)
+  Si portfolio_vol élevée   → vol_factor < 1.0 (réduit expo)
+  Sécurité : retourne TARGET_PORTFOLIO_VOL si variance ≈ 0 (début paper → vol_factor=1.0)
+
+Corrélation inter-bots dynamique (Meta v2+) :
+  avg_corr = mean(pearson(A,B), pearson(A,C), pearson(A,G), pearson(B,C), pearson(B,G), pearson(C,G))
+  fenêtre : 20 derniers trades par bot
+  Si avg_corr > CORR_REDUCE_THRESHOLD (70%) → cb_factor_vol × 0.80
+  Protection crise (liquidations simultanées = corrélations qui explosent)
+
+cb_factor_final = max(CB_MIN_FACTOR, cb_factor_vol × corr_factor)
+
+Allocation drift tracking (Meta v2+) :
+  drift = sum(|target_weight[b] - actual_weight[b]|) pour b in VALID_BOTS
+  actual_weight[b] = valeur_bot / total_portefeuille_réel
+  Loggé dans summary["alloc_drift"]. Warning si drift > 0.20 (20%).
+  Valide que l'allocation cible Bot Z correspond à la réalité paper.
 
 Priorité anti-surexposition actif (G > C > A > B) :
   Si un même actif est détenu par plus de 2 bots simultanément,
@@ -249,25 +294,31 @@ Persistance (logs/bot_z/state.json)
 
 Sauvegardé après chaque cycle :
 
-  Champ               Contenu
-  z_capital           Capital Bot Z actuel (€) — z_capital × (1+weighted_return)
-  cb_peak             Plus haut historique de z_capital
-  cb_factor           Facteur exposition (1.0=plein, 0.30=min)
-  current_engine      Engine actif
-  pending_engine      Engine en attente de confirmation
-  days_pending        Cycles de confirmation accumulés
-  last_bot_values     Valeurs de A/B/C/G au cycle précédent (pour MTM)
-  last_alloc_weights  Poids normalisés du cycle précédent
-  last_regime         Dernier régime détecté
-  last_regime_info    {regime, confidence, vix, qqq_ok}
-  last_allocation     Allocation complète du dernier cycle
-  last_cross_exposure Surexpositions par actif détectées
-  last_warnings       Alertes du dernier cycle
-  regime_history      500 derniers régimes avec timestamps
-  allocation_history  500 dernières allocations (budget_eur par bot)
-  total_simulated_eur Alias de z_capital (dashboard compat)
-  perf_pct            Performance % vs 10 000€ initial
-  days_running        Jours depuis PAPER_START_DATE (2026-03-06)
+  Champ                Contenu
+  z_capital            Capital Bot Z actuel (€) — z_capital × (1+weighted_return)
+  cb_peak              Plus haut historique de z_capital
+  cb_factor            Facteur CB brut (avant vol_factor et corr_factor)
+  current_engine       Engine actif
+  pending_engine       Engine en attente de confirmation
+  days_pending         Cycles de confirmation accumulés
+  days_in_regime       Jours consécutifs dans le régime actuel (persist factor)
+  last_bot_values      Valeurs de A/B/C/G au cycle précédent (pour MTM)
+  last_alloc_weights   Poids normalisés du cycle précédent
+  z_capital_history    Dernières 25 valeurs de z_capital (pour portfolio_vol)
+  last_portfolio_vol   Vol annualisée du portefeuille (20 cycles)
+  last_vol_factor      Facteur vol targeting appliqué ce cycle
+  last_avg_corr        Corrélation moyenne inter-bots (20 trades)
+  last_alloc_drift     Drift allocation cible vs réelle
+  last_regime          Dernier régime détecté
+  last_regime_info     {regime, confidence, vix, qqq_ok}
+  last_allocation      Allocation complète du dernier cycle
+  last_cross_exposure  Surexpositions par actif détectées
+  last_warnings        Alertes du dernier cycle
+  regime_history       500 derniers régimes avec timestamps + strength
+  allocation_history   500 dernières allocations (budget_eur par bot)
+  total_simulated_eur  Alias de z_capital (dashboard compat)
+  perf_pct             Performance % vs 10 000€ initial
+  days_running         Jours depuis PAPER_START_DATE (2026-03-06)
 
 Shadow log (logs/bot_z/shadow.jsonl) :
   Une ligne JSON par cycle, contient tout le résumé + engine_reason +
@@ -315,24 +366,36 @@ Lacunes connues et roadmap
      d'une position d'un sous-bot même si allocation tombe à 0€
 
 4. Revue 2026-04-30
-   → Analyser shadow.jsonl avec analyze_botz.py
+   → Analyser shadow.jsonl avec analyze_botz.py (drift, vol, corr, switches)
    → Décider passage en live ou ajustement paramètres
-   → Brancher budget dispatch si données suffisantes
+   → Brancher budget dispatch + risk budgeting par trade si données suffisantes
+
+5. Risk budgeting par trade (prochaine étape après revue)
+   → risk_per_trade_eur = 0.4% × z_capital (ex. 40€ sur 10 000€)
+   → size = risk_per_trade / |entry - stop|
+   → Effet estimé : Sharpe +15-30%, MaxDD -20-30%
 
 ---
 
-Configuration production (CLAUDE.md / multi_runner.py)
----------------------------------------------------------
+Configuration production (live/bot_z.py)
+-----------------------------------------
 
-  INITIAL_CAP        = 10 000€ (4 bots × 2 500€ notionnel)
-  PAPER_START_DATE   = 2026-03-06
-  PAPER_REVIEW_DATE  = 2026-04-30
-  TARGET_VOL         = 0.15 (vol cible 15% annualisée)
-  MAX_BOT_WEIGHT     = 0.40 (cap 40% = 4 000€ par bot)
-  MAX_ASSET_EXPOSURE = 0.30 (cap 30% sur un même actif)
-  MAX_BOTS_SAME_ASSET = 2  (max 2 bots longs sur le même actif)
-  CASH_VIX_THRESHOLD = 35.0 (VIX > 35 → 30% cash forcé)
-  CB_THRESHOLD       = -0.25 (-25% DD → réduction expo)
-  CB_MIN_FACTOR      = 0.30 (70% cash minimum en CB max)
-  CB_RECOVERY        = 0.005 (+0.5%/cycle de récupération)
-  BOT_PRIORITY       = [G, C, A, B] (résolution conflits actif)
+  INITIAL_CAP             = 10 000€ (4 bots × 2 500€ notionnel)
+  PAPER_START_DATE        = 2026-03-06
+  PAPER_REVIEW_DATE       = 2026-04-30
+  TARGET_VOL              = 0.15   (vol cible rolling score par bot)
+  MAX_BOT_WEIGHT          = 0.40   (cap 40% = 4 000€ par bot)
+  MAX_ASSET_EXPOSURE      = 0.30   (cap 30% sur un même actif)
+  MAX_BOTS_SAME_ASSET     = 2      (max 2 bots longs sur le même actif)
+  CASH_VIX_THRESHOLD      = 35.0   (VIX > 35 → 30% cash forcé)
+  CB_THRESHOLD            = -0.25  (-25% DD → réduction exposition)
+  CB_MIN_FACTOR           = 0.30   (70% cash minimum en CB max)
+  CB_RECOVERY             = 0.005  (+0.5%/cycle de récupération)
+  BOT_PRIORITY            = [G, C, A, B] (résolution conflits actif)
+
+  — Améliorations Meta v2+ —
+  SWITCH_PENALTY          = 0.05   (pénalité score si changement d'engine)
+  TARGET_PORTFOLIO_VOL    = 0.20   (vol cible portefeuille — vol targeting global)
+  BTC_HIGH_VOL_THRESHOLD  = 0.80   (BTC 20d annualized vol > 80% → force HIGH_VOL)
+  CORR_REDUCE_THRESHOLD   = 0.70   (corrélation inter-bots > 70% → expo ×0.80)
+  REGIME_PERSIST_DAYS     = 7      (jours pour confiance pleine dans un régime)
