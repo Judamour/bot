@@ -217,3 +217,72 @@ Bot G a CAGR +19% mais Sharpe 0.67 (vs 2.14-3.38 pour les autres). Cela signifie
 6. **Robustesse sur 10 ans ?** Le backtest couvre 2020-2026 (6 ans dont 2 bull crypto exceptionnels). Quelle serait la performance sur 2016-2026 (10 ans, incluant le premier bull-bear cycle BTC) ?
 
 7. **Corrélation A/B** : Les deux bots les plus performants (A +35% et B +39%) sont-ils trop corrélés ? En 2022 les deux perdent ~-45%. Bot Z devrait switcher vers C et G — est-ce que ça protège suffisamment ?
+
+---
+
+## 12. Réponses ChatGPT — Audit Run 11 (2026-03-06)
+
+### Verdict global
+
+> "Ton système est probablement dans les 1-2% des bots retail les plus sérieux."
+> "Structure identique aux CTA funds : diversification + regime detection + vol targeting + circuit breaker + meta allocator."
+
+---
+
+### Réponses aux 7 questions
+
+**1. Bot A MaxDD -66%**
+Acceptable dans l'architecture multi-bots. A représente ~20-40% du portefeuille + Circuit Breaker.
+C'est pour ça que le MaxDD portefeuille est -9.6% et non -66%.
+**Le MaxDD individuel n'est pas un problème dans un système multi-stratégies.**
+
+**2. Bot B — Momentum post-2022**
+Le factor momentum traverse des cycles de **5 à 10 ans de sous-performance** — normal.
+Bot Z réduit l'exposition à B en bear. **Ne pas supprimer Bot B.**
+
+**3. Bot G — Sharpe 0.67**
+Point faible réel mais Bot G sert à la **diversification**.
+Un bot avec Sharpe faible peut améliorer le Sharpe global si sa corrélation avec les autres est faible.
+
+**4. Meta v2 vs Omega**
+Omega est meilleur sur le papier (+55.6% CAGR, Sharpe 1.96) mais est **statique**.
+Meta v2 choisit l'engine et s'adapte au régime → **plus robuste hors-échantillon**.
+
+**5. Dégradation IS → OOS (1.56 → 1.27)**
+Règle empirique quant : Sharpe OOS ≈ 60-80% du Sharpe IS.
+Ratio obtenu : 1.27 / 1.56 = **81%** → dans la norme haute. **Pas de sur-optimisation détectée.**
+
+**6. Robustesse sans bull 2020-2021**
+Système toujours rentable post-2021 : A ~+65%, G ~+24%, C ~+8%, B ~+8%.
+**L'edge ne dépend pas du seul bull crypto historique.**
+
+**7. Corrélation A/B**
+A=-47% et B=-43% en 2022 → corrélation élevée confirmée.
+Mais Bot Z corrige via regime switching + engine PRO (réduit A/B, augmente C/G).
+**Le risque est amorti par l'architecture.**
+
+---
+
+### 3 vrais risques identifiés (non évidents)
+
+1. **Dépendance à Bot A** — Bot A est le vrai moteur du CAGR. Si A perd son edge, le CAGR global chute significativement.
+
+2. **Déclin du momentum** — Bot B peut devenir inutile si les crypto trends disparaissent (marchés latéraux prolongés).
+
+3. **Vol_factor bloquant** — Si la volatilité du portefeuille explose, `vol_factor = 0.3` → quasi plus de trades. Risque de manquer un rebond en sous-exposant au pire moment.
+
+---
+
+### Point rassurant
+
+Monte Carlo 100% de simulations positives sur les 4 bots.
+> "C'est extrêmement rare. Ça veut dire edge robuste indépendant de l'ordre des trades."
+
+---
+
+### Action confirmée
+
+Ne pas toucher le modèle. 3 mois paper trading → vérifier corrélations, drift, switches, vol_factor.
+Puis budget dispatch réel.
+
+**Note** : ChatGPT mentionne "le point le plus dangereux du système" (non révélé) — à demander à la prochaine session.
