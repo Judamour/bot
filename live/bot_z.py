@@ -1,42 +1,40 @@
 """
-live/bot_z.py — Bot Z Enhanced — Paper Trading Production
-==========================================================
+live/bot_z.py — Bot Z Meta v2 — Paper Trading Production
+=========================================================
 Phase : PAPER TRADING (démarré 2026-03-06, revue 2026-04-30)
 Capital : 10 000€ (4 bots validés × 2 500€)
 
-Architecture Bot Z Enhanced (validée backtest 2020-2026, Run 4) :
+Architecture Bot Z Meta v2 (validée backtest 2020-2026, Run 10) :
   Bots A, B, C, G (state files) + Macro (VIX, QQQ, BTC)
       ↓
-  Regime Engine (4 régimes VIX+QQQ+BTC)
+  Regime Engine (4 régimes VIX+QQQ+BTC + Momentum Overlay)
       ↓
-  Momentum Overlay (BTC < EMA200 AND QQQ < SMA200 → force BEAR)
+  Meta Engine Selector (ENHANCED / OMEGA / OMEGA_V2 / PRO)
       ↓
-  Portfolio Engine (régime pur, allocation 100% dynamique)
+  Portfolio Engine (allocation dynamique selon engine actif)
       ↓
-  Circuit Breaker (-25% DD → expo 30%, récupération +0.5%/j)
+  Circuit Breaker (seuils adaptés par engine)
       ↓
   logs/bot_z/shadow.jsonl + logs/bot_z/state.json
 
-Régimes + Momentum Overlay :
-  BULL     : QQQ > SMA200 + BTC bull + VIX < 25
-  RANGE    : QQQ > SMA200 + VIX entre 18 et 30
-  BEAR     : QQQ < SMA200 ou VIX > 30 — ou forcé par MO (BTC+QQQ bearish)
-  HIGH_VOL : VIX > 35 — ou forcé par MO (un seul indicateur bearish)
+Sélection d'engine (Meta v2) :
+  Hard rules (non-négociables) :
+    PRO forcé si (BTC+QQQ both bearish ET VIX>26) OU VIX>32 OU DD<-12%
+    ENHANCED bloqué si BTC ou QQQ bearish
 
-Calibration BEAR v2 (prouvée 2022 : -9% vs -17% equal-weight) :
-  BULL     : G×1.2, B×1.0, A×0.8, C×0.5
-  RANGE    : A×1.0, G×0.8, B×0.8, C×0.7
-  BEAR     : C×1.5, G×1.2, A×0.3, B×0.0  ← SEULS défensifs 2022
-  HIGH_VOL : C×1.0, G×0.8, A×0.5, B×0.3
+  Scoring data-driven (si pas de hard rule) :
+    score = 0.50 × regime_fit + 0.30 × rolling_quality + 0.20 × inverse_vol
+    → engine avec meilleur score (hysteresis 7/5/4/3 jours)
 
-Circuit Breaker :
-  DD portefeuille < -25% → cb_factor réduit à 0.30 (70% cash)
-  Récupération progressive +0.5%/jour quand DD > -10%
+Engines disponibles :
+  ENHANCED  : régime pur v2 (BULL max CAGR) — Sharpe 1.61, MaxDD -18.9%
+  OMEGA     : ER/Risk proxy + softmax quality — base neutre + quality boost
+  OMEGA_V2  : OMEGA + Risk Parity (blend inverse-vol) — Sharpe 2.03, MaxDD -7.6%
+  PRO       : défensif pur C+G, VIX scaling — Sharpe 1.90, MaxDD -9.1%
 
 Résultats backtest (2020-2026, 6 ans) :
-  Enhanced : CAGR +59.8% | Sharpe 1.61 | MaxDD -18.9%
-  2022 bear : -9.0% (vs -16.8% equal-weight) — edge BEAR confirmé
-  Walk-forward OOS 2023-2026 : +41.5% — edge réel (non sur-ajusté)
+  Meta v2 : CAGR +43.2% | Sharpe 1.70 | MaxDD -9.6% | 2022 +1.0%
+  Distribution : ENHANCED 17% / OMEGA 30% / OMEGA_V2 28% / PRO 25%
 """
 import json
 import os
@@ -97,6 +95,89 @@ BOT_NAMES = {
     "g": "Trend Multi-Asset",
 }
 
+# ── Engine weights — Meta v2 ─────────────────────────────────────────────────
+# ENHANCED = REGIME_WEIGHTS (ci-dessus)
+PRO_WEIGHTS = {
+    "BULL":     {"a": 0.2, "b": 0.0, "c": 1.8, "g": 1.0},
+    "RANGE":    {"a": 0.3, "b": 0.0, "c": 1.8, "g": 1.0},
+    "BEAR":     {"a": 0.1, "b": 0.0, "c": 2.0, "g": 1.0},
+    "HIGH_VOL": {"a": 0.2, "b": 0.0, "c": 1.8, "g": 1.0},
+}
+OMEGA_WEIGHTS = {  # base neutre + quality scoring fait le tri
+    "BULL":     {"a": 0.9, "b": 1.1, "c": 0.7, "g": 1.0},
+    "RANGE":    {"a": 1.0, "b": 0.9, "c": 0.8, "g": 0.9},
+    "BEAR":     {"a": 0.4, "b": 0.1, "c": 1.3, "g": 1.1},
+    "HIGH_VOL": {"a": 0.6, "b": 0.4, "c": 1.2, "g": 1.0},
+}
+
+ENGINE_REGIME_FIT = {
+    "ENHANCED": {"BULL": 1.0, "RANGE": 0.6, "HIGH_VOL": 0.3, "BEAR": 0.1},
+    "OMEGA":    {"BULL": 0.8, "RANGE": 0.8, "HIGH_VOL": 0.7, "BEAR": 0.5},
+    "OMEGA_V2": {"BULL": 0.5, "RANGE": 0.7, "HIGH_VOL": 0.9, "BEAR": 0.8},
+    "PRO":      {"BULL": 0.3, "RANGE": 0.5, "HIGH_VOL": 0.8, "BEAR": 1.0},
+}
+META_ENGINE_HYSTERESIS = {"ENHANCED": 7, "OMEGA": 5, "OMEGA_V2": 4, "PRO": 3}
+
+
+# ── Sélecteur d'engine Meta v2 ────────────────────────────────────────────────
+
+def select_engine_live(vix: float, btc_bearish: bool, qqq_bearish: bool,
+                       port_dd: float, regime: str,
+                       rolling_scores: dict, bot_vols: dict) -> str:
+    """
+    Sélectionne l'engine optimal pour ce cycle (production, sans shadow tracking).
+
+    Hard rules (non-négociables) :
+      PRO forcé si (BTC+QQQ both bearish ET VIX>26) OU VIX>32 OU DD<-12%
+      ENHANCED bloqué si BTC ou QQQ bearish
+
+    Scoring (si pas de hard rule) :
+      score = 0.50 × regime_fit + 0.30 × rolling_quality_norm + 0.20 × inverse_vol_norm
+    """
+    # Hard rules
+    force_pro = ((btc_bearish and qqq_bearish and vix > 26) or vix > 32 or port_dd < -0.12)
+    if force_pro:
+        return "PRO"
+    block_enhanced = btc_bearish or qqq_bearish
+
+    # Normalisation des proxies de qualité et risque
+    max_quality = max(rolling_scores.values()) if rolling_scores else 1.0
+    avg_quality = (sum(rolling_scores.values()) / len(rolling_scores)) if rolling_scores else 1.0
+    quality_norm = avg_quality / max_quality if max_quality > 0 else 0.5
+
+    max_vol = max(bot_vols.values()) if bot_vols else TARGET_VOL
+    avg_vol = (sum(bot_vols.values()) / len(bot_vols)) if bot_vols else TARGET_VOL
+
+    best_engine = None
+    best_score  = -1.0
+    candidates  = ["ENHANCED", "OMEGA", "OMEGA_V2", "PRO"]
+
+    for eng in candidates:
+        if eng == "ENHANCED" and block_enhanced:
+            continue
+
+        rf = ENGINE_REGIME_FIT[eng].get(regime, 0.5)
+
+        # Inverse vol : chaque engine a un profil différent
+        if eng == "PRO":
+            # PRO favorisé quand vol haute
+            inv_risk_norm = min(1.0, avg_vol / max(TARGET_VOL, 0.01))
+        elif eng == "OMEGA_V2":
+            # OMEGA_V2 favorisé en stress modéré
+            stress = max(0.0, (vix - 20) / 20.0)
+            inv_risk_norm = min(1.0, 0.3 + stress * 0.7)
+        else:
+            # ENHANCED/OMEGA : favorisés quand vol basse
+            inv_risk_norm = max(0.0, 1.0 - avg_vol / max(max_vol, 0.01))
+
+        score = 0.50 * rf + 0.30 * quality_norm + 0.20 * inv_risk_norm
+
+        if score > best_score:
+            best_score  = score
+            best_engine = eng
+
+    return best_engine or "OMEGA"
+
 
 def load_state() -> dict:
     if os.path.exists(STATE_FILE):
@@ -109,6 +190,9 @@ def load_state() -> dict:
         "paper_review_date": PAPER_REVIEW_DATE,
         "cb_peak": INITIAL_CAP,
         "cb_factor": 1.0,
+        "current_engine": "OMEGA",
+        "pending_engine": "OMEGA",
+        "days_pending": 0,
         "regime_history": [],
         "allocation_history": [],
         "shadow_trades": [],
@@ -275,20 +359,31 @@ def compute_bot_volatility(state: dict, window: int = 20) -> float:
 # ── Allocation principale ────────────────────────────────────────────────────
 
 def compute_shadow_allocation(regime: str, all_states: dict, macro: dict,
-                              cb_factor: float = 1.0) -> dict:
+                              cb_factor: float = 1.0,
+                              engine: str = "ENHANCED") -> dict:
     """
-    Calcule l'allocation Bot Z Enhanced pour chaque bot.
+    Calcule l'allocation Bot Z Meta v2 pour chaque bot.
 
-    Structure : régime pur 100% dynamique + circuit breaker
-      - Poids par régime (calibration v2, validée backtest 2022)
-      - Modulation par qualité récente (rolling score)
+    Structure : engine sélectionné + circuit breaker
+      - Poids par engine/régime (ENHANCED, OMEGA, OMEGA_V2, PRO)
+      - OMEGA_V2 : blend 50% OMEGA + 50% inverse-vol (risk parity)
+      - Modulation par qualité récente (rolling score, sauf PRO)
       - Exposition finale × cb_factor (circuit breaker)
       - Cap par bot 40%
 
     Retourne {bot_id: {budget_eur, budget_pct, weight_*, cb_factor, open_positions}}
     """
     vix      = macro.get("vix", 15.0)
-    regime_w = REGIME_WEIGHTS.get(regime, REGIME_WEIGHTS["RANGE"])
+
+    # Choisir le tableau de poids selon l'engine
+    if engine == "PRO":
+        base_w = PRO_WEIGHTS.get(regime, PRO_WEIGHTS["RANGE"])
+    elif engine in ("OMEGA", "OMEGA_V2"):
+        base_w = OMEGA_WEIGHTS.get(regime, OMEGA_WEIGHTS["RANGE"])
+    else:  # ENHANCED (défaut)
+        base_w = REGIME_WEIGHTS.get(regime, REGIME_WEIGHTS["RANGE"])
+
+    regime_w = base_w
     exposure = get_exposure(all_states)
 
     # Cash forcé si VIX > seuil
@@ -302,7 +397,27 @@ def compute_shadow_allocation(regime: str, all_states: dict, macro: dict,
     for bot_id, state in all_states.items():
         rw      = regime_w.get(bot_id, 0.0)
         quality = compute_rolling_score(bot_id, state)
-        raw_weights[bot_id] = rw * quality
+        # PRO : pas de boost qualité (défensif pur, C+G fixes)
+        if engine == "PRO":
+            raw_weights[bot_id] = rw
+        else:
+            raw_weights[bot_id] = rw * quality
+
+    # OMEGA_V2 : blend 50% OMEGA weights + 50% inverse-vol (risk parity)
+    if engine == "OMEGA_V2":
+        bot_vols = {b: compute_bot_volatility(s) for b, s in all_states.items()}
+        max_vol  = max(bot_vols.values()) if bot_vols else TARGET_VOL
+        inv_vols = {b: (1.0 / max(v, 0.01)) for b, v in bot_vols.items()}
+        total_iv = sum(inv_vols.values()) or 1.0
+        rp_weights = {b: inv_vols[b] / total_iv for b in inv_vols}
+
+        total_omega = sum(raw_weights.values()) or 1.0
+        omega_norm  = {b: raw_weights[b] / total_omega for b in raw_weights}
+
+        # Blend 50/50
+        blended = {b: 0.5 * omega_norm.get(b, 0) + 0.5 * rp_weights.get(b, 0)
+                   for b in raw_weights}
+        raw_weights = blended
 
     total_w = sum(raw_weights.values()) or 1.0
     norm_weights = {k: v / total_w for k, v in raw_weights.items()}
@@ -332,12 +447,13 @@ def compute_shadow_allocation(regime: str, all_states: dict, macro: dict,
         allocation[bot_id] = {
             "budget_eur":    round(total_eur, 0),
             "budget_pct":    round(budget_pct * 100, 1),
-            "weight_regime": round(regime_w.get(bot_id, 0.0), 2),
+            "weight_regime": round(base_w.get(bot_id, 0.0), 2),
             "weight_quality": round(quality_w, 2),
             "weight_final":  round(w, 3),
             "cb_factor":     round(cb_factor, 2),
             "bot_name":      BOT_NAMES.get(bot_id, bot_id),
             "open_positions": list(positions.keys()),
+            "engine":        engine,
         }
 
     return allocation
@@ -411,19 +527,61 @@ def run_bot_z_cycle(macro: dict) -> dict:
 
     cb_active = cb_factor < 1.0
 
-    # 4. Allocation Enhanced (régime pur + CB)
-    allocation = compute_shadow_allocation(regime, all_states, macro, cb_factor)
+    # 4. Meta v2 — Sélection d'engine avec hysteresis
+    vix = macro.get("vix", 15.0)
+    btc_trend   = macro.get("btc_context", {}).get("btc_trend", "bull")
+    btc_bearish = btc_trend in ("bear", "strong_bear")
+    qqq_bearish = not macro.get("qqq_regime_ok", True)
 
-    # 5. Analyse exposition croisée
+    rolling_scores = {b: compute_rolling_score(b, s) for b, s in all_states.items()}
+    bot_vols       = {b: compute_bot_volatility(s)   for b, s in all_states.items()}
+
+    raw_engine     = select_engine_live(vix, btc_bearish, qqq_bearish,
+                                        port_dd, regime, rolling_scores, bot_vols)
+
+    # Hysteresis : on attend N jours de confirmation avant de switcher
+    current_engine = state.get("current_engine", "OMEGA")
+    pending_engine = state.get("pending_engine", raw_engine)
+    days_pending   = state.get("days_pending", 0)
+
+    if raw_engine != pending_engine:
+        pending_engine = raw_engine
+        days_pending   = 0
+    else:
+        days_pending += 1
+
+    if days_pending >= META_ENGINE_HYSTERESIS.get(pending_engine, 5):
+        current_engine = pending_engine
+
+    # CB seuils adaptés par engine (PRO plus sensible)
+    cb_tiers = {
+        "ENHANCED": [(-0.25, CB_MIN_FACTOR)],
+        "OMEGA":    [(-0.25, CB_MIN_FACTOR)],
+        "OMEGA_V2": [(-0.20, 0.50), (-0.30, CB_MIN_FACTOR)],
+        "PRO":      [(-0.10, 0.80), (-0.20, 0.50), (-0.30, CB_MIN_FACTOR)],
+    }
+    tiers = cb_tiers.get(current_engine, [(-0.25, CB_MIN_FACTOR)])
+    target_factor = 1.0
+    for threshold, floor in sorted(tiers, key=lambda x: x[0]):
+        if port_dd < threshold:
+            target_factor = floor
+    if target_factor < cb_factor:
+        cb_factor = max(target_factor, cb_factor - 0.05)
+
+    # 5. Allocation Meta v2 (engine sélectionné + CB)
+    allocation = compute_shadow_allocation(regime, all_states, macro, cb_factor, current_engine)
+
+    # 6. Analyse exposition croisée
     cross = analyze_cross_exposure(all_states, allocation)
 
-    # 6. Warnings
+    # 7. Warnings
     warnings_list = []
     if cb_active:
         warnings_list.append(
             f"CIRCUIT BREAKER actif — DD={port_dd*100:.1f}% | expo={cb_factor*100:.0f}%"
         )
-    vix = macro.get("vix", 15.0)
+    if current_engine != "ENHANCED":
+        warnings_list.append(f"Engine actif : {current_engine} (pending={pending_engine}, j={days_pending})")
     if vix > CASH_VIX_THRESHOLD:
         warnings_list.append(f"HIGH_VOL forcé (VIX={vix:.1f} > {CASH_VIX_THRESHOLD})")
     for sym, info in cross.items():
@@ -435,11 +593,11 @@ def run_bot_z_cycle(macro: dict) -> dict:
                 f"— priorité {prio_name}"
             )
 
-    # 7. Métriques de performance
+    # 8. Métriques de performance
     perf_pct = (total_simulated - INITIAL_CAP) / INITIAL_CAP * 100
     days_running = (datetime.now() - datetime.fromisoformat(PAPER_START_DATE)).days
 
-    # 8. Construction du résumé
+    # 9. Construction du résumé
     summary = {
         "timestamp":          ts,
         "regime":             regime,
@@ -460,15 +618,22 @@ def run_bot_z_cycle(macro: dict) -> dict:
         "days_running":       days_running,
         "paper_start":        PAPER_START_DATE,
         "paper_review":       PAPER_REVIEW_DATE,
+        "current_engine":     current_engine,
+        "pending_engine":     pending_engine,
+        "days_pending":       days_pending,
     }
 
-    # 9. Log shadow
+    # 10. Log shadow
     _log_shadow(summary)
 
-    # 10. Mise à jour state
-    state["cb_peak"]   = round(cb_peak, 2)
-    state["cb_factor"] = round(cb_factor, 3)
-    state["regime_history"].append({"ts": ts, "regime": regime, "confidence": regime_info["confidence"]})
+    # 11. Mise à jour state
+    state["cb_peak"]        = round(cb_peak, 2)
+    state["cb_factor"]      = round(cb_factor, 3)
+    state["current_engine"] = current_engine
+    state["pending_engine"] = pending_engine
+    state["days_pending"]   = days_pending
+    state["regime_history"].append({"ts": ts, "regime": regime, "engine": current_engine,
+                                    "confidence": regime_info["confidence"]})
     state["regime_history"] = state["regime_history"][-500:]
     state["allocation_history"].append({"ts": ts, "allocation": {k: v["budget_eur"] for k, v in allocation.items()}})
     state["allocation_history"] = state["allocation_history"][-500:]
@@ -507,12 +672,18 @@ def print_bot_z_summary(summary: dict):
     days      = summary.get("days_running", 0)
     review    = summary.get("paper_review", PAPER_REVIEW_DATE)
     cb_c      = Fore.RED if cb_active else Fore.GREEN
+    engine    = summary.get("current_engine", "ENHANCED")
+    eng_colors = {"ENHANCED": Fore.GREEN, "OMEGA": Fore.CYAN,
+                  "OMEGA_V2": Fore.YELLOW, "PRO": Fore.RED}
+    ec        = eng_colors.get(engine, Fore.WHITE)
 
     print(f"\n{Fore.CYAN}{'─'*78}")
-    print(f"  BOT Z ENHANCED — PAPER TRADING | {ts}")
+    print(f"  BOT Z META v2 — PAPER TRADING | {ts}")
     print(f"  Jour {days} / revue {review} | Capital initial : {INITIAL_CAP:.0f}€")
     print(f"  Régime : {c}{r}{Style.RESET_ALL} (conf={conf:.0%}) | VIX={summary['vix']:.1f} | "
           f"QQQ={'✓' if summary['qqq_ok'] else '✗'} | BTC={summary['btc_trend']}")
+    print(f"  Engine : {ec}{engine}{Style.RESET_ALL} "
+          f"(pending={summary.get('pending_engine','?')}, j={summary.get('days_pending',0)})")
     print(f"  CB : {cb_c}×{cb_factor:.0%}{Style.RESET_ALL} (DD={port_dd:+.1f}%) | "
           f"Expo effective : {INITIAL_CAP * cb_factor:.0f}€")
     print(f"{'─'*78}{Style.RESET_ALL}")
