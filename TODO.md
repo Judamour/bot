@@ -79,7 +79,58 @@
 
 - [ ] **Kraken xStocks live** — Passer PAPER_TRADING=false après revue ~1 mois
 
-## Notes audit ChatGPT (2026-03-06) — A relire en debut de session
+## Améliorations Bot Z Meta v2 — Pipeline (audit ChatGPT 2026-03-06)
+
+### Déjà implémenté (ne pas refaire)
+- [x] Regime confidence score — `detect_regime_score()` retourne confidence [0-1]
+- [x] Strategy decay partial — quality ramp-up (5→20 trades) + Omega v2 meta-learning
+- [x] Multi-tier CB par engine — PRO 3 tiers, OMEGA_V2 2 tiers
+- [x] Anti-surexposition actif — max 2 bots même actif, priorité G>C>A>B
+
+### A implémenter — par priorité
+
+- [ ] **[CRITIQUE avant live] Allocation drift tracking**
+      Mesurer l'écart entre allocation cible (Bot Z) et allocation réelle (positions sub-bots).
+      `drift = sum(|poids_cible[b] - poids_reel[b]|) for b in VALID_BOTS`
+      Si drift > 0.20 → warning log + Telegram. Valide que backtest ≈ paper live.
+      Sans ça, le Sharpe 1.70 du backtest n'a pas de valeur opérationnelle.
+
+- [ ] **[PRIORITE 1] Volatility targeting global du portefeuille**
+      `portfolio_vol = std(z_capital_returns_20d) * sqrt(252)`
+      `vol_factor = clip(TARGET_VOL / portfolio_vol, 0.3, 1.5)`
+      `exposition = z_capital * cb_factor * vol_factor`  (avant calcul budgets)
+      Effet estimé : Sharpe 1.70 → ~1.9 | MaxDD -9.6% → ~-7%
+      Référence : AQR, Man AHL, Winton — tous utilisent VT comme brique de base.
+      TARGET_VOL = 0.20 (20% annualisé — adapté crypto+stocks)
+
+- [ ] **[PRIORITE 2] Switch cost penalty dans le scoring**
+      Ajouter `-0.05` au score d'un engine différent du current_engine.
+      `if candidate != current_engine: score -= SWITCH_PENALTY`
+      Evite les micro-switchs sur signaux marginaux. Moins de friction de performance.
+
+- [ ] **[PRIORITE 3] Regime confidence dans le scoring** (trivial — déjà calculé)
+      Utiliser `regime_confidence` dans la formule :
+      `score = 0.50 * regime_fit * regime_confidence + 0.30 * quality + 0.20 * inv_risk`
+      En transition de régime (confidence 0.6), pondère moins le regime_fit → privilégie OMEGA.
+
+- [ ] **[PRIORITE 4] Regime persistence factor**
+      `regime_strength = min(1.0, days_in_current_regime / 7.0)`
+      facteurs : 1j→0.6 | 3j→0.8 | 7j→1.0
+      `regime_fit *= regime_strength`
+      Evite les faux signaux en début de régime.
+
+- [ ] **[PRIORITE 5] Crypto realized vol pour régime**
+      VIX est aveugle aux crises crypto. Ajouter :
+      `btc_vol_20d = std(btc_daily_returns_20d) * sqrt(252)`
+      Si btc_vol_20d > 0.80 ET régime BULL/RANGE → forcer HIGH_VOL
+      Capte les crashes crypto que VIX détecte avec retard.
+
+- [ ] **[PRIORITE 6] Corrélation dynamique des bots**
+      `avg_corr = mean(corr(returns_A,B), corr(A,C), corr(A,G), corr(B,C), corr(B,G), corr(C,G))`
+      fenêtre 20 trades. Si avg_corr > 0.70 → `portfolio_exposure *= 0.8`
+      Protection crise (liquidations simultanées = corrélations qui explosent).
+
+### Notes audit ChatGPT (2026-03-06) — A relire en debut de session
 
 ### 1. Risk Budgeting par trade — upgrade Sharpe
 Principe : chaque trade risque X% du portefeuille total, peu importe le bot ou l'actif.
