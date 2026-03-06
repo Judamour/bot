@@ -1,0 +1,7 @@
+bot,cagr,sharpe,max_dd,profit_factor,trades,win_rate,final
+Bot A — Supertrend+MR,13.4,3.68,-66.6,2.91,144,44.4,1949.0
+Bot B — Momentum,15.3,2.5,-72.1,1.94,40,25.0,2135.0
+Bot C — Breakout,8.5,0.94,-5.1,2.87,35,48.6,1293.0
+Bot G — Trend Multi-Asset,10.1,0.41,-16.0,3.99,87,56.3,1668.0
+Bot H — VCB Breakout,0.0,0.0,0.0,0.0,0,0.0,1000.0
+Bot I — RS Leaders,-3.9,-0.86,-19.7,0.0,127,0.0,807.0
