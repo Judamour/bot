@@ -39,7 +39,7 @@
       --eng-pro:      #ff4444;
     }
 
-    html, body { height: 100%; background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira Code', 'JetBrains Mono', monospace; font-size: 13px; }
+    html, body { min-height: 100%; background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira Code', 'JetBrains Mono', monospace; font-size: 13px; }
 
     /* ── Header ── */
     .header {
@@ -386,7 +386,9 @@
     </div>
     <div class="card">
       <div class="card-title">Allocation dispatching</div>
-      <canvas id="alloc-chart" height="220"></canvas>
+      <div style="position:relative; height:220px;">
+        <canvas id="alloc-chart"></canvas>
+      </div>
     </div>
   </div>
 
@@ -528,7 +530,10 @@ let allocChart   = null;
 let stratCharts  = {};
 let historyData  = [];
 
-// ── Tab switching ────────────────────────────────────────────────────────────
+// ── Tab switching — lazy load pour éviter Chart.js resize loop dans display:none ──
+
+let _stratLoaded = false;
+let _labLoaded   = false;
 
 function switchTab(tab) {
   document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
@@ -537,6 +542,8 @@ function switchTab(tab) {
   const idx = ['portfolio','strategies','lab','logs'].indexOf(tab);
   document.querySelectorAll('.nav-btn')[idx].classList.add('active');
   if (tab === 'logs') loadLogs();
+  if (tab === 'strategies' && !_stratLoaded) { _stratLoaded = true; loadStrategies(); }
+  if (tab === 'lab'        && !_labLoaded)   { _labLoaded   = true; loadLab(); }
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -1026,10 +1033,10 @@ socket.on('sentiment_update', (data) => {
 // ── Init ─────────────────────────────────────────────────────────────────────
 
 async function init() {
+  // Charger UNIQUEMENT les charts visibles au démarrage (Portfolio tab)
+  // Les tabs cachés sont chargés lazily au premier clic — sinon Chart.js
+  // entre en boucle de resize infinie sur des éléments display:none
   await Promise.all([loadPortfolio(), loadHistory()]);
-  // Pre-load strategy cards for faster tab switch
-  await loadStrategies();
-  await loadLab();
 }
 
 init();
@@ -1040,9 +1047,9 @@ setInterval(() => {
   loadHistory();
 }, 60000);
 
-// Refresh strategies every 2 min
+// Refresh strategies every 2 min si tab visible
 setInterval(() => {
-  if (document.getElementById('tab-strategies').classList.contains('active')) {
+  if (_stratLoaded && document.getElementById('tab-strategies').classList.contains('active')) {
     loadStrategies();
   }
 }, 120000);
