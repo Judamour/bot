@@ -57,6 +57,18 @@
       → Fréquence switchs engine, % hard_rule_pro, durée par engine, CB activations
       → Vérifier que quality scores convergent (trade count par bot)
 
+- [ ] **Budget dispatch + Risk Budgeting par trade** (audit ChatGPT — upgrade prioritaire)
+      Aujourd'hui Bot Z envoie budget en € mais les bots tradent avec leurs règles internes.
+      Upgrade : Bot Z envoie aussi `risk_per_trade_eur` dans budget.json :
+        `{ "a": { "budget_eur": 2430, "risk_per_trade_eur": 40 }, ... }`
+      Chaque bot calcule : `size = risk_per_trade / |entry - stop|` (au lieu de capital × pct)
+      Tous les trades risquent le même montant → portefeuille beaucoup plus stable.
+      Effet estimé : Sharpe 1.70 → 1.9-2.1 | MaxDD -9.6% → -7 à -8%
+      Niveau 1 : nouvelles entrées seulement (sizing risk-based)
+      Niveau 2 : reduce_only si exposition > budget
+      Niveau 3 : sortie forcée graduelle si budget=0 prolongé
+      Bonus : max_portfolio_risk = 3% → bloque nouvelles positions si somme risques > 3%
+
 - [ ] **Script revue mensuelle** — Parser signals.jsonl → rapport win rate par contexte macro
       (VIX range, F&G range, BTC trend, acceptance rate Claude) → Telegram
 
@@ -66,6 +78,29 @@
 - [ ] **Time-based exit** — Sortir après 10 bougies (40h en 4h) sans atteindre le TP
 
 - [ ] **Kraken xStocks live** — Passer PAPER_TRADING=false après revue ~1 mois
+
+## Notes audit ChatGPT (2026-03-06) — A relire en debut de session
+
+### 1. Risk Budgeting par trade — upgrade Sharpe
+Principe : chaque trade risque X% du portefeuille total, peu importe le bot ou l'actif.
+  risk_per_trade = 0.4% × 10 000€ = 40€
+  size = 40€ / |entry - stop|
+Effet : Sharpe estimé +15-30% | MaxDD -20-30% | portefeuille plus prévisible et scalable.
+C'est la dernière étape avant un système professionnel. A brancher avec le budget dispatch.
+
+### 2. Strategy decay — vigilance long terme
+Trend/momentum/breakout sont tous corrélés au facteur "trend following".
+Protections déjà en place : multi-stratégies, meta-allocation, regime detection.
+Facteurs manquants à long terme :
+  - Volatility factor (long vol en crash, short vol en calme)
+  - Relative value / pairs trading (ETH/BTC, SPY/QQQ — décorrélé du trend)
+Règle quant : remplacer ~20% des stratégies tous les 3 ans.
+Bot Z est une plateforme évolutive — peut superviser 8-10 bots sans refonte.
+
+### 3. Verdict global ChatGPT
+"Architecture équivalente à un fonds multi-stratégies simplifié."
+Estimation réaliste performance live : CAGR 25-30% (backtests donnent souvent 2× le réel).
+Point le plus solide : walk-forward OOS 2023-2026 valide l'edge hors-échantillon.
 
 ## Fait (historique)
 
