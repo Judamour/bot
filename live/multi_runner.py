@@ -61,6 +61,9 @@ from strategies.trend_following_strategy import (
 from strategies.vcb_strategy import (
     run_vcb_cycle, load_state as load_vcb, save_state as save_vcb,
 )
+from strategies.rs_leaders_strategy import (
+    run_rs_leaders_cycle, load_state as load_rsl, save_state as save_rsl,
+)
 import live.bot as bot_a
 
 init(autoreset=True)
@@ -117,7 +120,8 @@ def _portfolio_value(state: dict, price_cache: dict = None) -> float:
 
 def print_contest_status(state_a: dict, state_b: dict, state_c: dict,
                           state_d: dict, state_e: dict, state_f: dict,
-                          state_g: dict, state_h: dict, daily_cache: dict = None):
+                          state_g: dict, state_h: dict, state_i: dict,
+                          daily_cache: dict = None):
     bots = [
         ("A — Supertrend+MR",    state_a),
         ("B — Momentum",         state_b),
@@ -127,6 +131,7 @@ def print_contest_status(state_a: dict, state_b: dict, state_c: dict,
         ("F — Claude Haiku",     state_f),
         ("G — Trend Multi-Asset", state_g),
         ("H — VCB Breakout",     state_h),
+        ("I — RS Leaders",       state_i),
     ]
 
     print(f"\n{Fore.CYAN}{'='*72}")
@@ -135,7 +140,7 @@ def print_contest_status(state_a: dict, state_b: dict, state_c: dict,
     print(f"{'Bot':<26} {'Libre':>10} {'Total':>10} {'Positions':>10} {'Trades':>8} {'Perf':>8}")
     print("-" * 72)
 
-    all_states = [state_a, state_b, state_c, state_d, state_e, state_f, state_g, state_h]
+    all_states = [state_a, state_b, state_c, state_d, state_e, state_f, state_g, state_h, state_i]
     for name, state in bots:
         total = _portfolio_value(state, daily_cache)
         init = state.get("initial_capital", INITIAL_CAPITAL_PER_BOT)
@@ -156,7 +161,7 @@ def print_contest_status(state_a: dict, state_b: dict, state_c: dict,
     combined_perf = (total_all - total_init) / total_init * 100 if total_init > 0 else 0
     color = Fore.GREEN if combined_perf > 0 else Fore.RED
     print("-" * 72)
-    print(f"{'TOTAL (8000€ base)':<26} {'':>10} {total_all:>8.2f}€  "
+    print(f"{'TOTAL (9000€ base)':<26} {'':>10} {total_all:>8.2f}€  "
           f"{'':>10} {'':>8}  {color}{combined_perf:>+6.1f}%{Style.RESET_ALL}")
     print(f"{Fore.CYAN}{'='*72}{Style.RESET_ALL}\n")
 
@@ -186,6 +191,7 @@ def run():
     os.makedirs("logs/haiku_llm",  exist_ok=True)
     os.makedirs("logs/trend",      exist_ok=True)
     os.makedirs("logs/vcb",        exist_ok=True)
+    os.makedirs("logs/rs_leaders", exist_ok=True)
 
     log(f"{'='*60}", "INFO")
     log("  MULTI-BOT CONTEST STARTED", "INFO")
@@ -197,7 +203,8 @@ def run():
     log(f"  Bot F: Claude Haiku       → logs/haiku_llm/state.json", "INFO")
     log(f"  Bot G: Trend Multi-Asset  → logs/trend/state.json", "INFO")
     log(f"  Bot H: VCB Breakout       → logs/vcb/state.json", "INFO")
-    log(f"  Capital initial: {INITIAL_CAPITAL_PER_BOT:.0f}€ × 8 = {INITIAL_CAPITAL_PER_BOT*8:.0f}€", "INFO")
+    log(f"  Bot I: RS Leaders         → logs/rs_leaders/state.json", "INFO")
+    log(f"  Capital initial: {INITIAL_CAPITAL_PER_BOT:.0f}€ × 9 = {INITIAL_CAPITAL_PER_BOT*9:.0f}€", "INFO")
     log(f"{'='*60}", "INFO")
 
     state_a = load_state_a()
@@ -208,6 +215,7 @@ def run():
     state_f = load_hai()
     state_g = load_trd()
     state_h = load_vcb()
+    state_i = load_rsl()
 
     log(f"Bot A capital: {state_a['capital']:.2f}€ | Positions: {list(state_a['positions'].keys())}")
     log(f"Bot B capital: {state_b['capital']:.2f}€ | Positions: {list(state_b['positions'].keys())}")
@@ -217,6 +225,7 @@ def run():
     log(f"Bot F capital: {state_f['capital']:.2f}€ | Positions: {list(state_f['positions'].keys())}")
     log(f"Bot G capital: {state_g['capital']:.2f}€ | Positions: {list(state_g['positions'].keys())}")
     log(f"Bot H capital: {state_h['capital']:.2f}€ | Positions: {list(state_h['positions'].keys())}")
+    log(f"Bot I capital: {state_i['capital']:.2f}€ | Positions: {list(state_i['positions'].keys())}")
 
     while True:
         try:
@@ -368,11 +377,21 @@ def run():
                 f"Trades: {len(state_h['trades'])}"
             )
 
-            # ── 12. Contest summary ───────────────────────────────────────────
-            print_contest_status(state_a, state_b, state_c, state_d, state_e, state_f, state_g, state_h, ohlcv_daily)
+            # ── 12. Bot I: RS Leaders ─────────────────────────────────────────
+            log(f"\n{Fore.CYAN}--- Bot I: RS Leaders ---{Style.RESET_ALL}")
+            state_i = run_rs_leaders_cycle(state_i, ohlcv_daily, macro)
+            save_rsl(state_i)
+            log(
+                f"[I] Capital: {state_i['capital']:.2f}€ | "
+                f"Positions: {list(state_i['positions'].keys())} | "
+                f"Trades: {len(state_i['trades'])}"
+            )
 
-            # ── 13. Drawdown checks ───────────────────────────────────────────
-            for name, state in [("A", state_a), ("B", state_b), ("C", state_c), ("D", state_d), ("E", state_e), ("F", state_f), ("G", state_g), ("H", state_h)]:
+            # ── 13. Contest summary ───────────────────────────────────────────
+            print_contest_status(state_a, state_b, state_c, state_d, state_e, state_f, state_g, state_h, state_i, ohlcv_daily)
+
+            # ── 14. Drawdown checks ───────────────────────────────────────────
+            for name, state in [("A", state_a), ("B", state_b), ("C", state_c), ("D", state_d), ("E", state_e), ("F", state_f), ("G", state_g), ("H", state_h), ("I", state_i)]:
                 total = _portfolio_value(state, ohlcv_daily)
                 init = state.get("initial_capital", INITIAL_CAPITAL_PER_BOT)
                 dd = (total - init) / init
@@ -384,10 +403,10 @@ def run():
                         f"Seuil: {config.MAX_DRAWDOWN*100:.0f}%"
                     )
 
-            # ── 14. Snapshot journalier pour Bot A ────────────────────────────
+            # ── 15. Snapshot journalier pour Bot A ────────────────────────────
             bot_a._check_daily_snapshot(state_a)
 
-            # ── 15. Wait for next cycle ───────────────────────────────────────
+            # ── 16. Wait for next cycle ───────────────────────────────────────
             next_run = _next_cycle_utc()
             wait_sec = max(0, (next_run - datetime.now(timezone.utc).replace(tzinfo=None)).total_seconds())
             log(
@@ -406,6 +425,7 @@ def run():
             save_hai(state_f)
             save_trd(state_g)
             save_vcb(state_h)
+            save_rsl(state_i)
             break
         except Exception as e:
             log(f"Erreur inattendue: {e}", "WARN")

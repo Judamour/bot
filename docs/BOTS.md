@@ -1,8 +1,8 @@
-# Documentation des 6 Bots — Appels API, Paramètres, Timing
+# Documentation des 9 Bots — Appels API, Paramètres, Timing
 
 ## Vue d'ensemble
 
-6 bots en compétition simultanée, chacun avec **1000€ de capital paper**.
+9 bots en compétition simultanée, chacun avec **1000€ de capital paper**.
 Runner : `live/multi_runner.py` — un seul processus, données macro partagées.
 
 **Cycles d'exécution** : 03h00, 07h00, 11h00, 15h00, 19h00, 23h00 UTC
@@ -374,6 +374,74 @@ Sous-performe en marchés plats (peu de compressions), sur-performe lors de gran
 
 ---
 
+## Bot I — Relative Strength Leaders
+
+**Fichier** : `strategies/rs_leaders_strategy.py`
+**State** : `logs/rs_leaders/state.json`
+**Origine** : recommandation ChatGPT — basé sur MSCI World Quality + Momentum (12-16% CAGR historique)
+
+### Concept
+Sélection des **leaders en force relative** sur l'univers complet des 20 symboles :
+- Calcul d'un score composite de momentum multi-période pour chaque actif
+- Filtres de qualité stricts : structure SMA triple, ADX, volatilité, extension
+- Tenir les 3 leaders, sortir si l'actif tombe hors top 5 (buffer anti-churn)
+- Sizing via volatility targeting : les actifs plus calmes reçoivent plus de capital
+
+### Différences vs Bot B (Momentum Rotation)
+| Critère | Bot B | Bot I |
+|---------|-------|-------|
+| Score | 1m/3m/6m equal weight | 1m/3m/6m + distance SMA200 (weighted) |
+| Filtre structure | Aucun | SMA50 > SMA200 (golden cross) |
+| Filtre volatilité | Aucun | vol < 90% annualisée |
+| Filtre extension | Aucun | prix pas > 15% au-dessus SMA50 |
+| Filtre qualité | Aucun | ADX > 18 |
+| Stop loss | -12% fixe | 2.5×ATR trailing + hard stop -10% |
+| Exit SMA | Aucun | SMA50 break |
+| Sizing | total/4 égal | Volatility targeting (TARGET_VOL=15%) |
+| Seuil de sortie | Top 4 strict | Top 5 (buffer 2 rangs) |
+
+### Score RS composite
+```
+rs_score = 0.35 × (perf 1m) + 0.35 × (perf 3m) + 0.20 × (perf 6m) + 0.10 × (distance SMA200)
+```
+Périodes : 1m=22j, 3m=66j, 6m=130j.
+
+### Paramètres
+| Paramètre | Valeur |
+|-----------|--------|
+| Timeframe | Daily (ohlcv_daily, 220 jours) |
+| Top N positions | 3 |
+| Exit rank | > 5 (sortie si non dans top 5) |
+| Rebalancement min | 5 jours |
+| ADX seuil | > 18 |
+| Vol annualisée max | < 90% |
+| Extension SMA50 max | < 15% |
+| Hard stop | -10% depuis l'entrée |
+| Trailing stop | 2.5×ATR |
+| Exit SMA | SMA50 break |
+| Target vol | 15% |
+| Max position | 30% du capital |
+| Pause macro | VIX > 30 ou QQQ bearish |
+
+### Volatility targeting (sizing)
+```
+size_pct = min(TARGET_VOL / annual_vol, MAX_POS_PCT)
+           = min(0.15 / annual_vol, 0.30)
+size_units = (capital × size_pct) / entry_price
+```
+Ex : actif avec vol 30% → size 50% du capital cap à 30% → 30%. Actif vol 50% → 30% du capital.
+
+### Univers
+Tous les 20 symboles (7 crypto + 13 xStocks). Le score et les filtres sélectionnent naturellement les meilleurs.
+
+### Appel API
+**Aucun.** Stratégie 100% quantitative.
+
+### Performance de référence
+MSCI World Quality + Momentum index : 12-16% CAGR sur 10 ans. La version filtrée (ADX, extension) vise à réduire les drawdowns des années 2022-type.
+
+---
+
 ## Résumé des appels API par cycle
 
 | Bot | API | Nb appels/cycle (estimé) | Coût/cycle |
@@ -386,6 +454,7 @@ Sous-performe en marchés plats (peu de compressions), sur-performe lors de gran
 | F | Anthropic Haiku | 0-10 (si pre-filter passe) | ~$0.008 |
 | G | Aucun | 0 | $0 |
 | H | Aucun | 0 | $0 |
+| I | Aucun | 0 | $0 |
 | A pré-marché | Anthropic Haiku | 1/jour ouvré | ~$0.005/jour |
 
 **Total journalier estimé** : $0.05-0.15/jour selon activité du marché
