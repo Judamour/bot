@@ -267,7 +267,18 @@ def run():
             ohlcv_daily = fetch_ohlcv_cache(config.SYMBOLS, timeframe="1d", days=220)
             log(f"Daily cache: {len(ohlcv_daily)}/{len(config.SYMBOLS)} symbols ready")
 
-            # ── 4. Bot A: Supertrend + filters ────────────────────────────────
+            # ── 4. Bot Z — Pilot (allocation dispatch AVANT les sub-bots) ────────
+            try:
+                z_summary = run_bot_z_cycle(macro)
+                print_bot_z_summary(z_summary)
+                log(f"[Z] Engine: {z_summary.get('current_engine','?')} | "
+                    f"Capital: {z_summary.get('z_capital_eur', z_summary.get('total_simulated_eur',0)):.2f}€ | "
+                    f"Régime: {z_summary.get('regime','?')} | "
+                    f"Budget: {z_summary.get('budget',{})}")
+            except Exception as ez:
+                log(f"Bot Z erreur (non bloquant): {ez}", "WARN")
+
+            # ── 5. Bot A: Supertrend + filters ────────────────────────────────
             log(f"\n{Fore.CYAN}--- Bot A: Supertrend+MR ---{Style.RESET_ALL}")
 
             rotation = bot_a._compute_rotation_factors(state_a.get("trades", []))
@@ -308,7 +319,7 @@ def run():
                 f"Trades: {len(state_a['trades'])}"
             )
 
-            # ── 5. Bot B: Momentum Rotation ───────────────────────────────────
+            # ── 6. Bot B: Momentum Rotation ───────────────────────────────────
             log(f"\n{Fore.GREEN}--- Bot B: Momentum Rotation ---{Style.RESET_ALL}")
             state_b = run_momentum_cycle(state_b, ohlcv_daily, macro)
             save_mom(state_b)
@@ -318,7 +329,7 @@ def run():
                 f"Trades: {len(state_b['trades'])}"
             )
 
-            # ── 6. Bot C: Donchian Breakout ───────────────────────────────────
+            # ── 7. Bot C: Donchian Breakout ───────────────────────────────────
             log(f"\n{Fore.YELLOW}--- Bot C: Donchian Breakout ---{Style.RESET_ALL}")
             brk_cache = {s: ohlcv_daily.get(s) for s in BREAKOUT_SYMBOLS if s in ohlcv_daily}
             state_c = run_breakout_cycle(state_c, brk_cache, macro)
@@ -329,16 +340,16 @@ def run():
                 f"Trades: {len(state_c['trades'])}"
             )
 
-            # ── 7. Bot D: DeepSeek LLM (DÉSACTIVÉ — coût tokens) ────────────
+            # ── 8. Bot D: DeepSeek LLM (DÉSACTIVÉ — coût tokens) ────────────
             log(f"\n[D] Bot D DeepSeek — désactivé (coût tokens)")
 
-            # ── 8. Bot E: Claude Sonnet (DÉSACTIVÉ — coût tokens) ────────────
+            # ── 9. Bot E: Claude Sonnet (DÉSACTIVÉ — coût tokens) ────────────
             log(f"[E] Bot E Claude Sonnet — désactivé (coût tokens)")
 
-            # ── 9. Bot F: Claude Haiku (DÉSACTIVÉ — coût tokens) ─────────────
+            # ── 10. Bot F: Claude Haiku (DÉSACTIVÉ — coût tokens) ─────────────
             log(f"[F] Bot F Claude Haiku — désactivé (coût tokens)")
 
-            # ── 10. Bot G: Trend Following Multi-Asset ────────────────────────
+            # ── 11. Bot G: Trend Following Multi-Asset ────────────────────────
             log(f"\n{Fore.CYAN}--- Bot G: Trend Following Multi-Asset ---{Style.RESET_ALL}")
             state_g = run_trend_cycle(state_g, ohlcv_daily, macro)
             save_trd(state_g)
@@ -348,7 +359,7 @@ def run():
                 f"Trades: {len(state_g['trades'])}"
             )
 
-            # ── 11. Bot H: VCB Breakout ───────────────────────────────────────
+            # ── 12. Bot H: VCB Breakout ───────────────────────────────────────
             log(f"\n{Fore.RED}--- Bot H: VCB Breakout ---{Style.RESET_ALL}")
             state_h = run_vcb_cycle(state_h, ohlcv_4h, macro)
             save_vcb(state_h)
@@ -358,7 +369,7 @@ def run():
                 f"Trades: {len(state_h['trades'])}"
             )
 
-            # ── 12. Bot I: RS Leaders ─────────────────────────────────────────
+            # ── 13. Bot I: RS Leaders ─────────────────────────────────────────
             log(f"\n{Fore.CYAN}--- Bot I: RS Leaders ---{Style.RESET_ALL}")
             state_i = run_rs_leaders_cycle(state_i, ohlcv_daily, macro)
             save_rsl(state_i)
@@ -368,10 +379,10 @@ def run():
                 f"Trades: {len(state_i['trades'])}"
             )
 
-            # ── 13. Contest summary ───────────────────────────────────────────
+            # ── 14. Contest summary ───────────────────────────────────────────
             print_contest_status(state_a, state_b, state_c, state_d, state_e, state_f, state_g, state_h, state_i, ohlcv_daily)
 
-            # ── 14. Drawdown checks ───────────────────────────────────────────
+            # ── 15. Drawdown checks ───────────────────────────────────────────
             for name, state in [("A", state_a), ("B", state_b), ("C", state_c), ("D", state_d), ("E", state_e), ("F", state_f), ("G", state_g), ("H", state_h), ("I", state_i)]:
                 total = _portfolio_value(state, ohlcv_daily)
                 init = state.get("initial_capital", INITIAL_CAPITAL_PER_BOT)
@@ -383,13 +394,6 @@ def run():
                         f"⛔ <b>Bot {name} MAX DRAWDOWN</b> {dd*100:.1f}%\n"
                         f"Seuil: {config.MAX_DRAWDOWN*100:.0f}%"
                     )
-
-            # ── 15. Bot Z — Regime Engine (shadow mode) ───────────────────────
-            try:
-                z_summary = run_bot_z_cycle(macro)
-                print_bot_z_summary(z_summary)
-            except Exception as ez:
-                log(f"Bot Z erreur (non bloquant): {ez}", "WARN")
 
             # ── 16. Snapshot journalier pour Bot A ────────────────────────────
             bot_a._check_daily_snapshot(state_a)

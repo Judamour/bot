@@ -185,7 +185,7 @@ def load_state() -> dict:
             return json.load(f)
     return {
         "initial_capital": INITIAL_CAP,
-        "capital_simulated": INITIAL_CAP,
+        "z_capital": INITIAL_CAP,
         "paper_start_date": PAPER_START_DATE,
         "paper_review_date": PAPER_REVIEW_DATE,
         "cb_peak": INITIAL_CAP,
@@ -193,6 +193,8 @@ def load_state() -> dict:
         "current_engine": "OMEGA",
         "pending_engine": "OMEGA",
         "days_pending": 0,
+        "last_bot_values": {},
+        "last_alloc_weights": {},
         "regime_history": [],
         "allocation_history": [],
         "shadow_trades": [],
@@ -209,6 +211,14 @@ def _log_shadow(entry: dict):
     os.makedirs(os.path.dirname(SHADOW_LOG), exist_ok=True)
     with open(SHADOW_LOG, "a") as f:
         f.write(json.dumps(entry, default=str) + "\n")
+
+
+def _write_budget(budget: dict):
+    """Écrit le budget alloué par Bot Z pour chaque sub-bot (logs/bot_z/budget.json)."""
+    os.makedirs(os.path.dirname(STATE_FILE), exist_ok=True)
+    budget_path = os.path.join(os.path.dirname(STATE_FILE), "budget.json")
+    with open(budget_path, "w") as f:
+        json.dump({"ts": datetime.now().isoformat(), "budget": budget}, f, indent=2)
 
 
 def load_bot_state(bot_id: str) -> dict:
@@ -504,21 +514,33 @@ def run_bot_z_cycle(macro: dict) -> dict:
     regime_info = detect_regime_score(macro)
     regime = regime_info["regime"]
 
-    # 3. Circuit Breaker — calcul DD portefeuille
+    # 3. Circuit Breaker — calcul DD portefeuille sur z_capital
     state = load_state()
-    portfolio_values = {}
-    total_simulated = 0.0
+
+    # Valeur actuelle de chaque sub-bot (capital libre + positions mark-to-market)
+    bot_values = {}
     for bot_id, s in all_states.items():
-        val = s.get("capital", INITIAL_CAP / len(BOT_STATE_FILES)) + sum(
+        val = s.get("capital", 1000.0) + sum(
             p.get("entry", 0) * p.get("size", 0)
             for p in s.get("positions", {}).values()
         )
-        portfolio_values[bot_id] = round(val, 2)
-        total_simulated += val
+        bot_values[bot_id] = round(val, 2)
 
-    cb_peak   = max(state.get("cb_peak", INITIAL_CAP), total_simulated)
+    # Retour pondéré du cycle : retours de chaque bot × poids du cycle précédent
+    z_capital       = state.get("z_capital", INITIAL_CAP)
+    prev_bot_values = state.get("last_bot_values", {b: 1000.0 for b in VALID_BOTS})
+    prev_weights    = state.get("last_alloc_weights", {b: 1.0 / len(VALID_BOTS) for b in VALID_BOTS})
+
+    cycle_returns = {
+        b: (bot_values[b] / prev_bot_values[b] - 1) if prev_bot_values.get(b, 0) > 0 else 0.0
+        for b in VALID_BOTS
+    }
+    weighted_return = sum(prev_weights.get(b, 0) * cycle_returns.get(b, 0) for b in VALID_BOTS)
+    new_z_capital   = max(0.0, z_capital * (1 + weighted_return))
+
+    cb_peak   = max(state.get("cb_peak", INITIAL_CAP), new_z_capital)
     cb_factor = state.get("cb_factor", 1.0)
-    port_dd   = (total_simulated - cb_peak) / cb_peak if cb_peak > 0 else 0.0
+    port_dd   = (new_z_capital - cb_peak) / cb_peak if cb_peak > 0 else 0.0
 
     if port_dd < CB_THRESHOLD:
         cb_factor = max(CB_MIN_FACTOR, cb_factor - 0.05)
@@ -571,10 +593,15 @@ def run_bot_z_cycle(macro: dict) -> dict:
     # 5. Allocation Meta v2 (engine sélectionné + CB)
     allocation = compute_shadow_allocation(regime, all_states, macro, cb_factor, current_engine)
 
-    # 6. Analyse exposition croisée
+    # 6. Budget dispatch — écriture logs/bot_z/budget.json pour les sub-bots
+    alloc_weights = {b: allocation[b]["weight_final"] for b in VALID_BOTS if b in allocation}
+    budget = {b: round(new_z_capital * cb_factor * alloc_weights.get(b, 0.0), 2) for b in VALID_BOTS}
+    _write_budget(budget)
+
+    # 7. Analyse exposition croisée
     cross = analyze_cross_exposure(all_states, allocation)
 
-    # 7. Warnings
+    # 8. Warnings
     warnings_list = []
     if cb_active:
         warnings_list.append(
@@ -593,11 +620,11 @@ def run_bot_z_cycle(macro: dict) -> dict:
                 f"— priorité {prio_name}"
             )
 
-    # 8. Métriques de performance
-    perf_pct = (total_simulated - INITIAL_CAP) / INITIAL_CAP * 100
+    # 9. Métriques de performance
+    perf_pct = (new_z_capital - INITIAL_CAP) / INITIAL_CAP * 100
     days_running = (datetime.now() - datetime.fromisoformat(PAPER_START_DATE)).days
 
-    # 9. Construction du résumé
+    # 10. Construction du résumé
     summary = {
         "timestamp":          ts,
         "regime":             regime,
@@ -608,8 +635,9 @@ def run_bot_z_cycle(macro: dict) -> dict:
         "allocation":         allocation,
         "cross_exposure":     cross,
         "warnings":           warnings_list,
-        "portfolio_values":   portfolio_values,
-        "total_simulated_eur": round(total_simulated, 2),
+        "bot_values":         bot_values,
+        "total_simulated_eur": round(new_z_capital, 2),
+        "z_capital_eur":      round(new_z_capital, 2),
         "initial_capital":    INITIAL_CAP,
         "perf_pct":           round(perf_pct, 2),
         "cb_factor":          round(cb_factor, 2),
@@ -621,17 +649,21 @@ def run_bot_z_cycle(macro: dict) -> dict:
         "current_engine":     current_engine,
         "pending_engine":     pending_engine,
         "days_pending":       days_pending,
+        "budget":             budget,
     }
 
-    # 10. Log shadow
+    # 11. Log shadow
     _log_shadow(summary)
 
-    # 11. Mise à jour state
-    state["cb_peak"]        = round(cb_peak, 2)
-    state["cb_factor"]      = round(cb_factor, 3)
-    state["current_engine"] = current_engine
-    state["pending_engine"] = pending_engine
-    state["days_pending"]   = days_pending
+    # 12. Mise à jour state
+    state["cb_peak"]           = round(cb_peak, 2)
+    state["cb_factor"]         = round(cb_factor, 3)
+    state["z_capital"]         = round(new_z_capital, 2)
+    state["last_bot_values"]   = bot_values
+    state["last_alloc_weights"] = alloc_weights
+    state["current_engine"]    = current_engine
+    state["pending_engine"]    = pending_engine
+    state["days_pending"]      = days_pending
     state["regime_history"].append({"ts": ts, "regime": regime, "engine": current_engine,
                                     "confidence": regime_info["confidence"]})
     state["regime_history"] = state["regime_history"][-500:]
@@ -642,8 +674,8 @@ def run_bot_z_cycle(macro: dict) -> dict:
     state["last_allocation"]     = allocation
     state["last_cross_exposure"] = cross
     state["last_warnings"]       = warnings_list
-    state["last_portfolio_values"] = portfolio_values
-    state["total_simulated_eur"] = round(total_simulated, 2)
+    state["last_bot_values"]     = bot_values
+    state["total_simulated_eur"] = round(new_z_capital, 2)
     state["perf_pct"]            = round(perf_pct, 2)
     state["days_running"]        = days_running
     save_state(state)
@@ -704,11 +736,14 @@ def print_bot_z_summary(summary: dict):
         for w in summary["warnings"]:
             print(f"    • {w}")
 
-    total  = summary.get("total_simulated_eur", 0)
+    total  = summary.get("z_capital_eur", summary.get("total_simulated_eur", 0))
     perf   = summary.get("perf_pct", 0)
     perf_c = Fore.GREEN if perf >= 0 else Fore.RED
-    print(f"\n  Portefeuille : {total:.2f}€  ({perf_c}{perf:+.2f}%{Style.RESET_ALL}) "
+    budget = summary.get("budget", {})
+    print(f"\n  Portefeuille Bot Z : {total:.2f}€  ({perf_c}{perf:+.2f}%{Style.RESET_ALL}) "
           f"vs initial {INITIAL_CAP:.0f}€")
+    if budget:
+        print(f"  Budget dispatché → " + " | ".join(f"{b.upper()}:{v:.0f}€" for b, v in budget.items()))
     print(f"{Fore.CYAN}{'─'*78}{Style.RESET_ALL}\n")
 
 

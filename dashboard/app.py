@@ -363,6 +363,77 @@ def api_bot_z():
     return jsonify({"regime": "N/A", "allocation": {}, "warnings": [], "perf_pct": 0})
 
 
+@app.route("/api/portfolio")
+def api_portfolio():
+    """Vue complète Bot Z Pilote — état live, allocation, performance sub-bots."""
+    z_state = {}
+    if os.path.exists(_BOT_Z_FILE):
+        try:
+            with open(_BOT_Z_FILE) as f:
+                z_state = json.load(f)
+        except Exception:
+            pass
+
+    # Budget actuel dispatché par Bot Z
+    budget_file = os.path.join(BASE_DIR, "logs", "bot_z", "budget.json")
+    budget = {}
+    if os.path.exists(budget_file):
+        try:
+            with open(budget_file) as f:
+                budget = json.load(f).get("budget", {})
+        except Exception:
+            pass
+
+    # Métriques des sub-bots A, B, C, G
+    strategies = {}
+    for bot_id in ["a", "b", "c", "g"]:
+        state = load_bot_state(bot_id)
+        metrics = compute_metrics(state, _live_prices)
+        alloc = z_state.get("last_allocation", {}).get(bot_id, {})
+        strategies[bot_id] = {
+            "id": bot_id,
+            "name": _BOT_NAMES[bot_id],
+            "color": _BOT_COLORS[bot_id],
+            "capital": metrics["capital"],
+            "total_value": metrics["total_value"],
+            "pnl_pct": metrics["pnl_pct"],
+            "pnl_eur": metrics["pnl_eur"],
+            "win_rate": metrics["win_rate"],
+            "open_trades": metrics["open_trades"],
+            "total_trades": metrics["total_trades"],
+            "equity_curve": compute_equity_curve(state),
+            "positions": metrics["positions"],
+            "z_budget_eur": budget.get(bot_id, alloc.get("budget_eur", 0)),
+            "z_budget_pct": alloc.get("budget_pct", 0),
+            "z_weight_final": alloc.get("weight_final", 0),
+        }
+
+    z_capital = z_state.get("z_capital", z_state.get("total_simulated_eur", 10000.0))
+    initial   = z_state.get("initial_capital", 10000.0)
+    perf_pct  = z_state.get("perf_pct", (z_capital - initial) / initial * 100 if initial else 0)
+
+    return jsonify({
+        "z_capital_eur":   round(z_capital, 2),
+        "initial_capital": round(initial, 2),
+        "perf_pct":        round(perf_pct, 2),
+        "pnl_eur":         round(z_capital - initial, 2),
+        "port_dd":         z_state.get("port_dd", 0),
+        "cb_factor":       z_state.get("cb_factor", 1.0),
+        "cb_active":       z_state.get("cb_factor", 1.0) < 1.0,
+        "current_engine":  z_state.get("current_engine", "OMEGA"),
+        "pending_engine":  z_state.get("pending_engine", "OMEGA"),
+        "days_pending":    z_state.get("days_pending", 0),
+        "regime":          z_state.get("last_regime", "RANGE"),
+        "vix":             z_state.get("last_regime_info", {}).get("vix", 0),
+        "warnings":        z_state.get("last_warnings", []),
+        "budget":          budget,
+        "strategies":      strategies,
+        "days_running":    z_state.get("days_running", 0),
+        "paper_start":     z_state.get("paper_start_date", ""),
+        "paper_review":    z_state.get("paper_review_date", ""),
+    })
+
+
 @app.route("/api/bot_z_history")
 def api_bot_z_history():
     """Retourne l'historique equity + engine + régime du Bot Z (shadow.jsonl)."""
@@ -379,7 +450,7 @@ def api_bot_z_history():
                         rec = json.loads(line)
                         history.append({
                             "ts":           rec.get("timestamp", "")[:16],
-                            "total":        rec.get("total_simulated_eur", 10000),
+                            "total":        rec.get("z_capital_eur", rec.get("total_simulated_eur", 10000)),
                             "perf_pct":     rec.get("perf_pct", 0),
                             "regime":       rec.get("regime", "RANGE"),
                             "engine":       rec.get("current_engine", "ENHANCED"),
