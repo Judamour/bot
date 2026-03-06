@@ -363,6 +363,42 @@ def api_bot_z():
     return jsonify({"regime": "N/A", "allocation": {}, "warnings": [], "perf_pct": 0})
 
 
+@app.route("/api/bot_z_history")
+def api_bot_z_history():
+    """Retourne l'historique equity + engine + régime du Bot Z (shadow.jsonl)."""
+    shadow_log = os.path.join(BASE_DIR, "logs", "bot_z", "shadow.jsonl")
+    history = []
+    if os.path.exists(shadow_log):
+        try:
+            with open(shadow_log) as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        rec = json.loads(line)
+                        history.append({
+                            "ts":           rec.get("timestamp", "")[:16],
+                            "total":        rec.get("total_simulated_eur", 10000),
+                            "perf_pct":     rec.get("perf_pct", 0),
+                            "regime":       rec.get("regime", "RANGE"),
+                            "engine":       rec.get("current_engine", "ENHANCED"),
+                            "cb_factor":    rec.get("cb_factor", 1.0),
+                            "port_dd":      rec.get("port_dd", 0),
+                        })
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+    # Déduplique par date (garde dernier point par jour)
+    by_day = {}
+    for h in history:
+        day = h["ts"][:10]
+        by_day[day] = h
+    daily = sorted(by_day.values(), key=lambda x: x["ts"])
+    return jsonify({"history": daily, "count": len(daily)})
+
+
 @app.route("/api/alerts")
 def api_alerts():
     """Retourne les alertes API actives (crédits épuisés)."""

@@ -38,6 +38,11 @@
 
       --radius: 12px;
       --radius-sm: 8px;
+
+      --eng-enhanced: #00e676;
+      --eng-omega:    #00c8ff;
+      --eng-omegav2:  #ffd740;
+      --eng-pro:      #ff4444;
     }
 
     html, body {
@@ -538,6 +543,152 @@
     }
     .token-stat span { color: var(--text); font-weight: 600; }
 
+    /* ── Engine Hero ── */
+    .engine-hero {
+      position: relative;
+      border-radius: var(--radius);
+      overflow: hidden;
+      padding: 32px 28px;
+      border: 1px solid;
+      transition: all 0.5s ease;
+      margin-bottom: 14px;
+    }
+    .engine-hero::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(ellipse at 30% 50%, var(--eh-color, #00c8ff) 0%, transparent 65%);
+      opacity: 0.07;
+      pointer-events: none;
+      transition: opacity 0.5s;
+    }
+    .engine-hero:hover::before { opacity: 0.12; }
+
+    .engine-hero-top {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 20px;
+    }
+    .engine-hero-left { flex: 1; }
+    .engine-hero-label {
+      font-size: 10px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      color: var(--muted);
+      margin-bottom: 10px;
+    }
+    .engine-name-big {
+      font-size: 52px;
+      font-weight: 900;
+      letter-spacing: -1px;
+      line-height: 1;
+      margin-bottom: 10px;
+      transition: color 0.5s;
+    }
+    .engine-desc {
+      font-size: 13px;
+      color: var(--muted);
+      line-height: 1.5;
+      max-width: 520px;
+    }
+
+    .engine-hero-right {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+
+    .engine-meta-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-top: 20px;
+      padding-top: 20px;
+      border-top: 1px solid rgba(255,255,255,0.06);
+    }
+    .engine-meta-item { display: flex; flex-direction: column; gap: 3px; }
+    .engine-meta-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.8px; color: var(--muted); }
+    .engine-meta-value { font-size: 14px; font-weight: 700; }
+
+    /* Hysteresis progress */
+    .hysteresis-wrap { margin-top: 16px; }
+    .hysteresis-label {
+      display: flex;
+      justify-content: space-between;
+      font-size: 10px;
+      color: var(--muted);
+      margin-bottom: 5px;
+    }
+    .hysteresis-bar-wrap {
+      height: 5px;
+      background: rgba(255,255,255,0.07);
+      border-radius: 3px;
+      overflow: hidden;
+    }
+    .hysteresis-bar-fill {
+      height: 100%;
+      border-radius: 3px;
+      transition: width 0.8s ease;
+    }
+
+    /* Engine selector chips */
+    .engine-chips {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .engine-chip {
+      padding: 4px 10px;
+      border-radius: 20px;
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: 0.5px;
+      border: 1px solid;
+      transition: all 0.2s;
+      opacity: 0.4;
+    }
+    .engine-chip.active { opacity: 1; }
+    .engine-chip.ENHANCED { color: var(--eng-enhanced); border-color: rgba(0,230,118,0.4); }
+    .engine-chip.ENHANCED.active { background: rgba(0,230,118,0.12); }
+    .engine-chip.OMEGA    { color: var(--eng-omega);    border-color: rgba(0,200,255,0.4); }
+    .engine-chip.OMEGA.active { background: rgba(0,200,255,0.12); }
+    .engine-chip.OMEGA_V2 { color: var(--eng-omegav2); border-color: rgba(255,215,64,0.4); }
+    .engine-chip.OMEGA_V2.active { background: rgba(255,215,64,0.12); }
+    .engine-chip.PRO      { color: var(--eng-pro);      border-color: rgba(255,68,68,0.4); }
+    .engine-chip.PRO.active { background: rgba(255,68,68,0.12); }
+
+    /* Engine-specific hero border colors */
+    .engine-hero.ENHANCED { border-color: rgba(0,230,118,0.25); }
+    .engine-hero.OMEGA    { border-color: rgba(0,200,255,0.25); }
+    .engine-hero.OMEGA_V2 { border-color: rgba(255,215,64,0.25); }
+    .engine-hero.PRO      { border-color: rgba(255,68,68,0.25); }
+
+    /* Perf number in hero */
+    .engine-perf-big {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+    }
+    .engine-perf-label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 4px; }
+    .engine-perf-value { font-size: 38px; font-weight: 900; line-height: 1; }
+    .engine-perf-sub { font-size: 12px; color: var(--muted); margin-top: 3px; }
+
+    /* Z equity chart */
+    .z-equity-chart { height: 220px; position: relative; }
+
+    /* Engine history timeline */
+    .engine-timeline { display: flex; gap: 3px; flex-wrap: wrap; }
+    .engine-dot {
+      width: 14px; height: 14px;
+      border-radius: 3px;
+      title: attr(title);
+      cursor: default;
+    }
+
     /* ── Glow animation for live updates ── */
     @keyframes flash-green {
       0%, 100% { background: transparent; }
@@ -588,6 +739,7 @@
 
   <div class="header-right">
     <div class="pill regime RANGE" id="regimePill">RANGE</div>
+    <div class="pill" id="enginePill" style="color:#00c8ff;border-color:rgba(0,200,255,0.35);background:rgba(0,200,255,0.07);cursor:pointer;" onclick="switchTab('bot-z')" title="Voir Bot Z">⚙ OMEGA</div>
     <div class="pill vix" id="vixPill">VIX –</div>
     <div class="pill fg" id="fgPill">F&G –</div>
     <div class="next-cycle" id="nextCyclePill">⏱ –:––</div>
@@ -841,59 +993,157 @@
 
   <!-- ── BOT Z ── -->
   <div class="tab-panel" id="tab-bot-z">
+
+    <!-- En-tête -->
     <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;">
       <div style="width:12px;height:12px;border-radius:50%;background:var(--purple);box-shadow:0 0 10px rgba(179,136,255,0.5);"></div>
       <h2 style="font-size:18px;font-weight:800;">Bot Z — Meta v2</h2>
       <div class="paper-badge">PAPER 10 000€</div>
+      <div style="margin-left:auto;">
+        <div class="engine-chips" id="z-engine-chips">
+          <div class="engine-chip ENHANCED active">ENHANCED</div>
+          <div class="engine-chip OMEGA">OMEGA</div>
+          <div class="engine-chip OMEGA_V2">OMEGA V2</div>
+          <div class="engine-chip PRO">PRO</div>
+        </div>
+      </div>
     </div>
 
-    <div class="kpi-grid" style="margin-bottom:14px;">
+    <!-- ██ ENGINE HERO — pièce centrale du dashboard ██ -->
+    <div class="engine-hero OMEGA" id="z-engine-hero" style="--eh-color:#00c8ff">
+      <div class="engine-hero-top">
+        <div class="engine-hero-left">
+          <div class="engine-hero-label">ENGINE ACTIF</div>
+          <div class="engine-name-big" id="z-eng-name" style="color:#00c8ff">OMEGA</div>
+          <div class="engine-desc" id="z-eng-desc">Mode standard — ER/Risk scoring + softmax. Équilibre performance/risque en conditions normales.</div>
+
+          <!-- Hysteresis : switch en attente -->
+          <div class="hysteresis-wrap" id="z-hysteresis-wrap" style="display:none">
+            <div class="hysteresis-label">
+              <span id="z-hyst-label">Switch vers — en attente</span>
+              <span id="z-hyst-count">0/5 j</span>
+            </div>
+            <div class="hysteresis-bar-wrap">
+              <div class="hysteresis-bar-fill" id="z-hyst-fill" style="width:0%;background:#00c8ff"></div>
+            </div>
+          </div>
+
+          <div class="engine-meta-grid">
+            <div class="engine-meta-item">
+              <div class="engine-meta-label">Régime détecté</div>
+              <div class="engine-meta-value" id="z-eng-regime">RANGE</div>
+            </div>
+            <div class="engine-meta-item">
+              <div class="engine-meta-label">Confiance</div>
+              <div class="engine-meta-value" id="z-eng-conf">—</div>
+            </div>
+            <div class="engine-meta-item">
+              <div class="engine-meta-label">VIX</div>
+              <div class="engine-meta-value" id="z-eng-vix">—</div>
+            </div>
+            <div class="engine-meta-item">
+              <div class="engine-meta-label">Circuit Breaker</div>
+              <div class="engine-meta-value" id="z-eng-cb">—</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="engine-hero-right">
+          <div class="engine-perf-big">
+            <div class="engine-perf-label">Rendement total</div>
+            <div class="engine-perf-value" id="z-eng-perf">—</div>
+            <div class="engine-perf-sub" id="z-eng-days">— jours</div>
+          </div>
+          <div style="margin-top:16px;text-align:right;">
+            <div class="engine-perf-label" style="margin-bottom:4px;">Portefeuille</div>
+            <div style="font-size:22px;font-weight:800;color:var(--accent);" id="z-eng-total">—</div>
+          </div>
+          <div style="margin-top:8px;text-align:right;">
+            <div class="engine-perf-label" style="margin-bottom:4px;">Max Drawdown</div>
+            <div style="font-size:18px;font-weight:700;color:var(--red);" id="z-eng-dd">—</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- KPI row -->
+    <div class="kpi-grid" id="z-kpi-row" style="margin-bottom:14px;">
       <div class="kpi-card">
-        <div class="kpi-label">Portefeuille simulé</div>
+        <div class="kpi-label">Portfolio simulé</div>
         <div class="kpi-value blue" id="z-total">—</div>
         <div class="kpi-sub">capital initial 10 000€</div>
       </div>
       <div class="kpi-card">
-        <div class="kpi-label">Performance</div>
+        <div class="kpi-label">P&L €</div>
+        <div class="kpi-value" id="z-pnl-eur">—</div>
+        <div class="kpi-sub">depuis le 06/03/2026</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Rendement %</div>
         <div class="kpi-value" id="z-perf">—</div>
         <div class="kpi-sub" id="z-days">— jours</div>
       </div>
       <div class="kpi-card">
-        <div class="kpi-label">DD portefeuille</div>
+        <div class="kpi-label">Drawdown actuel</div>
         <div class="kpi-value red" id="z-dd">—</div>
         <div class="kpi-sub">depuis le pic</div>
       </div>
       <div class="kpi-card">
         <div class="kpi-label">Circuit Breaker</div>
         <div class="kpi-value" id="z-cb">—</div>
-        <div class="kpi-sub" id="z-cb-status">inactive</div>
+        <div class="kpi-sub" id="z-cb-status">inactif</div>
       </div>
     </div>
 
-    <div class="regime-bar" id="z-regime-bar">
-      <span style="font-size:11px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.8px;">Régime :</span>
-      <div class="regime-indicator RANGE" id="z-regime-ind">RANGE</div>
-      <span style="font-size:11px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.8px;margin-left:8px;">Engine :</span>
-      <div class="engine-indicator" id="z-engine-ind">OMEGA</div>
-      <div style="margin-left:auto;font-size:11px;color:var(--muted);" id="z-engine-detail"></div>
-    </div>
-
-    <div class="grid-2" style="margin-top:14px;">
+    <!-- Courbe d'équité + allocation -->
+    <div class="grid-2" style="margin-bottom:14px;">
       <div class="card">
-        <div class="card-header"><span class="card-title">Allocation par bot</span></div>
+        <div class="card-header">
+          <span class="card-title">Courbe d'équité — Bot Z</span>
+          <span style="font-size:11px;color:var(--muted);" id="z-chart-period"></span>
+        </div>
         <div class="card-body">
-          <div class="alloc-grid" id="z-alloc"></div>
+          <div class="z-equity-chart"><canvas id="z-equity-canvas"></canvas></div>
         </div>
       </div>
       <div class="card">
-        <div class="card-header"><span class="card-title">Alertes &amp; Diagnostics</span></div>
+        <div class="card-header"><span class="card-title">Allocation actuelle</span></div>
         <div class="card-body">
+          <div class="alloc-grid" id="z-alloc"></div>
+          <div class="divider" style="margin:14px 0;"></div>
+          <div class="section-title">Alertes</div>
           <div class="warning-list" id="z-warnings">
-            <div style="color:var(--muted);font-size:12px;">Aucune alerte active.</div>
+            <div style="color:var(--muted);font-size:12px;">Aucune alerte.</div>
           </div>
         </div>
       </div>
     </div>
+
+    <!-- Historique régimes / engines -->
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">Historique des engines utilisés</span>
+        <span style="font-size:11px;color:var(--muted);">chaque carré = 1 cycle (4h)</span>
+      </div>
+      <div class="card-body">
+        <div style="margin-bottom:10px;display:flex;gap:16px;flex-wrap:wrap;">
+          <span style="font-size:11px;color:var(--muted);">
+            <span style="display:inline-block;width:10px;height:10px;background:var(--eng-enhanced);border-radius:2px;margin-right:4px;vertical-align:middle;"></span>ENHANCED
+          </span>
+          <span style="font-size:11px;color:var(--muted);">
+            <span style="display:inline-block;width:10px;height:10px;background:var(--eng-omega);border-radius:2px;margin-right:4px;vertical-align:middle;"></span>OMEGA
+          </span>
+          <span style="font-size:11px;color:var(--muted);">
+            <span style="display:inline-block;width:10px;height:10px;background:var(--eng-omegav2);border-radius:2px;margin-right:4px;vertical-align:middle;"></span>OMEGA V2
+          </span>
+          <span style="font-size:11px;color:var(--muted);">
+            <span style="display:inline-block;width:10px;height:10px;background:var(--eng-pro);border-radius:2px;margin-right:4px;vertical-align:middle;"></span>PRO
+          </span>
+        </div>
+        <div class="engine-timeline" id="z-engine-timeline" style="gap:2px;"></div>
+      </div>
+    </div>
+
   </div>
 
   <!-- ── LOG ── -->
@@ -964,7 +1214,7 @@ document.querySelectorAll('.nav-tab').forEach(tab => {
       }
     });
     if (activeTab === 'contest' && contestData) renderContest(contestData);
-    if (activeTab === 'bot-z') renderBotZ(botZData);
+    if (activeTab === 'bot-z') { renderBotZ(botZData); loadZHistory(); }
     if (activeTab === 'log') refreshLog();
   });
 });
@@ -1196,47 +1446,121 @@ function renderOverview() {
 }
 
 // ═══════════════════════════════════════════ BOT Z ═══
+
+const ENGINE_COLORS = {
+  ENHANCED: '#00e676',
+  OMEGA:    '#00c8ff',
+  OMEGA_V2: '#ffd740',
+  PRO:      '#ff4444',
+};
+const ENGINE_DESC = {
+  ENHANCED: 'Mode Taureau — poids maximaux sur B (Momentum) et G (Trend). Optimal quand BTC + QQQ en hausse, VIX < 20. CAGR max.',
+  OMEGA:    'Mode Standard — ER/Risk scoring + softmax. Équilibre performance/risque en conditions normales. Défaut de 55% du temps.',
+  OMEGA_V2: 'Mode Défense Douce — Omega + Risk Parity 50/50. Inverse-vol blend : réduit exposition aux actifs volatils. Activé si VIX > 26 ou DD > -10%.',
+  PRO:      'Mode Protection — C+G défensifs + multi-paliers CB (80%→50%→30%). Activé en crise : VIX > 32, DD < -12% ou BTC+QQQ bearish. MaxDD -9%.',
+};
+const ENGINE_HYSTERESIS = {ENHANCED:7, OMEGA:5, OMEGA_V2:4, PRO:3};
+
+let zEquityChart = null;
+let zHistoryData = [];
+
+function switchTab(tabId) {
+  const tab = document.querySelector(`.nav-tab[data-tab="${tabId}"]`);
+  if (tab) tab.click();
+}
+
 function renderBotZ(data) {
   if (!data || !data.regime) return;
   botZData = data;
 
   const regime = data.regime || 'RANGE';
-  const engine = data.current_engine || data.last_allocation?.a?.engine || 'ENHANCED';
+  const engine = data.current_engine || 'OMEGA';
+  const pending = data.pending_engine || engine;
+  const daysPending = data.days_pending || 0;
+  const hystTotal = ENGINE_HYSTERESIS[pending] || 5;
+  const engColor = ENGINE_COLORS[engine] || '#b388ff';
+  const perfC = cls(data.perf_pct);
 
-  // Header pills
+  // ── Header pills ──────────────────────────────────────────
   const rp = document.getElementById('regimePill');
   if (rp) { rp.textContent = regime; rp.className = 'pill regime ' + regime; }
 
-  setEl('z-total', fmtE(data.total_simulated_eur));
-  const perfC = cls(data.perf_pct);
-  setEl('z-perf', `<span class="${perfC}">${fmtP(data.perf_pct)}</span>`);
-  setEl('z-days', `${data.days_running || 0} jours de paper trading`);
-  setEl('z-dd', fmtP(data.port_dd));
+  const ep = document.getElementById('enginePill');
+  if (ep) {
+    ep.innerHTML = `⚙ ${engine}`;
+    ep.style.color = engColor;
+    ep.style.borderColor = engColor + '55';
+    ep.style.background  = engColor + '12';
+  }
+
+  // ── Engine Hero ───────────────────────────────────────────
+  const hero = document.getElementById('z-engine-hero');
+  if (hero) {
+    hero.className = `engine-hero ${engine}`;
+    hero.style.setProperty('--eh-color', engColor);
+  }
+
+  setEl('z-eng-name', engine);
+  const engNameEl = document.getElementById('z-eng-name');
+  if (engNameEl) engNameEl.style.color = engColor;
+
+  setEl('z-eng-desc', ENGINE_DESC[engine] || '');
+  setEl('z-eng-regime', regime);
+  setEl('z-eng-conf', fmt((data.regime_confidence || 0) * 100, 0) + '%');
+  setEl('z-eng-vix', fmt(data.vix, 1));
+
   const cbActive = data.cb_active;
+  const cbEl = document.getElementById('z-eng-cb');
+  if (cbEl) {
+    cbEl.textContent = `×${fmt(data.cb_factor || 1, 2)} ${cbActive ? '⚡ ACTIF' : 'inactif'}`;
+    cbEl.style.color = cbActive ? 'var(--red)' : 'var(--green)';
+  }
+
+  // P&L + rendement dans le hero
+  setEl('z-eng-perf', fmtP(data.perf_pct));
+  const perfEl = document.getElementById('z-eng-perf');
+  if (perfEl) perfEl.className = 'engine-perf-value ' + perfC;
+
+  setEl('z-eng-days', `${data.days_running || 0} jours — depuis ${data.paper_start || '—'}`);
+  setEl('z-eng-total', fmtE(data.total_simulated_eur));
+  setEl('z-eng-dd', fmtP(data.port_dd));
+
+  // Hysteresis bar (si switch en attente)
+  const hystWrap = document.getElementById('z-hysteresis-wrap');
+  if (pending !== engine && daysPending >= 0) {
+    const pct = Math.min(100, (daysPending / hystTotal) * 100);
+    if (hystWrap) hystWrap.style.display = 'block';
+    setEl('z-hyst-label', `Switch potentiel → ${pending}`);
+    setEl('z-hyst-count', `${daysPending}/${hystTotal} j`);
+    const fill = document.getElementById('z-hyst-fill');
+    if (fill) { fill.style.width = pct + '%'; fill.style.background = ENGINE_COLORS[pending] || '#ccc'; }
+  } else {
+    if (hystWrap) hystWrap.style.display = 'none';
+  }
+
+  // Engine chips (active state)
+  document.querySelectorAll('.engine-chip').forEach(c => {
+    const chipEng = c.textContent.replace(' ','_').trim();
+    c.classList.toggle('active', chipEng === engine || c.textContent.trim() === engine);
+  });
+  // Fix OMEGA V2 chip match
+  document.querySelectorAll('.engine-chip.OMEGA_V2').forEach(c => {
+    c.classList.toggle('active', engine === 'OMEGA_V2');
+  });
+
+  // ── KPI row ───────────────────────────────────────────────
+  setEl('z-total', fmtE(data.total_simulated_eur));
+  const pnlEur = (data.total_simulated_eur || 10000) - 10000;
+  setEl('z-pnl-eur', `<span class="${perfC}">${fmtE(pnlEur)}</span>`);
+  setEl('z-perf', `<span class="${perfC}">${fmtP(data.perf_pct)}</span>`);
+  setEl('z-days', `${data.days_running || 0} jours`);
+  setEl('z-dd', fmtP(data.port_dd));
   setEl('z-cb', `×${fmt(data.cb_factor || 1, 2)}`);
-  const cbEl = document.getElementById('z-cb');
-  if (cbEl) cbEl.className = 'kpi-value ' + (cbActive ? 'red' : 'green');
-  setEl('z-cb-status', cbActive ? 'ACTIF' : 'inactif');
+  const cbStatusEl = document.getElementById('z-cb');
+  if (cbStatusEl) cbStatusEl.className = 'kpi-value ' + (cbActive ? 'red' : 'green');
+  setEl('z-cb-status', cbActive ? '⚡ ACTIF' : 'inactif');
 
-  // Regime indicator
-  const ri = document.getElementById('z-regime-ind');
-  if (ri) { ri.textContent = regime; ri.className = 'regime-indicator ' + regime; }
-
-  // Engine indicator
-  const ei = document.getElementById('z-engine-ind');
-  if (ei) {
-    ei.textContent = engine;
-    const engineColors = {ENHANCED:'#00e676',OMEGA:'#00c8ff',OMEGA_V2:'#ffd740',PRO:'#ff4444'};
-    ei.style.color = engineColors[engine] || '#b388ff';
-    ei.style.borderColor = (engineColors[engine] || '#b388ff') + '40';
-    ei.style.background  = (engineColors[engine] || '#b388ff') + '10';
-  }
-  const ped = document.getElementById('z-engine-detail');
-  if (ped && data.pending_engine) {
-    ped.textContent = `pending: ${data.pending_engine} (${data.days_pending || 0}j / ${{'ENHANCED':7,'OMEGA':5,'OMEGA_V2':4,'PRO':3}[data.pending_engine]||5}j)`;
-  }
-
-  // Allocation bars
+  // ── Allocation bars ───────────────────────────────────────
   const alloc = data.last_allocation || {};
   const allocEl = document.getElementById('z-alloc');
   if (allocEl && Object.keys(alloc).length) {
@@ -1244,21 +1568,22 @@ function renderBotZ(data) {
     allocEl.innerHTML = Object.entries(alloc).map(([bid, a]) => {
       const pct = a.budget_pct || 0;
       const color = botColors[bid] || '#6a8aaa';
+      const barWidth = Math.min(100, pct * 2.5);
       return `
         <div class="alloc-row">
-          <div class="alloc-name" style="color:${color}">${a.bot_name}</div>
+          <div class="alloc-name" style="color:${color};font-weight:700;">${a.bot_name}</div>
           <div class="alloc-bar-wrap">
-            <div class="alloc-bar" style="width:${Math.min(100,pct*2.5)}%;background:${color}"></div>
+            <div class="alloc-bar" style="width:${barWidth}%;background:linear-gradient(90deg,${color},${color}80)"></div>
           </div>
-          <div class="alloc-budget">${fmtE(a.budget_eur)}</div>
+          <div class="alloc-budget" style="font-weight:700;">${fmtE(a.budget_eur)}</div>
           <div class="alloc-pct">${fmt(pct)}%</div>
         </div>
       `;
     }).join('');
   }
 
-  // Warnings
-  const warns = data.last_warnings || data.warnings || [];
+  // ── Warnings ──────────────────────────────────────────────
+  const warns = (data.last_warnings || data.warnings || []).filter(w => !w.startsWith('Engine actif'));
   const wEl = document.getElementById('z-warnings');
   if (wEl) {
     wEl.innerHTML = warns.length
@@ -1266,18 +1591,123 @@ function renderBotZ(data) {
       : '<div style="color:var(--muted);font-size:12px;">Aucune alerte active.</div>';
   }
 
-  // Overview Bot Z card
+  // ── Overview Bot Z card ───────────────────────────────────
   const ovz = document.getElementById('ovBotZBody');
   if (ovz) {
     ovz.innerHTML = `
-      <div class="regime-bar" style="margin-bottom:10px;">
-        <div class="regime-indicator ${regime}" style="font-size:11px;padding:6px 10px;">${regime}</div>
-        <div class="engine-indicator" style="font-size:11px;padding:6px 10px;color:${{'ENHANCED':'#00e676','OMEGA':'#00c8ff','OMEGA_V2':'#ffd740','PRO':'#ff4444'}[engine]||'#b388ff'}">${engine}</div>
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap;">
+        <div class="regime-indicator ${regime}" style="font-size:11px;padding:5px 10px;">${regime}</div>
+        <div style="padding:5px 10px;border-radius:6px;font-size:11px;font-weight:800;border:1px solid ${engColor}40;color:${engColor};background:${engColor}12;">⚙ ${engine}</div>
         <div style="margin-left:auto;font-size:11px;color:var(--muted);">CB ×${fmt(data.cb_factor||1,2)}</div>
       </div>
-      <div style="font-size:11px;color:var(--muted);">Simulé : <span style="color:var(--text);font-weight:700;">${fmtE(data.total_simulated_eur)}</span>  —  P&L : <span class="${perfC}" style="font-weight:700;">${fmtP(data.perf_pct)}</span></div>
+      <div style="font-size:12px;color:var(--muted);">
+        Simulé <span style="color:var(--text);font-weight:700;">${fmtE(data.total_simulated_eur)}</span>
+        &nbsp;—&nbsp;
+        P&L <span class="${perfC}" style="font-weight:700;">${fmtP(data.perf_pct)}</span>
+        &nbsp;—&nbsp;
+        DD <span style="color:var(--red);font-weight:600;">${fmtP(data.port_dd)}</span>
+      </div>
     `;
   }
+}
+
+// ── Bot Z equity chart ────────────────────────────────────
+function renderZEquityChart(history) {
+  if (!history || !history.length) return;
+  zHistoryData = history;
+
+  const canvas = document.getElementById('z-equity-canvas');
+  if (!canvas) return;
+
+  // Update period label
+  if (history.length >= 2) {
+    const first = history[0].ts?.substring(0,10) || '';
+    const last  = history[history.length-1].ts?.substring(0,10) || '';
+    setEl('z-chart-period', `${first} → ${last}`);
+  }
+
+  const labels = history.map(h => h.ts?.substring(0,10) || '');
+  const values = history.map(h => h.total || 10000);
+
+  // Build engine timeline dots
+  const timeline = document.getElementById('z-engine-timeline');
+  if (timeline) {
+    timeline.innerHTML = history.map(h => {
+      const color = ENGINE_COLORS[h.engine] || '#6a8aaa';
+      const label = `${h.ts?.substring(0,10)} — ${h.engine} (${h.regime}) P&L: ${fmtP(h.perf_pct)}`;
+      return `<div class="engine-dot" style="background:${color}80;border:1px solid ${color}" title="${label}"></div>`;
+    }).join('');
+  }
+
+  if (zEquityChart) {
+    zEquityChart.data.labels = labels;
+    zEquityChart.data.datasets[0].data = values;
+    // Color segments by engine
+    zEquityChart.data.datasets[0].segment = {
+      borderColor: ctx => ENGINE_COLORS[history[ctx.p0DataIndex]?.engine] || '#00c8ff',
+    };
+    zEquityChart.update('none');
+    return;
+  }
+
+  const ctx = canvas.getContext('2d');
+  const gradient = ctx.createLinearGradient(0, 0, 0, 220);
+  gradient.addColorStop(0, 'rgba(0,200,255,0.25)');
+  gradient.addColorStop(1, 'rgba(0,200,255,0.01)');
+
+  zEquityChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [{
+        label: 'Bot Z — Portefeuille',
+        data: values,
+        borderWidth: 2,
+        backgroundColor: gradient,
+        fill: true,
+        tension: 0.3,
+        pointRadius: 0,
+        pointHoverRadius: 4,
+        segment: {
+          borderColor: ctx => ENGINE_COLORS[history[ctx.p0DataIndex]?.engine] || '#00c8ff',
+        },
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          mode: 'index', intersect: false,
+          callbacks: {
+            label: ctx => {
+              const h = history[ctx.dataIndex];
+              return `${fmtE(ctx.raw)} (${h?.engine || '—'} / ${h?.regime || '—'})`;
+            },
+            afterLabel: ctx => {
+              const h = history[ctx.dataIndex];
+              return `P&L: ${fmtP(h?.perf_pct)} | DD: ${fmtP(h?.port_dd)}`;
+            },
+          }
+        }
+      },
+      scales: {
+        x: { display: true, ticks: { maxTicksLimit: 8, color: '#6a8aaa', font:{size:10} }, grid: { color: 'rgba(30,45,70,0.4)' } },
+        y: { display: true, ticks: { color: '#6a8aaa', font:{size:10}, callback: v => fmtE(v) }, grid: { color: 'rgba(30,45,70,0.4)' } },
+      },
+      interaction: { intersect: false, mode: 'index' },
+    }
+  });
+}
+
+function loadZHistory() {
+  fetch('/api/bot_z_history')
+    .then(r => r.json())
+    .then(d => {
+      if (d.history?.length) renderZEquityChart(d.history);
+    })
+    .catch(() => {});
 }
 
 // ═══════════════════════════════════════════ BOT TABS ═══
@@ -1522,6 +1952,7 @@ function loadAll() {
     botZData = d;
     renderBotZ(d);
   }).catch(()=>{});
+  loadZHistory();
 
   // Health + system
   refreshHealth();
@@ -1573,6 +2004,7 @@ setInterval(() => {
     botZData = d;
     renderBotZ(d);
   }).catch(()=>{});
+  if (activeTab === 'bot-z') loadZHistory();
 }, 120000);
 
 // Countdown timer
