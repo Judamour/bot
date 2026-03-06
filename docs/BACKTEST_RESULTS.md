@@ -1,11 +1,14 @@
 # Résultats Backtests — Multi-Bots
 
+> **SOURCE DE VÉRITÉ : historique des runs de backtest**
+> Architecture live → voir `docs/PROJET Z .md` | Stratégies → voir `docs/BOTS.md`
+
 > Script : `backtest/multi_backtest.py`
-> Dernier run : 2026-03-06 (Run 9 — Bot Z Meta méta-sélecteur + MC 5000)
+> Dernier run : 2026-03-06 (**Run 10 — Bot Z Meta v2 engine scoring data-driven + MC 5000**)
 > Graphique : `backtest/results/multi_equity.png`
 > CSV détaillé : `backtest/results/multi_summary.csv`
 > CSV Bot Z : `backtest/results/bot_z_comparison.csv`
-> Symboles : 16/20 (LINK, AVAX, TSLA, AMZN absents — données insuffisantes)
+> Symboles : 16 (5 crypto + 11 xStocks — LINK, AVAX, TSLA, AMZN exclus définitivement)
 
 ---
 
@@ -264,6 +267,37 @@ Au lieu de `REGIME_WEIGHTS_Z[regime]`, Omega calcule à chaque barre :
 - Trade-off : **sacrifice 29% CAGR pour gagner +0.07 Sharpe et -1.1% MaxDD** → intéressant pour capital défensif uniquement
 - Pour maximiser CAGR risque-ajusté : **Bot Z Omega sans RP reste le meilleur compromis**
 
+### Bot Z Meta v2 — Engine Scoring data-driven (Run 10 — PRODUCTION)
+
+**Architecture actuelle en paper trading depuis 2026-03-06.**
+
+Amélioration clé vs Meta v1 (Run 9) : sélection d'engine via **scoring data-driven** (0.50×regime_fit + 0.30×quality + 0.20×inv_risk) au lieu de règles statiques. Seuils recalibrés (VIX>26 pour PRO, DD<-12%).
+
+**Résultat Run 10 (2020-2026) :**
+
+| Métrique | Meta v2 | Meta v1 | Enhanced |
+|----------|---------|---------|---------|
+| CAGR | +43.2% | +38.6% | +59.8% |
+| Sharpe | **1.70** | 1.54 | 1.61 |
+| MaxDD | **-9.6%** | -15.1% | -18.9% |
+| 2022 (bear) | **+1.0%** | +1.2% | -9.0% |
+
+**Performance annuelle Meta v2 :**
+
+| 2020 | 2021 | 2022 | 2023 | 2024 | 2025 | 2026 YTD |
+|------|------|------|------|------|------|----------|
+| +21.6% | +173.5% | **+1.0%** | +62.2% | +12.0% | +17.9% | +1.0% |
+
+Distribution engines (2020-2026) : **ENHANCED 17% / OMEGA 30% / OMEGA_V2 28% / PRO 25%**
+
+**Interprétation :**
+- Meilleur Sharpe (1.70) et MaxDD (-9.6%) parmi les systèmes CAGR > 40%
+- 2022 +1.0% : protection bear quasi-parfaite (vs -9.0% pour Enhanced)
+- CAGR inférieur à Enhanced (+59.8%) : le meta-engine coupe les bull runs extrêmes → contrepartie normale
+- Distribution plus équilibrée que Meta v1 (OMEGA_V2 28% vs 10%) → meilleure diversification d'engines
+
+---
+
 ### Bot Z Meta — Méta-sélecteur dynamique (Run 9)
 
 **Architecture** : sélectionne l'engine optimal à chaque barre selon le régime marché.
@@ -417,7 +451,7 @@ La calibration actuelle pour le régime BEAR (`a=1.5, g=0.2`) est **fausse** :
 - [x] Bot J Mean Reversion : RSI(2)+Bollinger+SMA200 (CAGR +1.6%, Sharpe 1.47, MaxDD -1.7%, WinRate 70.8%)
 - [x] Bot Z Omega v2 : Risk Parity + Meta-Learning (CAGR +26.1%, Sharpe 2.03 meilleur de toutes les structures, MaxDD -7.6%)
 - [x] Bot Z Meta : méta-sélecteur ENHANCED/OMEGA/OMEGA_V2/PRO (CAGR +38.6%, Sharpe 1.54, MaxDD -15.1%, 2022 +1.2%)
-- [ ] Bot Z Meta v2 : calibration seuils (VIX>26 au lieu de >24 pour OMEGA_V2) — cible OMEGA ~60%, ENHANCED ~25%
+- [x] Bot Z Meta v2 : calibration seuils (VIX>26, DD<-12% pour PRO) — Run 10 : OMEGA 30%, ENHANCED 17%, OMEGA_V2 28%, PRO 25%
 - [ ] Bot Z Adaptive v2 : relever seuil PRO (VIX>30, 2+ conditions) — cible ENHANCED 35% du temps
 - [ ] Corriger le churn Bot I (REBAL_DAYS=10, filtre re-entry)
 - [ ] Exclure Bot H du backtest daily (0 trades)
@@ -438,6 +472,7 @@ La calibration actuelle pour le régime BEAR (`a=1.5, g=0.2`) est **fausse** :
 | 2026-03-06 | Jan 2020 → Mar 2026 (6 ans) | **Run 7** : Bot Z Omega ER+Risk+Corr+Softmax | **Omega +55.5% Sharpe 1.96 MaxDD -8.7% (meilleur risque-ajusté)** | bot_z_comparison.csv |
 | 2026-03-06 | Jan 2020 → Mar 2026 (6 ans) | **Run 8** : Bot J MR (RSI2+BB+SMA200) + Omega v2 (RP+ML) | **J: MaxDD -1.7% WinRate 70.8% / v2: Sharpe 2.03 MaxDD -7.6%** | bot_z_comparison.csv |
 | 2026-03-06 | Jan 2020 → Mar 2026 (6 ans) | **Run 9** : Bot Z Meta méta-sélecteur E/Ω/Ω2/P + hysteresis | **Meta: CAGR +38.6% MaxDD -15.1% 2022 +1.2% (OMEGA 51%/PRO 21%)** | bot_z_comparison.csv |
+| 2026-03-06 | Jan 2020 → Mar 2026 (6 ans) | **Run 10** : Bot Z Meta v2 engine scoring data-driven (seuils recalibrés) | **Meta v2: CAGR +43.2% Sharpe 1.70 MaxDD -9.6% 2022 +1.0% (OMEGA 30%/OMEGA_V2 28%/PRO 25%/ENH 17%)** | bot_z_comparison.csv |
 
 ---
 

@@ -1,6 +1,17 @@
 Bot Z Meta v2 — Documentation complète (mise à jour 2026-03-06)
 ================================================================
 
+SOURCE DE VÉRITÉ : architecture live Bot Z Meta v2
+Backtests → docs/BACKTEST_RESULTS.md | Stratégies → docs/BOTS.md
+
+STATUT RÉEL (important avant de lire) :
+  Bot Z = allocateur ANALYTIQUE (pas encore exécutif)
+  Il calcule l'allocation et écrit budget.json, mais A/B/C/G
+  tradent encore avec leur capital propre (1 000€ chacun).
+  Budget dispatch branché prévu après revue 2026-04-30.
+
+---
+
 Vue d'ensemble
 --------------
 

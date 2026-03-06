@@ -1,12 +1,20 @@
-# Documentation des 9 Bots — Appels API, Paramètres, Timing
+# Documentation des Bots — Appels API, Paramètres, Timing
+
+> **SOURCE DE VÉRITÉ : stratégies individuelles (A → I)**
+> Architecture Bot Z → voir `docs/PROJET Z .md` | Backtests → voir `docs/BACKTEST_RESULTS.md`
 
 ## Vue d'ensemble
 
-9 bots en compétition simultanée, chacun avec **1000€ de capital paper**.
 Runner : `live/multi_runner.py` — un seul processus, données macro partagées.
 
 **Cycles d'exécution** : 03h00, 07h00, 11h00, 15h00, 19h00, 23h00 UTC
 (soit toutes les 4h, 6 fois par jour)
+
+**Bots actifs en paper trading (2026-03-06)** :
+- **Bot Z** — Pilote central, 10 000€, exécuté en PREMIER à chaque cycle
+- **Bot A / B / C / G** — Supervisés par Bot Z, capital propre 1 000€ chacun (budget dispatch non encore branché)
+- **Bot D / E / F** — Lab LLM expérimental, hors Bot Z, désactivés en prod (coût tokens)
+- **Bot H / I** — Expérimentaux, non actifs en prod
 
 ---
 
@@ -498,8 +506,17 @@ Mots-clés détectés : `credit`, `billing`, `insufficient`, `balance`, `quota`,
 **Dashboard** : endpoint `/api/bot_z`
 
 **Phase actuelle : PAPER TRADING** — démarré le 2026-03-06, revue le 2026-04-30
-**Capital** : 10 000€ (4 bots validés : A, B, C, G — 2 500€ chacun en base)
-**Structure** : Bot Z Enhanced (régime pur 100% dynamique + MO + CB)
+**Capital** : 10 000€ (4 bots validés : A, B, C, G)
+**Architecture active** : **Bot Z Meta v2** (4 engines : ENHANCED/OMEGA/OMEGA_V2/PRO)
+
+> **STATUT RÉEL — IMPORTANT**
+> Bot Z est un **allocateur analytique**, pas encore un **allocateur exécutif**.
+> - Il calcule l'allocation optimale et écrit `logs/bot_z/budget.json` à chaque cycle.
+> - **A/B/C/G tradent encore avec leur capital propre (1 000€)** et ignorent le budget.json.
+> - Le budget dispatch (A/B/C/G lisent le budget) est prévu après la revue 2026-04-30.
+> - Les résultats de z_capital sont donc une **simulation analytique**, pas le P&L réel des bots.
+
+Pour les résultats de backtest (CAGR +43.2%, Sharpe 1.70, MaxDD -9.6%) → voir `docs/BACKTEST_RESULTS.md` Run 10.
 
 ---
 
