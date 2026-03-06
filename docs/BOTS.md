@@ -483,6 +483,98 @@ Mots-clés détectés : `credit`, `billing`, `insufficient`, `balance`, `quota`,
 
 ---
 
+---
+
+## Bot Z — Regime Engine (Shadow Mode)
+
+**Fichier** : `live/bot_z.py`
+**State** : `logs/bot_z/state.json`
+**Log** : `logs/bot_z/shadow.jsonl`
+**Dashboard** : endpoint `/api/bot_z`
+
+### Concept
+
+Bot Z n'exécute aucun trade. Il observe les 6 bots actifs et simule en temps réel ce qu'un gestionnaire de portefeuille intelligent aurait décidé.
+
+**Phase actuelle : SHADOW MODE** — comparaison silencieuse. Après 3 mois de données live, on pourra comparer la performance réelle (1000€ séparés) vs la performance simulée par Bot Z pour décider de basculer.
+
+### Détection du régime
+
+| Régime | Conditions |
+|--------|-----------|
+| BULL | QQQ > SMA200 + VIX < 18 |
+| RANGE | QQQ > SMA200 + VIX 18-30 |
+| BEAR | QQQ < SMA200 |
+| HIGH_VOL | VIX > 30 |
+
+### Poids d'allocation par régime
+
+| Bot | BULL | RANGE | BEAR | HIGH_VOL |
+|-----|------|-------|------|----------|
+| A — Supertrend | 0.5 | 1.2 | 1.5 | 0.8 |
+| B — Momentum | 1.0 | 0.8 | 0.0 | 0.3 |
+| C — Breakout | 0.8 | 0.5 | 0.0 | 0.3 |
+| G — Trend | 1.3 | 0.7 | 0.2 | 0.3 |
+| H — VCB | 1.0 | 0.5 | 0.0 | 0.3 |
+| I — RS Leaders | 1.2 | 1.0 | 0.0 | 0.3 |
+
+### Allocation finale
+
+```
+budget_bot = capital_total × (weight_régime × weight_qualité) / somme_des_poids
+weight_qualité = Sharpe rolling 20 derniers trades (normalisé 0.3 → 1.5)
+```
+
+### Contraintes portefeuille
+
+- Max 30% du capital total sur un même actif
+- Max 2 bots simultanés long sur le même actif → warning si dépassé
+
+### Feuille de route Bot Z
+
+| Phase | Condition | Action |
+|-------|-----------|--------|
+| A — Shadow (maintenant) | Toujours | Observe + log, n'exécute rien |
+| B — Comparaison | 3 mois de data | Comparer perf réelle vs simulée Z |
+| C — Capital mutualisé | Backtests validés | Basculer vers capital unique géré par Z |
+
+---
+
+## Backtests 3 ans
+
+**Script** : `backtest/multi_backtest.py`
+**Résultats** : `docs/BACKTEST_RESULTS.md` (mis à jour manuellement après chaque run)
+**Graphique** : `backtest/results/multi_equity.png`
+**CSV** : `backtest/results/multi_summary.csv`
+
+### Lancer le backtest
+
+```bash
+# Dans le répertoire du projet
+python backtest/multi_backtest.py
+```
+
+Durée estimée : 5-15 minutes (fetch 20 symboles × 3 ans + simulation 6 bots).
+
+### Métriques calculées
+
+- **CAGR** : rendement annualisé composé
+- **Sharpe** : return / volatilité × √252 (> 1.0 = bon, > 1.5 = excellent)
+- **Max DD** : pire drawdown depuis le pic (< -20% = risque élevé)
+- **Profit Factor** : gains bruts / pertes brutes (> 1.5 = stratégie rentable)
+- **Trades** : nombre total (< 20 = pas statistiquement fiable)
+- **Performance par année** : 2022 (bear) / 2023 (bull lent) / 2024 (bull fort)
+- **Performance par régime** : BULL / RANGE / BEAR / HIGH_VOL → base pour Bot Z
+
+### Note méthodologique
+
+- Bot A simulé sur daily (live = 4h) — légère surestimation des trades
+- Pas de filtre Claude sur Bot A en backtest (assume toujours CONFIRME)
+- Frais et slippage appliqués : 0.26% + 0.10% par trade
+- Pas de survivorship bias : tous les 20 symboles actuels testés
+
+---
+
 ## Gestion du risque commune
 
 | Règle | Valeur |
