@@ -148,14 +148,16 @@ def analyze(records: list, export_csv: bool = False):
         reason = r.get("engine_reason", {})
         if eng != prev_eng and prev_eng is not None:
             switches.append({
-                "ts":       r.get("timestamp", "?")[:16],
-                "from":     prev_eng,
-                "to":       eng,
-                "hard_rule": reason.get("hard_rule_pro", False),
-                "vix":      reason.get("vix", "?"),
-                "dd_pct":   reason.get("port_dd_pct", "?"),
-                "regime":   reason.get("regime", "?"),
-                "raw_engine": reason.get("raw_engine", "?"),
+                "ts":               r.get("timestamp", "?")[:16],
+                "from":             prev_eng,
+                "to":               eng,
+                "hard_rule":        reason.get("hard_rule_pro", False),
+                "vix":              reason.get("vix", "?"),
+                "dd_pct":           reason.get("port_dd_pct", "?"),
+                "regime":           reason.get("regime", "?"),
+                "raw_engine":       reason.get("raw_engine", "?"),
+                "regime_confidence": r.get("regime_confidence", ""),
+                "btc_realized_vol": r.get("btc_realized_vol", ""),
             })
         prev_eng = eng
 
@@ -208,6 +210,42 @@ def analyze(records: list, export_csv: bool = False):
     vix_values = [float(r.get("vix", 0)) for r in records if r.get("vix")]
     vix_avg = sum(vix_values) / len(vix_values) if vix_values else 0
     vix_max = max(vix_values) if vix_values else 0
+
+    # ── Vol targeting (Meta v2+) ──────────────────────────────────────────────
+    vol_factors   = [float(r.get("vol_factor", 1.0)) for r in records if "vol_factor" in r]
+    portfolio_vols = [float(r.get("portfolio_vol", 0)) for r in records if "portfolio_vol" in r]
+    vol_factor_avg = sum(vol_factors) / len(vol_factors) if vol_factors else 1.0
+    vol_factor_min = min(vol_factors) if vol_factors else 1.0
+    vol_factor_max = max(vol_factors) if vol_factors else 1.0
+    n_vol_reduced  = sum(1 for v in vol_factors if v < 0.95)
+    n_vol_boosted  = sum(1 for v in vol_factors if v > 1.05)
+    port_vol_avg   = sum(portfolio_vols) / len(portfolio_vols) if portfolio_vols else 0.0
+
+    # ── Corrélation inter-bots (Meta v2+) ─────────────────────────────────────
+    corr_values    = [float(r.get("avg_bot_corr", 0)) for r in records if "avg_bot_corr" in r]
+    corr_avg       = sum(corr_values) / len(corr_values) if corr_values else 0.0
+    corr_max       = max(corr_values) if corr_values else 0.0
+    n_corr_reduced = sum(1 for r in records if float(r.get("corr_factor", 1.0)) < 1.0)
+
+    # ── Allocation drift (Meta v2+) ────────────────────────────────────────────
+    drift_values  = [float(r.get("alloc_drift", 0)) for r in records if "alloc_drift" in r]
+    drift_avg     = sum(drift_values) / len(drift_values) if drift_values else 0.0
+    drift_max     = max(drift_values) if drift_values else 0.0
+    drift_last    = drift_values[-1] if drift_values else 0.0
+    n_drift_warn  = sum(1 for v in drift_values if v > 0.20)
+
+    # ── Regime confidence & persistence (Meta v2+) ────────────────────────────
+    conf_values     = [float(r.get("regime_confidence", 1.0)) for r in records if "regime_confidence" in r]
+    strength_values = [float(r.get("regime_strength", 1.0)) for r in records if "regime_strength" in r]
+    conf_avg        = sum(conf_values) / len(conf_values) if conf_values else 1.0
+    strength_avg    = sum(strength_values) / len(strength_values) if strength_values else 1.0
+    n_low_conf      = sum(1 for v in conf_values if v < 0.5)
+
+    # ── BTC realized vol overrides (Meta v2+) ─────────────────────────────────
+    btc_vols         = [float(r.get("btc_realized_vol", 0)) for r in records if "btc_realized_vol" in r]
+    btc_vol_avg      = sum(btc_vols) / len(btc_vols) if btc_vols else 0.0
+    btc_vol_max      = max(btc_vols) if btc_vols else 0.0
+    n_btc_highvol    = sum(1 for v in btc_vols if v > 0.80)
 
     # ─────────────────────────────────────────────────────────────────────────
     # AFFICHAGE
@@ -317,7 +355,75 @@ def analyze(records: list, export_csv: bool = False):
         b_bar = bar(avg, INITIAL_CAP * 0.5, 24)
         print(f"  {bc}{name:<20}{RST} {avg:>8.0f}€  {pct:>5.1f}%  {b_bar}")
 
-    # ── 8. Recommandations ────────────────────────────────────────────────────
+    # ── 8. Métriques Meta v2+ ─────────────────────────────────────────────────
+    separator("META v2+ — VOL TARGETING / CORRÉLATION / DRIFT")
+
+    # Vol targeting
+    has_vt = len(vol_factors) > 0
+    if has_vt:
+        vt_c = Y if n_vol_reduced > 0 or n_vol_boosted > 0 else G
+        print(f"  Vol targeting     : vol_factor moy={vol_factor_avg:.2f}  min={vol_factor_min:.2f}  max={vol_factor_max:.2f}")
+        print(f"  Portfolio vol moy : {port_vol_avg:.0%}  |  "
+              f"Réduit {n_vol_reduced}× (vol>cible)  |  Boosté {n_vol_boosted}× (vol<cible)")
+        if n_vol_reduced > n * 0.3:
+            print(f"  {Y}⚠ Vol targeting réduisait fréquemment l'expo → régime volatile{RST}")
+        elif n_vol_boosted > n * 0.3:
+            print(f"  {Y}⚠ Vol targeting boostait fréquemment → portfolio trop calme{RST}")
+        else:
+            print(f"  {G}✓ Vol targeting stable — ajustements marginaux{RST}")
+    else:
+        print(f"  {DIM}Vol targeting : données absentes (cycles pré-v2+){RST}")
+
+    # Corrélation
+    has_corr = len(corr_values) > 0
+    if has_corr:
+        print(f"\n  Corrélation moy   : {corr_avg:.0%}  |  Max : {corr_max:.0%}  |  "
+              f"Réductions expo : {n_corr_reduced}×")
+        if n_corr_reduced > 0:
+            print(f"  {Y}⚠ Bots trop corrélés {n_corr_reduced} cycles → exposition réduite ×0.80{RST}")
+        else:
+            print(f"  {G}✓ Corrélation inter-bots sous le seuil — diversification suffisante{RST}")
+    else:
+        print(f"  {DIM}Corrélation : données absentes (cycles pré-v2+){RST}")
+
+    # Drift allocation
+    has_drift = len(drift_values) > 0
+    if has_drift:
+        drift_c = R if drift_last > 0.20 else (Y if drift_last > 0.10 else G)
+        print(f"\n  Drift allocation  : moy={drift_avg:.0%}  max={drift_max:.0%}  actuel={drift_c}{drift_last:.0%}{RST}")
+        print(f"  Warnings drift>20%: {n_drift_warn}× sur {len(drift_values)} cycles")
+        if drift_last > 0.20:
+            print(f"  {R}✗ Drift élevé : allocation cible ≠ réalité → backtest peu représentatif{RST}")
+        elif drift_avg > 0.15:
+            print(f"  {Y}⚠ Drift moyen élevé — budget dispatch branché résoudrait ce point{RST}")
+        else:
+            print(f"  {G}✓ Drift faible — paper trading cohérent avec backtest{RST}")
+    else:
+        print(f"  {DIM}Drift : données absentes (cycles pré-v2+){RST}")
+
+    # Regime confidence & persistence
+    if len(conf_values) > 0:
+        print(f"\n  Confiance régime  : moy={conf_avg:.0%}  |  Faible (<50%) : {n_low_conf}×")
+        print(f"  Persistance moy   : {strength_avg:.0%}  (pleine à 7j de régime stable)")
+        if n_low_conf > n * 0.2:
+            print(f"  {Y}⚠ Régime souvent incertain — OMEGA favorisé (neutre) {n_low_conf} cycles{RST}")
+        else:
+            print(f"  {G}✓ Régime stable et confiant la plupart du temps{RST}")
+    else:
+        print(f"  {DIM}Confidence/persistance : données absentes (cycles pré-v2+){RST}")
+
+    # BTC realized vol
+    if len(btc_vols) > 0:
+        print(f"\n  BTC realized vol  : moy={btc_vol_avg:.0%}  max={btc_vol_max:.0%}  "
+              f"  Overrides HIGH_VOL: {n_btc_highvol}×")
+        if n_btc_highvol > 0:
+            print(f"  {Y}⚠ BTC vol >80% a forcé HIGH_VOL {n_btc_highvol}× (VIX était potentiellement bas){RST}")
+        else:
+            print(f"  {G}✓ BTC vol sous le seuil — pas d'override crypto{RST}")
+    else:
+        print(f"  {DIM}BTC realized vol : données absentes (cycles pré-v2+){RST}")
+
+    # ── 10. Recommandations ────────────────────────────────────────────────────
     separator("RECOMMANDATIONS PRÉ-LIVE")
     recs = []
 
@@ -365,12 +471,18 @@ def analyze(records: list, export_csv: bool = False):
     # ── Export CSV ────────────────────────────────────────────────────────────
     if export_csv:
         os.makedirs(REPORT_DIR, exist_ok=True)
-        # Equity + engine timeline
+
+        # Equity + engine timeline (enrichi Meta v2+)
         eq_path = os.path.join(REPORT_DIR, "equity_timeline.csv")
         with open(eq_path, "w", newline="") as f:
             w = csv.writer(f)
-            w.writerow(["timestamp", "z_capital", "perf_pct", "regime", "engine",
-                        "cb_factor", "port_dd", "vix", "mtm_live"])
+            w.writerow([
+                "timestamp", "z_capital", "perf_pct", "regime", "engine",
+                "cb_factor", "port_dd", "vix", "btc_trend", "mtm_live",
+                "regime_confidence", "regime_strength", "days_in_regime",
+                "vol_factor", "portfolio_vol", "avg_bot_corr", "corr_factor",
+                "alloc_drift", "btc_realized_vol",
+            ])
             for r in records:
                 w.writerow([
                     r.get("timestamp", "")[:16],
@@ -381,24 +493,38 @@ def analyze(records: list, export_csv: bool = False):
                     r.get("cb_factor", ""),
                     r.get("port_dd", ""),
                     r.get("vix", ""),
+                    r.get("btc_trend", ""),
                     r.get("mtm_live", False),
+                    r.get("regime_confidence", ""),
+                    r.get("regime_strength", ""),
+                    r.get("days_in_regime", ""),
+                    r.get("vol_factor", ""),
+                    r.get("portfolio_vol", ""),
+                    r.get("avg_bot_corr", ""),
+                    r.get("corr_factor", ""),
+                    r.get("alloc_drift", ""),
+                    r.get("btc_realized_vol", ""),
                 ])
-        print(f"\n  {G}✓ Equity timeline → {eq_path}{RST}")
+        print(f"\n  {G}✓ Equity timeline  → {eq_path}{RST}")
 
-        # Switchs
+        # Switchs (enrichi)
         sw_path = os.path.join(REPORT_DIR, "engine_switches.csv")
         with open(sw_path, "w", newline="") as f:
             w = csv.writer(f)
-            w.writerow(["timestamp", "from_engine", "to_engine", "hard_rule", "vix", "dd_pct", "regime"])
+            w.writerow(["timestamp", "from_engine", "to_engine", "hard_rule",
+                        "vix", "dd_pct", "regime", "regime_confidence", "btc_realized_vol"])
             for sw in switches:
-                w.writerow([sw["ts"], sw["from"], sw["to"], sw["hard_rule"], sw["vix"], sw["dd_pct"], sw["regime"]])
-        print(f"  {G}✓ Engine switches → {sw_path}{RST}")
+                w.writerow([sw["ts"], sw["from"], sw["to"], sw["hard_rule"],
+                            sw["vix"], sw["dd_pct"], sw["regime"],
+                            sw.get("regime_confidence", ""), sw.get("btc_realized_vol", "")])
+        print(f"  {G}✓ Engine switches  → {sw_path}{RST}")
 
         # Budget history
         bgt_path = os.path.join(REPORT_DIR, "budget_history.csv")
         with open(bgt_path, "w", newline="") as f:
             w = csv.writer(f)
-            w.writerow(["timestamp", "engine", "regime", "budget_a", "budget_b", "budget_c", "budget_g"])
+            w.writerow(["timestamp", "engine", "regime", "budget_a", "budget_b", "budget_c", "budget_g",
+                        "vol_factor", "corr_factor", "alloc_drift"])
             for r in records:
                 bgt = r.get("budget", {})
                 w.writerow([
@@ -406,8 +532,36 @@ def analyze(records: list, export_csv: bool = False):
                     r.get("current_engine", ""),
                     r.get("regime", ""),
                     bgt.get("a", ""), bgt.get("b", ""), bgt.get("c", ""), bgt.get("g", ""),
+                    r.get("vol_factor", ""),
+                    r.get("corr_factor", ""),
+                    r.get("alloc_drift", ""),
                 ])
         print(f"  {G}✓ Budget history   → {bgt_path}{RST}")
+
+        # Meta v2+ metrics timeline
+        meta_path = os.path.join(REPORT_DIR, "meta_v2plus_metrics.csv")
+        with open(meta_path, "w", newline="") as f:
+            w = csv.writer(f)
+            w.writerow(["timestamp", "regime_confidence", "regime_strength", "days_in_regime",
+                        "vol_factor", "portfolio_vol", "avg_bot_corr", "corr_factor",
+                        "alloc_drift", "btc_realized_vol",
+                        "score_a", "score_b", "score_c", "score_g",
+                        "vol_a", "vol_b", "vol_c", "vol_g"])
+            for r in records:
+                reason = r.get("engine_reason", {})
+                scores = reason.get("rolling_scores", {})
+                vols   = reason.get("bot_vols", {})
+                w.writerow([
+                    r.get("timestamp", "")[:16],
+                    r.get("regime_confidence", ""), r.get("regime_strength", ""),
+                    r.get("days_in_regime", ""),
+                    r.get("vol_factor", ""), r.get("portfolio_vol", ""),
+                    r.get("avg_bot_corr", ""), r.get("corr_factor", ""),
+                    r.get("alloc_drift", ""), r.get("btc_realized_vol", ""),
+                    scores.get("a", ""), scores.get("b", ""), scores.get("c", ""), scores.get("g", ""),
+                    vols.get("a", ""), vols.get("b", ""), vols.get("c", ""), vols.get("g", ""),
+                ])
+        print(f"  {G}✓ Meta v2+ metrics → {meta_path}{RST}")
 
     # ── Pied de page ──────────────────────────────────────────────────────────
     separator()

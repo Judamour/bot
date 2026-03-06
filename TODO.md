@@ -51,11 +51,50 @@
       Niveau 3 : budget=0 prolongé → sortie forcée graduelle (prochaines 3 clôtures)
       → A FAIRE APRÈS revue 2026-04-30 avec données réelles
 
-## Prochaine session — Priorités
+## Revue 2026-04-30 — Protocole complet
 
-- [ ] **Revue données paper** — Lancer `python backtest/analyze_botz.py --csv` sur données VPS
-      → Fréquence switchs engine, % hard_rule_pro, durée par engine, CB activations
-      → Vérifier que quality scores convergent (trade count par bot)
+### 0. Récupérer les données du VPS
+```bash
+ssh ubuntu@51.210.13.248
+sudo cp /home/botuser/bot-trading/logs/bot_z/shadow.jsonl /tmp/shadow_2026-04-30.jsonl
+exit
+scp ubuntu@51.210.13.248:/tmp/shadow_2026-04-30.jsonl backtest/results/
+```
+
+### 1. Rapport Bot Z (rapport principal)
+```bash
+python backtest/analyze_botz.py --csv
+# Génère : equity_timeline.csv | engine_switches.csv | budget_history.csv | meta_v2plus_metrics.csv
+```
+
+**Questions clés à répondre** :
+- [ ] Fréquence switchs engine (cible < 0.3/jour) — si > : augmenter hysteresis OMEGA à 7j
+- [ ] % temps en PRO (cible < 30%) — si > : hard rules trop sensibles ?
+- [ ] MaxDD paper (cible < -12%) — si > : CB trop lent ?
+- [ ] Rolling scores convergés ? (cible : score > 1.0 pour G et C après 20 trades)
+- [ ] Vol_factor moyen (cible : 0.85-1.15 → vol targeting actif mais stable)
+- [ ] Allocation drift moyen (cible < 15%) — si > 20% : budget dispatch urgent
+- [ ] Corrélation inter-bots (cible < 50%) — si > 70% régulier : stratégies trop similaires
+- [ ] BTC override HIGH_VOL : combien d'épisodes ? Ont-ils évité des pertes ?
+- [ ] Regime confidence moyenne (cible > 0.65) — si < : paramètres régime à ajuster
+
+### 2. Rapport Contest (A/B/C/G individuels)
+```bash
+# Sur VPS ou en local avec state files récupérés
+python backtest/analyze_botz.py --csv
+# + vérifier manuellement logs/supertrend/state.json, momentum, breakout, trend
+```
+- [ ] Quel bot a le meilleur win rate 20 derniers trades ?
+- [ ] Bot B (Momentum) : combien de rotations ? VIX>30 a bloqué combien de fois ?
+- [ ] Bot C (Breakout) : le VIX scaling a-t-il réduit les positions ?
+
+### 3. Décision go/no-go
+- [ ] **Budget dispatch** — Brancher si drift < 15% et rolling scores convergés
+- [ ] **Risk budgeting par trade** — si budget dispatch branché : ajouter risk_per_trade_eur
+- [ ] **Passage en live** — Décision finale (cible : live en 2026-07 si paper ≥ 4 mois)
+- [ ] **Ajustement paramètres** — switch penalty, regime_persist_days, btc_vol_threshold
+
+## Prochaine session — Priorités
 
 - [ ] **Budget dispatch + Risk Budgeting par trade** (audit ChatGPT — upgrade prioritaire)
       Aujourd'hui Bot Z envoie budget en € mais les bots tradent avec leurs règles internes.
