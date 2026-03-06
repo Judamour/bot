@@ -669,6 +669,8 @@ Distribution : ENHANCED 16% / BALANCED 42% / PRO 42%
 | **Paper Trading Enhanced** | 🟢 En cours | 10 000€, démarré 2026-03-06 |
 | Revue résultats | 📅 2026-04-30 | Analyse 55 jours de data live |
 | Bot Z Omega backtest | ✅ Terminé | Sharpe 1.96, MaxDD -8.7%, 2022 +0.2% |
+| Bot J Mean Reversion | ✅ Backtest | MaxDD -1.7%, WinRate 70.8%, corr basse avec trend |
+| Bot Z Omega v2 (RP+ML) | ✅ Backtest | Sharpe 2.03 (record), MaxDD -7.6% |
 | Bot Z Adaptive v2 | 🔲 Prévu | Seuils PRO ajustés + backtest |
 | Live Trading | 🔲 Futur | Après validation ~6 mois paper |
 
@@ -687,9 +689,9 @@ Distribution : ENHANCED 16% / BALANCED 42% / PRO 42%
 python backtest/multi_backtest.py
 ```
 
-Durée : ~42s (fetch 16 symboles × 6 ans + 6 bots + 7 structures Bot Z + MC 5000)
+Durée : ~45s (fetch 16 symboles × 6 ans + 7 bots + 8 structures Bot Z + MC 5000)
 
-### 7 structures Bot Z simulées
+### 8 structures Bot Z simulées
 
 | Structure | CAGR | Sharpe | MaxDD | Clé résultats |
 |-----------|------|--------|-------|---------------|
@@ -701,6 +703,7 @@ Durée : ~42s (fetch 16 symboles × 6 ans + 6 bots + 7 structures Bot Z + MC 500
 | Pro | +29.9% | 1.90 | -9.1% | VT + multi-CB |
 | Adaptive | +29.4% | 1.60 | -11.7% | Meta-switch E/B/P |
 | **Omega** | +55.5% | **1.96** | **-8.7%** | ER+Risk+Corr+softmax |
+| Omega v2 | +26.1% | **2.03** | **-7.6%** | Omega + Risk Parity + Meta-Learning |
 
 ### Validations statistiques incluses
 

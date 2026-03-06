@@ -772,6 +772,148 @@ def backtest_bot_i(daily_cache):
     return {"trades": trades, "equity": equity, "dates": dates, "name": "Bot I — RS Leaders"}
 
 
+# ── 10b. BOT J — MEAN REVERSION (RSI(2) + Bollinger + SMA200) ────────────────
+
+def backtest_bot_j_mean_reversion(daily_cache: dict) -> dict:
+    """
+    Bot J — Mean Reversion : stratégie anti-tendance, complémentaire aux bots trend.
+    Profil : faible corrélation avec A/B/C/G, gagne quand le marché est choppy/range.
+
+    Entrée LONG :
+      - RSI(2) < 5        — survente extrême sur 2 barres
+      - Close < Bollinger Lower (20j, 2σ) — extension vers le bas
+      - Close > SMA200    — filtre : ne pas acheter contre une tendance baissière majeure
+
+    Sortie :
+      - RSI(2) > 60 (retour à la normale)
+      - OU close > SMA20 (milieu Bollinger)
+
+    Stop : 1.5 × ATR14 sous l'entrée
+    Sizing : 0.5% du capital par trade, max 10% par position
+    """
+    log("Bot J — Mean Reversion (RSI2 + Bollinger + SMA200)...")
+
+    RISK_PCT    = 0.005   # 0.5% du capital par trade
+    ATR_MULT    = 1.5     # stop = 1.5 × ATR14
+    MAX_POS_PCT = 0.10    # max 10% du capital par position
+
+    trades  = []
+    equity  = []
+    dates   = []
+    capital = INITIAL
+
+    # Universel : tous les symboles valides avec assez de données
+    syms = sorted(daily_cache.keys())
+
+    # Pré-calcul des indicateurs par symbole
+    sigs = {}
+    for sym, df in daily_cache.items():
+        if df is None or len(df) < 210:   # SMA200 + warmup
+            continue
+        c = df["close"]
+        h = df["high"]
+        lo = df["low"]
+
+        # RSI(2)
+        delta = c.diff()
+        gain = delta.clip(lower=0).rolling(2).mean()
+        loss = (-delta.clip(upper=0)).rolling(2).mean()
+        rs   = gain / (loss + 1e-10)
+        rsi2 = 100 - 100 / (1 + rs)
+
+        # Bollinger Bands (20, 2σ)
+        bb_mid   = c.rolling(20).mean()
+        bb_std   = c.rolling(20).std()
+        bb_lower = bb_mid - 2 * bb_std
+
+        # SMA200
+        sma200 = c.rolling(200).mean()
+
+        # ATR14
+        atr14 = compute_atr(h, lo, c, 14)
+
+        sig = pd.DataFrame({
+            "close": c, "rsi2": rsi2, "bb_lower": bb_lower,
+            "bb_mid": bb_mid, "sma200": sma200, "atr14": atr14,
+        })
+        sig.dropna(inplace=True)
+        if len(sig) > 0:
+            sigs[sym] = sig
+
+    if not sigs:
+        return {"trades": [], "equity": [INITIAL], "dates": [], "name": "Bot J — Mean Reversion"}
+
+    # Dates communes (tous les jours où au moins un symbole est disponible)
+    all_dates = sorted({d for sig in sigs.values() for d in sig.index})
+
+    positions = {}   # {sym: {"entry": price, "stop": price, "size": size, "cost": cost}}
+
+    for dt in all_dates:
+        prices = {sym: float(sigs[sym].loc[dt, "close"])
+                  for sym in sigs if dt in sigs[sym].index}
+
+        # ── Gérer les stops et les sorties ──────────────────────────────────
+        to_close = []
+        for sym, pos in positions.items():
+            if sym not in prices:
+                continue
+            px = prices[sym]
+            # Stop hit
+            if px <= pos["stop"]:
+                pnl = (pos["stop"] - pos["entry"]) * pos["size"]  # négatif
+                cost_close = _cost(pos["size"], pos["stop"]) - pos["cost"]
+                capital += pos["cost"] + pnl - abs(cost_close) * FEE
+                trades.append({"pnl": pnl - abs(cost_close) * FEE, "exit": "stop"})
+                to_close.append(sym)
+                continue
+            # RSI exit ou retour au milieu Bollinger
+            if sym in sigs and dt in sigs[sym].index:
+                row = sigs[sym].loc[dt]
+                if row["rsi2"] > 60 or px > row["bb_mid"]:
+                    pnl = (px - pos["entry"]) * pos["size"]
+                    cost_close = pos["size"] * px * FEE
+                    net_pnl = pnl - cost_close
+                    capital += pos["cost"] + net_pnl
+                    trades.append({"pnl": net_pnl, "exit": "rsi_exit"})
+                    to_close.append(sym)
+        for sym in to_close:
+            del positions[sym]
+
+        # ── Chercher des signaux d'entrée ────────────────────────────────────
+        for sym, px in prices.items():
+            if sym in positions:
+                continue
+            if sym not in sigs or dt not in sigs[sym].index:
+                continue
+            row = sigs[sym].loc[dt]
+            if pd.isna(row["rsi2"]) or pd.isna(row["bb_lower"]) or pd.isna(row["sma200"]):
+                continue
+            # Signal MR : survente extrême + extension bas + au-dessus tendance
+            if (row["rsi2"] < 5
+                    and px < row["bb_lower"]
+                    and px > row["sma200"]
+                    and row["atr14"] > 0):
+                ep   = _entry(px)
+                stop = ep - ATR_MULT * row["atr14"]
+                risk = ep - stop
+                if risk <= 0:
+                    continue
+                size = min(capital * RISK_PCT / risk,
+                           capital * MAX_POS_PCT / ep)
+                size = max(size, 0)
+                cost = _cost(size, ep)
+                if cost <= capital and size > 0:
+                    capital -= cost
+                    positions[sym] = {"entry": ep, "stop": stop,
+                                      "size": size, "cost": cost}
+
+        pv = capital + sum(prices.get(s, p["entry"]) * p["size"] for s, p in positions.items())
+        equity.append(pv)
+        dates.append(dt)
+
+    return {"trades": trades, "equity": equity, "dates": dates, "name": "Bot J — Mean Reversion"}
+
+
 # ── 11. BOT Z — PORTFOLIO SIMULÉ ─────────────────────────────────────────────
 
 # Poids Bot Z pur par régime — CALIBRATION V2 (validée backtest 2020-2026)
@@ -1692,6 +1834,241 @@ def backtest_bot_z_omega(results: dict, vix_s: pd.Series, qqq_df: pd.DataFrame,
     }
 
 
+# ── 13e. BOT Z OMEGA V2 — Risk Parity + Meta-Learning ─────────────────────────
+
+def backtest_bot_z_omega_v2(results: dict, vix_s: pd.Series, qqq_df: pd.DataFrame,
+                             daily_cache: dict) -> dict:
+    """
+    Bot Z Omega v2 — Toutes les couches Omega + 2 couches supplémentaires :
+
+      6. Risk Parity (Equal Risk Contribution) :
+         Ajuste les poids pour que chaque bot contribue également au risque total.
+         Approximation inverse-vol : w_rp_i ∝ 1/vol_20d_i
+         Poids final = blend 50% Omega + 50% Risk Parity
+
+      7. Meta-Learning (strategy decay detection) :
+         Détecte quand un bot sous-performe par rapport à ses attentes historiques.
+         edge_score = return_30d_réel - return_30d_attendu (basé sur Sharpe long terme)
+         confidence = clip(1 + edge_score / 0.05, 0.4, 1.5)
+         → réduit l'allocation aux bots en perte d'edge avant que le DD explose
+    """
+    log("Bot Z Omega v2 — Risk Parity + Meta-Learning...")
+
+    valid = {k: results[k] for k in VALID_BOTS_Z if k in results and results[k]["equity"]}
+    # Inclure Bot J s'il est disponible (diversification factor)
+    if "j" in results and results["j"]["equity"]:
+        valid["j"] = results["j"]
+    if len(valid) < 2:
+        return {}
+
+    date_sets = [set(r["dates"]) for r in valid.values()]
+    common_dates = sorted(set.intersection(*date_sets))
+    if not common_dates:
+        return {}
+
+    n_bots        = len(valid)
+    initial_total = INITIAL * len(VALID_BOTS_Z)  # toujours 4×1000€ comme base de comparaison
+
+    bot_norm = {}
+    for k, r in valid.items():
+        bot_norm[k] = {d: v / INITIAL for d, v in zip(r["dates"], r["equity"])}
+
+    # BTC EMA200 (momentum overlay)
+    btc_df = daily_cache.get("BTC/EUR")
+    btc_norm = {}
+    if btc_df is not None and "ema200" in btc_df.columns:
+        for dt, row in btc_df.iterrows():
+            btc_norm[dt] = {"close": row["close"], "ema200": row["ema200"]}
+
+    SHARPE_WIN    = 90
+    VOL_WIN       = 20
+    SLOPE_WIN     = 60
+    CORR_WIN      = 20
+    META_WIN      = 30    # fenêtre meta-learning (30j)
+    SOFTMAX_BETA  = 3.0
+    CB_THRESHOLD  = -0.25
+    CB_MIN_FACTOR = 0.30
+    CB_RECOVERY   = 0.005
+    RP_BLEND      = 0.5   # 50% Omega + 50% Risk Parity
+
+    ret_history  = {k: [] for k in valid}
+    eq_history   = {k: [] for k in valid}
+    bot_peaks    = {k: 1.0 for k in valid}
+
+    cb_peak   = initial_total
+    cb_factor = 1.0
+
+    eq_v2     = [initial_total]
+    dates_out = [common_dates[0]]
+
+    for i in range(1, len(common_dates)):
+        dt      = common_dates[i]
+        prev_dt = common_dates[i - 1]
+
+        # ── Retours + historique ─────────────────────────────────────────────
+        bot_r = {}
+        for k in valid:
+            p = bot_norm[k].get(prev_dt, 1.0)
+            c = bot_norm[k].get(dt, p)
+            bot_r[k] = (c / p - 1) if p > 0 else 0.0
+            ret_history[k].append(bot_r[k])
+            eq_val = bot_norm[k].get(dt, 1.0)
+            eq_history[k].append(eq_val)
+            if eq_val > bot_peaks[k]:
+                bot_peaks[k] = eq_val
+
+        # ── Régime + Momentum Overlay ────────────────────────────────────────
+        regime = _get_regime_at_dt(dt, vix_s, qqq_df)
+        try:
+            dt_norm    = pd.Timestamp(dt).normalize().tz_localize(None)
+            qqq_close  = float(qqq_df["Close"].asof(dt_norm))
+            qqq_sma200 = float(qqq_df["sma200"].asof(dt_norm))
+            qqq_bearish = qqq_close < qqq_sma200
+        except Exception:
+            qqq_bearish = False
+        btc_row = btc_norm.get(dt) or btc_norm.get(prev_dt)
+        btc_bearish = (btc_row is not None and btc_row["ema200"] > 0
+                       and btc_row["close"] < btc_row["ema200"])
+        if btc_bearish and qqq_bearish:
+            regime = "BEAR"
+        elif btc_bearish or qqq_bearish:
+            regime = "HIGH_VOL" if regime in ("BULL", "RANGE") else regime
+
+        raw_regime_w = REGIME_WEIGHTS_Z.get(regime, REGIME_WEIGHTS_Z["RANGE"])
+
+        # ── ER + Risk scores (identique Omega) ──────────────────────────────
+        warmup = min(len(ret_history[k]) for k in valid)
+        ks = list(valid.keys())
+
+        er_comp   = {k: {} for k in ks}
+        risk_comp = {k: {} for k in ks}
+
+        for k in ks:
+            hist = ret_history[k]
+            eq_h = eq_history[k]
+            if warmup >= SHARPE_WIN:
+                r90 = np.array(hist[-SHARPE_WIN:])
+                sharpe_90 = (float(r90.mean() / r90.std() * math.sqrt(252))
+                             if r90.std() > 1e-8 else 0.0)
+                pos_sum = sum(r for r in hist[-SHARPE_WIN:] if r > 0)
+                neg_sum = abs(sum(r for r in hist[-SHARPE_WIN:] if r < 0))
+                pf_90 = min((pos_sum / neg_sum) if neg_sum > 1e-8 else 3.0, 5.0)
+                if len(eq_h) >= SLOPE_WIN:
+                    eq_s = np.array(eq_h[-SLOPE_WIN:])
+                    x = np.arange(len(eq_s))
+                    slope = (float(np.polyfit(x, eq_s / max(eq_s[0], 1e-8), 1)[0]) * 252
+                             if eq_s.std() > 1e-8 else 0.0)
+                else:
+                    slope = 0.0
+                total_rw = sum(raw_regime_w.values()) or 1.0
+                regime_fit = raw_regime_w.get(k, 0) / (total_rw / max(len(VALID_BOTS_Z), 1))
+                er_comp[k] = {"sharpe": sharpe_90, "pf": pf_90,
+                              "slope": slope, "regime_fit": regime_fit}
+                r20 = np.array(hist[-VOL_WIN:])
+                vol_20 = float(r20.std() * math.sqrt(252)) if r20.std() > 1e-8 else 0.01
+                down_r = r20[r20 < 0]
+                down_vol = (float(down_r.std() * math.sqrt(252))
+                            if len(down_r) > 1 and down_r.std() > 1e-8 else vol_20)
+                dd_k = abs(eq_history[k][-1] / bot_peaks[k] - 1) if bot_peaks[k] > 0 else 0.0
+                risk_comp[k] = {"vol": vol_20, "down_vol": down_vol, "dd": dd_k}
+            else:
+                er_comp[k]   = {"sharpe": 0.0, "pf": 1.0, "slope": 0.0, "regime_fit": 1.0}
+                risk_comp[k] = {"vol": 0.3, "down_vol": 0.3, "dd": 0.0}
+
+        def _z(vals):
+            arr = np.array(vals, dtype=float)
+            m, s = arr.mean(), arr.std()
+            return list((arr - m) / s) if s > 1e-8 else [0.0] * len(vals)
+
+        sharpe_z = dict(zip(ks, _z([er_comp[k]["sharpe"]     for k in ks])))
+        pf_z     = dict(zip(ks, _z([er_comp[k]["pf"]         for k in ks])))
+        slope_z  = dict(zip(ks, _z([er_comp[k]["slope"]      for k in ks])))
+        regime_z = dict(zip(ks, _z([er_comp[k]["regime_fit"] for k in ks])))
+        vol_z    = dict(zip(ks, _z([risk_comp[k]["vol"]      for k in ks])))
+        dvol_z   = dict(zip(ks, _z([risk_comp[k]["down_vol"] for k in ks])))
+        dd_z     = dict(zip(ks, _z([risk_comp[k]["dd"]       for k in ks])))
+
+        er_score   = {k: 0.35*sharpe_z[k] + 0.25*pf_z[k]
+                        + 0.20*slope_z[k] + 0.20*regime_z[k] for k in ks}
+        risk_score = {k: 0.4*vol_z[k] + 0.3*dvol_z[k] + 0.3*dd_z[k] for k in ks}
+        net_score  = {k: er_score[k] - risk_score[k] for k in ks}
+
+        corr_penalty = {k: 1.0 for k in ks}
+        if warmup >= CORR_WIN:
+            rets_mat = np.array([ret_history[k][-CORR_WIN:] for k in ks])
+            try:
+                corr_m = np.corrcoef(rets_mat)
+                n = len(ks)
+                for ii, k in enumerate(ks):
+                    others = [corr_m[ii, jj] for jj in range(n) if jj != ii]
+                    avg_c  = float(np.mean(others)) if others else 0.0
+                    corr_penalty[k] = max(0.3, 1.0 - max(0.0, avg_c - 0.5) / 0.5)
+            except Exception:
+                pass
+
+        final_scores = {k: net_score[k] * corr_penalty[k] for k in ks}
+        max_s   = max(final_scores.values())
+        exp_s   = {k: math.exp(SOFTMAX_BETA * (final_scores[k] - max_s)) for k in ks}
+        total_e = sum(exp_s.values()) or 1.0
+        omega_weights = {k: exp_s[k] / total_e for k in ks}
+
+        # ── Couche 6 : Risk Parity (inverse-vol) ────────────────────────────
+        vols_k = {k: max(risk_comp[k]["vol"], 0.01) for k in ks}
+        inv_vol = {k: 1.0 / vols_k[k] for k in ks}
+        total_iv = sum(inv_vol.values()) or 1.0
+        rp_weights = {k: inv_vol[k] / total_iv for k in ks}
+
+        # Blend Omega + Risk Parity
+        blended = {k: (1 - RP_BLEND) * omega_weights[k] + RP_BLEND * rp_weights[k] for k in ks}
+
+        # ── Couche 7 : Meta-Learning (strategy decay detection) ──────────────
+        meta_confidence = {k: 1.0 for k in ks}
+        if warmup >= max(SHARPE_WIN, META_WIN + 1):
+            # Sharpe long-terme de chaque bot (sur toute l'historique disponible)
+            for k in ks:
+                full_hist = np.array(ret_history[k])
+                long_sharpe = (float(full_hist.mean() / full_hist.std() * math.sqrt(252))
+                               if full_hist.std() > 1e-8 else 0.0)
+                # Retour attendu sur 30j selon Sharpe long terme
+                expected_daily = long_sharpe / math.sqrt(252)
+                expected_30d   = (1 + expected_daily) ** META_WIN - 1
+
+                # Retour réel des 30 derniers jours
+                r30 = np.array(ret_history[k][-META_WIN:])
+                actual_30d = float(np.prod(1 + r30) - 1)
+
+                edge_score = actual_30d - expected_30d
+                meta_confidence[k] = max(0.4, min(1.5, 1.0 + edge_score / 0.05))
+
+        # Appliquer la confidence meta-learning sur les poids blendés
+        adjusted = {k: blended[k] * meta_confidence[k] for k in ks}
+        total_adj = sum(adjusted.values()) or 1.0
+        final_weights = {k: adjusted[k] / total_adj for k in ks}
+
+        r_port = sum(final_weights[k] * bot_r[k] for k in ks)
+
+        # ── Circuit Breaker ──────────────────────────────────────────────────
+        current_pv = eq_v2[-1]
+        if current_pv > cb_peak:
+            cb_peak = current_pv
+        port_dd = (current_pv - cb_peak) / cb_peak if cb_peak > 0 else 0.0
+        if port_dd < CB_THRESHOLD:
+            cb_factor = max(CB_MIN_FACTOR, cb_factor - 0.05)
+        elif port_dd > -0.05:
+            cb_factor = min(1.0, cb_factor + CB_RECOVERY)
+
+        eq_v2.append(eq_v2[-1] * (1 + cb_factor * r_port))
+        dates_out.append(dt)
+
+    m   = _metrics_portfolio(eq_v2, dates_out, initial_total)
+    ann = annual_returns(eq_v2, dates_out)
+    return {
+        "name":    "Bot Z Omega v2 (RP+ML)",
+        "equity":  eq_v2, "dates": dates_out, "trades": [],
+        "metrics": m, "annual": ann, "regime": {},
+    }
+
+
 # ── 14. WALK-FORWARD TEST ─────────────────────────────────────────────────────
 
 def walk_forward_test(results: dict, vix_s: pd.Series, qqq_df: pd.DataFrame,
@@ -2027,6 +2404,7 @@ def print_report(results, vix_s, qqq_df, z_results=None, wf=None, mc=None):
             ("pro",      Fore.YELLOW,  "← VT + adaptive score + corr spike + multi-tier CB"),
             ("adaptive", Fore.CYAN,    "← meta-switch E/B/P + hysteresis 7/5/3j"),
             ("omega",    Fore.WHITE,   "← ER Engine + Risk Engine + Corr Penalty + softmax"),
+            ("omega_v2", Fore.GREEN,   "← Omega + Risk Parity + Meta-Learning"),
         ]
         for key, color, note in strategy_order:
             r = z_results.get(key)
@@ -2044,7 +2422,7 @@ def print_report(results, vix_s, qqq_df, z_results=None, wf=None, mc=None):
         hdr_z = f"  {'Stratégie':<32}" + "".join(f"  {y:>8}" for y in years)
         print(hdr_z)
         print("  " + "-" * (32 + 10 * len(years)))
-        for key in ["equal", "z", "hybrid", "enhanced", "pro", "adaptive", "omega"]:
+        for key in ["equal", "z", "hybrid", "enhanced", "pro", "adaptive", "omega", "omega_v2"]:
             r = z_results.get(key)
             if not r:
                 continue
@@ -2093,6 +2471,15 @@ def print_report(results, vix_s, qqq_df, z_results=None, wf=None, mc=None):
             print(f"  • Omega vs Enhanced          : {Fore.GREEN if om_cagr > enhanced_cagr else Fore.RED}"
                   f"{om_cagr - enhanced_cagr:+.1f}%/an{Style.RESET_ALL} CAGR | "
                   f"MaxDD={om_dd:.1f}% | Sharpe={om_sharpe:.2f}")
+        omega_v2_r = z_results.get("omega_v2")
+        if omega_v2_r:
+            ov2_cagr   = omega_v2_r["metrics"].get("cagr", 0)
+            ov2_dd     = omega_v2_r["metrics"].get("max_dd", 0)
+            ov2_sharpe = omega_v2_r["metrics"].get("sharpe", 0)
+            base = om_cagr if omega_r else enhanced_cagr
+            print(f"  • Omega v2 vs Omega          : {Fore.GREEN if ov2_cagr > (om_cagr if om_cagr else 0) else Fore.RED}"
+                  f"{ov2_cagr - (om_cagr if om_cagr else 0):+.1f}%/an{Style.RESET_ALL} CAGR | "
+                  f"MaxDD={ov2_dd:.1f}% | Sharpe={ov2_sharpe:.2f}")
         print(f"{Fore.CYAN}{'='*100}{Style.RESET_ALL}")
 
         # Walk-forward et Monte Carlo
@@ -2103,7 +2490,7 @@ def print_report(results, vix_s, qqq_df, z_results=None, wf=None, mc=None):
 
         # Save Z comparison to CSV
         z_rows = []
-        for key in ["equal", "z", "hybrid", "enhanced", "pro", "adaptive", "omega"]:
+        for key in ["equal", "z", "hybrid", "enhanced", "pro", "adaptive", "omega", "omega_v2"]:
             r = z_results.get(key)
             if r:
                 m = r["metrics"]
@@ -2154,6 +2541,7 @@ def plot_equity_curves(results, z_results=None):
                 ("pro",      "-",   2.5, "#ffd700"),
                 ("adaptive", "-",   3.2, "#00d9ff"),
                 ("omega",    "-",   3.0, "#ff6e96"),
+                ("omega_v2", "-",   3.5, "#00ff88"),
             ]
             for key, style, lw, color in z_styles:
                 r = z_results.get(key)
@@ -2202,6 +2590,7 @@ def main():
         "g": backtest_bot_g,
         "h": backtest_bot_h,
         "i": backtest_bot_i,
+        "j": backtest_bot_j_mean_reversion,
     }
 
     results = {}
@@ -2243,6 +2632,11 @@ def main():
         z_omega = backtest_bot_z_omega(results, vix_s, qqq_df, daily)
         if z_omega:
             z_results["omega"] = z_omega
+
+        log("Bot Z Omega v2 — Risk Parity + Meta-Learning...")
+        z_omega_v2 = backtest_bot_z_omega_v2(results, vix_s, qqq_df, daily)
+        if z_omega_v2:
+            z_results["omega_v2"] = z_omega_v2
 
         # Walk-forward test
         wf = walk_forward_test(results, vix_s, qqq_df, daily, split_year=2023)

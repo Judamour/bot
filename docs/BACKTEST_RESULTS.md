@@ -1,7 +1,7 @@
 # Résultats Backtests — Multi-Bots
 
 > Script : `backtest/multi_backtest.py`
-> Dernier run : 2026-03-06 (Run 7 — Bot Z Omega + MC 5000)
+> Dernier run : 2026-03-06 (Run 8 — Bot J MR + Omega v2 RP+ML + MC 5000)
 > Graphique : `backtest/results/multi_equity.png`
 > CSV détaillé : `backtest/results/multi_summary.csv`
 > CSV Bot Z : `backtest/results/bot_z_comparison.csv`
@@ -127,24 +127,29 @@
 
 ### Conclusions
 
-**1. Trois structures optimales selon l'objectif**
+**1. Quatre structures optimales selon l'objectif**
 
 | Objectif | Structure | CAGR | Sharpe | MaxDD |
 |----------|-----------|------|--------|-------|
 | Max croissance | Bot Z Enhanced | +59.8% | 1.61 | -18.9% |
 | Équilibre optimal | **Bot Z Omega** | **+55.5%** | **1.96** | **-8.7%** |
-| Max protection (faible capital) | Bot Z Pro | +29.9% | 1.90 | -9.1% |
+| Max risque-ajusté pur | **Bot Z Omega v2** | +26.1% | **2.03** | **-7.6%** |
+| Capital défensif | Bot Z Pro | +29.9% | 1.90 | -9.1% |
 
 **2. Pourquoi Bot Z Pro est moins en CAGR**
 - Volatility Targeting réduit drastiquement l'expo aux bots très volatils (Bot A vol ~80%/an → factor ×0.25)
 - Résultat : moins de capture des bull runs 2020-2021, mais stabilité maximale
 - 2022 (bear) : seulement **-5.5%** (Bot Pro) vs -9.0% (Enhanced) vs -16.8% (Equal)
 
-**3. Bot Z Omega : Sharpe 1.96 + MaxDD -8.7% = meilleur risque-ajusté global**
-- Meilleur Sharpe de TOUTES les structures (1.96 > Pro 1.90 > Enhanced 1.61)
-- MaxDD -8.7% = légèrement meilleur que Pro (-9.1%)
-- 2022 (bear) : **+0.2%** — quasi-flat, meilleure protection bear de toutes les structures
-- CAGR +55.5% vs Enhanced +59.8% : sacrifice de seulement 4.3%/an pour drastiquement moins de risque
+**3. Bot Z Omega v2 : Sharpe 2.03 = meilleur risque-ajusté de toutes les structures**
+- Meilleur Sharpe de TOUTES les structures (v2 2.03 > Omega 1.96 > Pro 1.90 > Enhanced 1.61)
+- MaxDD -7.6% = meilleur de toutes les structures
+- 2022 (bear) : **+0.1%** — quasi-flat, protection maximale
+- Contrepartie : CAGR +26.1% vs Omega +55.5% → Risk Parity réduit agressivement l'expo aux bots volatils
+
+**Bot Z Omega : meilleur compromis CAGR / risque**
+- CAGR +55.5% (proche Enhanced), Sharpe 1.96, MaxDD -8.7%
+- 2022 bear : +0.2% → protection quasi-parfaite sans sacrifier la croissance
 
 ### Bot Z Adaptive — Analyse Run 6
 
@@ -210,6 +215,54 @@ Au lieu de `REGIME_WEIGHTS_Z[regime]`, Omega calcule à chaque barre :
 - En 2022 (bear crypto -65%), Omega fait **+0.2%** → le Risk Engine a automatiquement réduit l'expo aux bots dangereux (A et B volatils) et sur-pondéré C et G (stables)
 - En 2021 (bull explosif), Omega fait +267% → le ER Engine a correctement identifié A/B comme performants et sur-pondéré
 - La corrélation penalty a protégé en détectant quand les 4 bots convergeaient
+
+### Bot J — Mean Reversion (Run 8)
+
+**Stratégie** : RSI(2) < 5 + Close < Bollinger Lower + Close > SMA200 → entrée long. Sortie : RSI(2) > 60 ou retour au milieu Bollinger. Stop : 1.5×ATR14. Sizing : 0.5% du capital / risque.
+
+**Résultat Run 8 (2020-2026) :**
+
+| CAGR | Sharpe | MaxDD | Trades | Win Rate |
+|------|--------|-------|--------|----------|
+| +1.6% | 1.47 | **-1.7%** | 161 | **70.8%** |
+
+**Interprétation :**
+- MaxDD seulement -1.7% sur 6 ans (dont 2022 bear crypto -65%) → stratégie quasi-indestructible
+- Win rate 70.8% = edge réel de mean reversion
+- CAGR faible (+1.6%) à cause du sizing conservateur (0.5% par trade, max 10% position)
+- **Rôle portfolio** : diversification de facteur. Gagne en range/choppy quand les trend bots souffrent
+- Faible corrélation attendue avec A/B/C/G (bots trend/momentum)
+
+### Bot Z Omega v2 — Risk Parity + Meta-Learning (Run 8)
+
+**Couches ajoutées sur Omega :**
+
+**Risk Parity (inverse-vol)** :
+- Chaque bot reçoit un poids proportionnel à `1/vol_20d`
+- Bot A (vol ~80%/an) → poids fortement réduit | Bot C (vol ~15%/an) → poids fortement augmenté
+- Blend 50% poids Omega + 50% poids Risk Parity → chaque bot contribue équitablement au risque
+
+**Meta-Learning (strategy decay detection)** :
+- Calcule le retour attendu sur 30j selon le Sharpe long terme de chaque bot
+- `edge_score = retour_réel_30j - retour_attendu_30j`
+- `confidence = clip(1 + edge_score / 0.05, 0.4, 1.5)` → réduit l'allocation aux bots en perte d'edge
+- Détecte les régimes où une stratégie perd son edge *avant* que le drawdown n'explose
+
+**Résultat Run 8 (2020-2026) :**
+
+| Métrique | Omega v2 | Omega | Différence |
+|----------|----------|-------|-----------|
+| CAGR | +26.1% | +55.5% | -29.4%/an |
+| Sharpe | **2.03** | 1.96 | **+0.07** ✓ |
+| MaxDD | **-7.6%** | -8.7% | **+1.1% meilleur** ✓ |
+| 2022 (bear) | **+0.1%** | +0.2% | Équivalent |
+
+**Interprétation :**
+- Le CAGR baisse fortement car Risk Parity réduit massivement les bots volatils (A vol 80% → poids <10%)
+- Mais Sharpe 2.03 = meilleur de toutes les structures (première fois > 2.0)
+- MaxDD -7.6% = meilleur de toutes les structures
+- Trade-off : **sacrifice 29% CAGR pour gagner +0.07 Sharpe et -1.1% MaxDD** → intéressant pour capital défensif uniquement
+- Pour maximiser CAGR risque-ajusté : **Bot Z Omega sans RP reste le meilleur compromis**
 
 **4. Règle des fonds multi-stratégies confirmée :**
 > *"Plusieurs stratégies moyennes ensemble battent souvent une excellente stratégie seule."*
@@ -325,6 +378,8 @@ La calibration actuelle pour le régime BEAR (`a=1.5, g=0.2`) est **fausse** :
 - [x] Bot Z Pro : Vol Targeting + Adaptive Score + Corr Spike + Multi-tier CB (Sharpe 1.90, MaxDD -9.1%)
 - [x] Bot Z Adaptive : Meta-switch E/B/P + hysteresis 7/5/3j (CAGR +29.4%, MaxDD -11.7%)
 - [x] Bot Z Omega : ER Engine + Risk Engine + Corr Penalty + softmax (CAGR +55.5%, Sharpe 1.96, MaxDD -8.7%)
+- [x] Bot J Mean Reversion : RSI(2)+Bollinger+SMA200 (CAGR +1.6%, Sharpe 1.47, MaxDD -1.7%, WinRate 70.8%)
+- [x] Bot Z Omega v2 : Risk Parity + Meta-Learning (CAGR +26.1%, Sharpe 2.03 meilleur de toutes les structures, MaxDD -7.6%)
 - [ ] Bot Z Adaptive v2 : relever seuil PRO (VIX>30, 2+ conditions) — cible ENHANCED 35% du temps
 - [ ] Corriger le churn Bot I (REBAL_DAYS=10, filtre re-entry)
 - [ ] Exclure Bot H du backtest daily (0 trades)
@@ -343,6 +398,7 @@ La calibration actuelle pour le régime BEAR (`a=1.5, g=0.2`) est **fausse** :
 | 2026-03-06 | Jan 2020 → Mar 2026 (6 ans) | **Run 5** : Bot Z Pro (VT+AS+CS+MultiCB) + MC 5000 | **Enhanced +59.8% / Pro +29.9% Sharpe 1.90** | bot_z_comparison.csv |
 | 2026-03-06 | Jan 2020 → Mar 2026 (6 ans) | **Run 6** : Bot Z Adaptive meta-switch E/B/P + hysteresis | **Adaptive +29.4% MaxDD -11.7% (ENHANCED 16%/BALANCED 42%/PRO 42%)** | bot_z_comparison.csv |
 | 2026-03-06 | Jan 2020 → Mar 2026 (6 ans) | **Run 7** : Bot Z Omega ER+Risk+Corr+Softmax | **Omega +55.5% Sharpe 1.96 MaxDD -8.7% (meilleur risque-ajusté)** | bot_z_comparison.csv |
+| 2026-03-06 | Jan 2020 → Mar 2026 (6 ans) | **Run 8** : Bot J MR (RSI2+BB+SMA200) + Omega v2 (RP+ML) | **J: MaxDD -1.7% WinRate 70.8% / v2: Sharpe 2.03 MaxDD -7.6%** | bot_z_comparison.csv |
 
 ---
 
