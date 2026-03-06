@@ -474,12 +474,17 @@ Mots-clés détectés : `credit`, `billing`, `insufficient`, `balance`, `quota`,
 
 ## Symboles tradés
 
-**Crypto (7)** : BTC/EUR, ETH/EUR, SOL/EUR, BNB/EUR, TON/EUR, LINK/EUR, AVAX/EUR
-**xStocks paper Kraken (13)** : NVDAx, AAPLx, TSLAx, MSFTx, METAx, AMZNx, GOOGx, PLTRx, AMDx, AVGOx, GLDx, NFLXx, CRWDx
+**Crypto (5)** : BTC/EUR, ETH/EUR, SOL/EUR, BNB/EUR, TON/EUR
+*(LINK/EUR et AVAX/EUR retirés — PF < 1 sur 1 et 3 ans)*
+
+**xStocks paper Kraken (11)** : NVDAx, AAPLx, MSFTx, METAx, GOOGx, PLTRx, AMDx, AVGOx, GLDx, NFLXx, CRWDx
+*(TSLAx retiré — WR=20%, Musk volatility ; AMZNx retiré — PF=0.07)*
+
+**Total** : 16 symboles
 
 **Bot C uniquement** : BTC/EUR, ETH/EUR, SOL/EUR (meilleurs trends Donchian)
 **Bot H uniquement** : BTC/EUR, ETH/EUR, SOL/EUR, NVDAx, AMDx, METAx, PLTRx (actifs à forte volatilité)
-**Bots A, B, D, E, F, G, I** : tous les 20 symboles
+**Bots A, B, D, E, F, G, I** : tous les 16 symboles
 
 ---
 
@@ -681,15 +686,31 @@ score = 0.50 × regime_fit + 0.30 × rolling_quality + 0.20 × inverse_vol
 
 **OMEGA_V2** = 50% OMEGA_WEIGHTS + 50% inverse-vol (risk parity pure)
 
-#### Tracking du capital z_capital
+#### Tracking du capital z_capital (Mark-to-Market réel)
 
 ```python
-# Chaque cycle :
+# Chaque cycle — prix live via OHLCV daily si disponible :
+for sym, pos in positions.items():
+    if ohlcv and sym in ohlcv:
+        live_price = ohlcv[sym]["close"].iloc[-1]   # MTM réel
+    else:
+        live_price = pos["entry"]                    # fallback
+
+bot_values[b] = capital + sum(live_price * size)
 cycle_returns = {b: bot_values[b]/prev_bot_values[b] - 1 for b in VALID_BOTS}
 weighted_return = sum(prev_weights[b] * cycle_returns[b] for b in VALID_BOTS)
-new_z_capital = z_capital * (1 + weighted_return)
-# → ecrit logs/bot_z/budget.json {a: €, b: €, c: €, g: €}
+new_z_capital = max(0.0, z_capital * (1 + weighted_return))
+# → écrit logs/bot_z/budget.json {a: €, b: €, c: €, g: €}
 ```
+
+**Engine reasons loggés** dans shadow.jsonl à chaque cycle :
+`hard_rule_pro, block_enhanced, btc_bearish, qqq_bearish, vix, port_dd_pct,
+regime, raw_engine, rolling_scores, bot_vols, engine_switched, prev_engine`
+
+**Quality ramp-up** (évite sur-pondération en début de paper) :
+- < 5 trades → score neutre 1.0
+- 5-20 trades → blend progressif : `confidence = (n-5)/15.0`
+- >= 20 trades → score plein `clamp(1.0 + sharpe×0.3, 0.3, 1.5)`
 
 #### Fichiers clés Bot Z
 
@@ -713,8 +734,13 @@ CAGR Meta v2 : **+43.2%** | Sharpe **1.70** | MaxDD **-9.6%** | 2022 : **+1.0%**
 |-------|--------|-------------|
 | Shadow Mode | ✅ Terminé | Observation sans exécution |
 | **Paper Trading Meta v2** | 🟢 En cours | 10 000€, démarré 2026-03-06 |
-| Budget dispatch sub-bots | 🔲 Prévu | A/B/C/G lisent budget.json pour sizing |
-| Revue résultats | 📅 2026-04-30 | Analyse 55 jours de data live |
+| MTM réel | ✅ Implémenté | Prix live via OHLCV daily (vs prix d'entrée) |
+| Engine reasons logging | ✅ Implémenté | hard_rule_pro, scores, vols dans shadow.jsonl |
+| Quality ramp-up | ✅ Implémenté | Blend 5→20 trades avant score plein |
+| Budget dispatch (write) | ✅ Implémenté | _write_budget() → logs/bot_z/budget.json |
+| Risk Budgeting par trade | 🔲 Prévu | `risk_per_trade_eur` dans budget.json (après revue) |
+| Budget dispatch (read) | 🔲 Prévu | A/B/C/G lisent budget.json pour sizing |
+| Revue résultats | 📅 2026-04-30 | analyze_botz.py sur 55 jours de data live |
 | Live Trading | 🔲 Futur | Après validation ~6 mois paper |
 
 ---
