@@ -622,42 +622,88 @@ budget_eur   = min(budget_eur, capital_total × 0.40)  # cap 40% par bot
 
 ---
 
-### Évolution prévue — Bot Z Adaptive
+### Bot Z Meta v2 — Production (architecture actuelle)
 
-**Version future : Bot Z Adaptive (backtest Run 6 effectué)**
+**Déployé en paper trading le 2026-03-06. Capital : 10 000€. Revue : 2026-04-30.**
 
-Un meta-switch sélectionne automatiquement le profil de risk management selon le régime :
+Bot Z est le **pilote central** de l'application. Il tourne en premier à chaque cycle, calcule l'allocation optimale, puis dispatche un budget en euros vers chaque stratégie.
 
-| Profil | Condition d'activation | Comportement |
-|--------|----------------------|-------------|
-| **ENHANCED** | Bull propre : BTC+QQQ bull + VIX<22 + DD>-5% + corr<60% | Max CAGR, CB single-tier |
-| **BALANCED** | Transition / bull fragile | Compromis, CB 2-tiers, vol 25% |
-| **PRO** | Bear/stress : VIX>30 ou corr>70% ou DD<-12% | Max protection, CB 3-tiers, vol 20% |
+#### Execution order (multi_runner.py)
+```
+1. Macro fetch (VIX, QQQ, BTC, Fear&Greed...)
+2. OHLCV prefetch (4h + daily)
+3. Bot Z FIRST → lit états A/B/C/G → calcule allocation → écrit budget.json
+4. Bot A tourne avec son capital propre (budget.json lu à terme)
+5. Bot B, C, G pareil
+...
+```
 
-Hysteresis : délai de confirmation avant switch (ENHANCED→switch 7j / BALANCED 5j / PRO 3j)
+#### 4 engines — sélection Meta v2
 
-**Résultat Run 6 (2020-2026) :** CAGR +29.4%, Sharpe 1.60, MaxDD -11.7%
-Distribution : ENHANCED 16% / BALANCED 42% / PRO 42%
+| Engine | Régime cible | Backtest Sharpe | Backtest MaxDD | Backtest CAGR |
+|--------|-------------|-----------------|----------------|---------------|
+| **ENHANCED** | Bull propre | 1.61 | -18.9% | +59.8% |
+| **OMEGA** | Neutre/quality | 1.96 | -8.7% | +55.5% |
+| **OMEGA_V2** | Stress modéré (risk parity) | 2.03 | -7.6% | +52.1% |
+| **PRO** | Bear/crise | 1.90 | -9.1% | +29.9% |
 
-**Statut** : seuils PRO trop sensibles (VIX>28) → v2 avec VIX>30 + 2 conditions simultanées prévue.
+**Hard rules (non-négociables)** :
+- PRO forcé si (BTC+QQQ bearish **ET** VIX>26) OU VIX>32 OU DD<-12%
+- ENHANCED bloqué si BTC ou QQQ bearish
 
----
+**Scoring data-driven** (si pas de hard rule) :
+```
+score = 0.50 × regime_fit + 0.30 × rolling_quality + 0.20 × inverse_vol
+```
 
-### Bot Z Omega — Portfolio Optimizer (Run 7)
+**Hysteresis** (jours confirmation avant switch) :
+- ENHANCED : 7j | OMEGA : 5j | OMEGA_V2 : 4j | PRO : 3j
 
-**Architecture différente des autres structures** : au lieu de poids régime fixes, Omega optimise dynamiquement les poids à chaque barre via un moteur ER/Risk.
+#### Poids par engine/régime
 
-**Expected Return Engine** par bot (z-score cross-sectionnel) :
-- `0.35 × Sharpe_90d` + `0.25 × PF_90d` + `0.20 × equity_slope_60d` + `0.20 × regime_fit`
+**ENHANCED = REGIME_WEIGHTS** (cf. tableau ci-dessus)
 
-**Risk Engine** par bot (z-score cross-sectionnel) :
-- `0.40 × vol_20d` + `0.30 × downside_vol` + `0.30 × current_dd_abs`
+**OMEGA_WEIGHTS** (neutre + quality scoring) :
+| Régime | A | B | C | G |
+|--------|---|---|---|---|
+| BULL | 0.9 | 1.1 | 0.7 | 1.0 |
+| RANGE | 1.0 | 0.9 | 0.8 | 0.9 |
+| BEAR | 0.4 | 0.1 | 1.3 | 1.1 |
+| HIGH_VOL | 0.6 | 0.4 | 1.2 | 1.0 |
 
-**Score final** = `(ER_score − risk_score) × corr_penalty` → softmax(β=3) → poids
+**PRO_WEIGHTS** (défensif C+G, B écarté) :
+| Régime | A | B | C | G |
+|--------|---|---|---|---|
+| BULL | 0.2 | 0.0 | 1.8 | 1.0 |
+| RANGE | 0.3 | 0.0 | 1.8 | 1.0 |
+| BEAR | 0.1 | 0.0 | 2.0 | 1.0 |
+| HIGH_VOL | 0.2 | 0.0 | 1.8 | 1.0 |
 
-**Résultats Run 7 :** CAGR +55.5% | **Sharpe 1.96** (meilleur de toutes les structures) | **MaxDD -8.7%** | 2022 bear : **+0.2%**
+**OMEGA_V2** = 50% OMEGA_WEIGHTS + 50% inverse-vol (risk parity pure)
 
-**Statut** : backtest validé, candidat production pour capital modéré (risque-ajusté optimal).
+#### Tracking du capital z_capital
+
+```python
+# Chaque cycle :
+cycle_returns = {b: bot_values[b]/prev_bot_values[b] - 1 for b in VALID_BOTS}
+weighted_return = sum(prev_weights[b] * cycle_returns[b] for b in VALID_BOTS)
+new_z_capital = z_capital * (1 + weighted_return)
+# → ecrit logs/bot_z/budget.json {a: €, b: €, c: €, g: €}
+```
+
+#### Fichiers clés Bot Z
+
+```
+live/bot_z.py            ← Pilote principal (Meta v2, select_engine_live, _write_budget)
+logs/bot_z/state.json    ← z_capital, current_engine, pending_engine, last_alloc_weights
+logs/bot_z/budget.json   ← Budget dispatché par sub-bot (mis à jour chaque cycle)
+logs/bot_z/shadow.jsonl  ← Historique complet (1 entrée/cycle, base equity chart)
+```
+
+#### Distribution engines (backtest 2020-2026)
+
+ENHANCED 17% / OMEGA 30% / OMEGA_V2 28% / PRO 25%
+CAGR Meta v2 : **+43.2%** | Sharpe **1.70** | MaxDD **-9.6%** | 2022 : **+1.0%**
 
 ---
 
@@ -665,14 +711,10 @@ Distribution : ENHANCED 16% / BALANCED 42% / PRO 42%
 
 | Phase | Statut | Description |
 |-------|--------|-------------|
-| ~~Shadow Mode~~ | ✅ Terminé | Observation sans exécution |
-| **Paper Trading Enhanced** | 🟢 En cours | 10 000€, démarré 2026-03-06 |
+| Shadow Mode | ✅ Terminé | Observation sans exécution |
+| **Paper Trading Meta v2** | 🟢 En cours | 10 000€, démarré 2026-03-06 |
+| Budget dispatch sub-bots | 🔲 Prévu | A/B/C/G lisent budget.json pour sizing |
 | Revue résultats | 📅 2026-04-30 | Analyse 55 jours de data live |
-| Bot Z Omega backtest | ✅ Terminé | Sharpe 1.96, MaxDD -8.7%, 2022 +0.2% |
-| Bot J Mean Reversion | ✅ Backtest | MaxDD -1.7%, WinRate 70.8%, corr basse avec trend |
-| Bot Z Omega v2 (RP+ML) | ✅ Backtest | Sharpe 2.03 (record), MaxDD -7.6% |
-| Bot Z Meta | ✅ Backtest | 2022 +1.2%, OMEGA 51%/PRO 21% — calibration v2 prévue |
-| Bot Z Adaptive v2 | 🔲 Prévu | Seuils PRO ajustés + backtest |
 | Live Trading | 🔲 Futur | Après validation ~6 mois paper |
 
 ---
