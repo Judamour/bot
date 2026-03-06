@@ -34,6 +34,7 @@ _BOT_PATHS = {
 }
 _BOT_NAMES  = {"a": "Supertrend+MR", "b": "Momentum", "c": "Breakout", "d": "DeepSeek R1", "e": "Claude Sonnet", "f": "Claude Haiku", "g": "Trend Multi-Asset", "h": "VCB Breakout", "i": "RS Leaders"}
 _BOT_COLORS = {"a": "#58a6ff", "b": "#3fb950", "c": "#ffa657", "d": "#c792ea", "e": "#ff7b72", "f": "#f7c948", "g": "#39d353", "h": "#e06c75", "i": "#79c0ff"}
+_BOT_Z_FILE = os.path.join(BASE_DIR, "logs", "bot_z", "state.json")
 MULTI_LOG   = os.path.join(BASE_DIR, "logs", "multi_runner.log")
 MULTI_INITIAL_CAPITAL = 1000.0
 
@@ -348,6 +349,18 @@ def api_claude():
         except Exception:
             pass
     return jsonify({"events": list(reversed(events))[:50]})
+
+
+@app.route("/api/bot_z")
+def api_bot_z():
+    """Retourne le dernier état du Regime Engine (Bot Z shadow)."""
+    if os.path.exists(_BOT_Z_FILE):
+        try:
+            with open(_BOT_Z_FILE) as f:
+                return jsonify(json.load(f))
+        except Exception:
+            pass
+    return jsonify({"regime": "N/A", "allocation": {}, "warnings": [], "perf_pct": 0})
 
 
 @app.route("/api/alerts")

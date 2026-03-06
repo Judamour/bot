@@ -64,6 +64,7 @@ from strategies.vcb_strategy import (
 from strategies.rs_leaders_strategy import (
     run_rs_leaders_cycle, load_state as load_rsl, save_state as save_rsl,
 )
+from live.bot_z import run_bot_z_cycle, print_bot_z_summary
 import live.bot as bot_a
 
 init(autoreset=True)
@@ -192,6 +193,7 @@ def run():
     os.makedirs("logs/trend",      exist_ok=True)
     os.makedirs("logs/vcb",        exist_ok=True)
     os.makedirs("logs/rs_leaders", exist_ok=True)
+    os.makedirs("logs/bot_z",     exist_ok=True)
 
     log(f"{'='*60}", "INFO")
     log("  MULTI-BOT CONTEST STARTED", "INFO")
@@ -382,10 +384,17 @@ def run():
                         f"Seuil: {config.MAX_DRAWDOWN*100:.0f}%"
                     )
 
-            # ── 15. Snapshot journalier pour Bot A ────────────────────────────
+            # ── 15. Bot Z — Regime Engine (shadow mode) ───────────────────────
+            try:
+                z_summary = run_bot_z_cycle(macro)
+                print_bot_z_summary(z_summary)
+            except Exception as ez:
+                log(f"Bot Z erreur (non bloquant): {ez}", "WARN")
+
+            # ── 16. Snapshot journalier pour Bot A ────────────────────────────
             bot_a._check_daily_snapshot(state_a)
 
-            # ── 16. Wait for next cycle ───────────────────────────────────────
+            # ── 17. Wait for next cycle ───────────────────────────────────────
             next_run = _next_cycle_utc()
             wait_sec = max(0, (next_run - datetime.now(timezone.utc).replace(tzinfo=None)).total_seconds())
             log(
