@@ -64,6 +64,9 @@ from strategies.vcb_strategy import (
 from strategies.rs_leaders_strategy import (
     run_rs_leaders_cycle, load_state as load_rsl, save_state as save_rsl,
 )
+from strategies.mean_reversion_strategy import (
+    run_mr_cycle, load_state as load_mr, save_state as save_mr,
+)
 from live.bot_z import run_bot_z_cycle, print_bot_z_summary
 import live.bot as bot_a
 
@@ -122,27 +125,33 @@ def _portfolio_value(state: dict, price_cache: dict = None) -> float:
 def print_contest_status(state_a: dict, state_b: dict, state_c: dict,
                           state_d: dict, state_e: dict, state_f: dict,
                           state_g: dict, state_h: dict, state_i: dict,
+                          state_j: dict = None,
                           daily_cache: dict = None):
     bots = [
-        ("A — Supertrend+MR",    state_a),
-        ("B — Momentum",         state_b),
-        ("C — Breakout",         state_c),
-        ("D — DeepSeek LLM",     state_d),
-        ("E — Claude Sonnet",    state_e),
-        ("F — Claude Haiku",     state_f),
+        ("A — Supertrend+MR",     state_a),
+        ("B — Momentum",          state_b),
+        ("C — Breakout",          state_c),
+        ("D — DeepSeek LLM",      state_d),
+        ("E — Claude Sonnet",     state_e),
+        ("F — Claude Haiku",      state_f),
         ("G — Trend Multi-Asset", state_g),
-        ("H — VCB Breakout",     state_h),
-        ("I — RS Leaders",       state_i),
+        ("H — VCB Breakout",      state_h),
+        ("I — RS Leaders",        state_i),
+        ("J — Mean Reversion",    state_j or {}),
     ]
 
     print(f"\n{Fore.CYAN}{'='*72}")
-    print(f"  🏆 CONTEST MULTI-BOT — {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+    print(f"  CONTEST MULTI-BOT — {datetime.now().strftime('%Y-%m-%d %H:%M')}")
     print(f"{'='*72}{Style.RESET_ALL}")
     print(f"{'Bot':<26} {'Libre':>10} {'Total':>10} {'Positions':>10} {'Trades':>8} {'Perf':>8}")
     print("-" * 72)
 
     all_states = [state_a, state_b, state_c, state_d, state_e, state_f, state_g, state_h, state_i]
+    if state_j:
+        all_states.append(state_j)
     for name, state in bots:
+        if not state:
+            continue
         total = _portfolio_value(state, daily_cache)
         init = state.get("initial_capital", INITIAL_CAPITAL_PER_BOT)
         perf = (total - init) / init * 100 if init > 0 else 0
@@ -157,12 +166,13 @@ def print_contest_status(state_a: dict, state_b: dict, state_c: dict,
         )
 
     # Combined
+    n_bots = len(all_states)
     total_all = sum(_portfolio_value(s, daily_cache) for s in all_states)
     total_init = sum(s.get("initial_capital", INITIAL_CAPITAL_PER_BOT) for s in all_states)
     combined_perf = (total_all - total_init) / total_init * 100 if total_init > 0 else 0
     color = Fore.GREEN if combined_perf > 0 else Fore.RED
     print("-" * 72)
-    print(f"{'TOTAL (9000€ base)':<26} {'':>10} {total_all:>8.2f}€  "
+    print(f"{'TOTAL ('+ str(n_bots*1000) +'€ base)':<26} {'':>10} {total_all:>8.2f}€  "
           f"{'':>10} {'':>8}  {color}{combined_perf:>+6.1f}%{Style.RESET_ALL}")
     print(f"{Fore.CYAN}{'='*72}{Style.RESET_ALL}\n")
 
@@ -191,9 +201,10 @@ def run():
     os.makedirs("logs/claude_llm", exist_ok=True)
     os.makedirs("logs/haiku_llm",  exist_ok=True)
     os.makedirs("logs/trend",      exist_ok=True)
-    os.makedirs("logs/vcb",        exist_ok=True)
-    os.makedirs("logs/rs_leaders", exist_ok=True)
-    os.makedirs("logs/bot_z",     exist_ok=True)
+    os.makedirs("logs/vcb",             exist_ok=True)
+    os.makedirs("logs/rs_leaders",      exist_ok=True)
+    os.makedirs("logs/mean_reversion",  exist_ok=True)
+    os.makedirs("logs/bot_z",           exist_ok=True)
 
     log(f"{'='*60}", "INFO")
     log("  MULTI-BOT CONTEST STARTED", "INFO")
@@ -206,7 +217,8 @@ def run():
     log(f"  Bot G: Trend Multi-Asset  → logs/trend/state.json", "INFO")
     log(f"  Bot H: VCB Breakout       → logs/vcb/state.json", "INFO")
     log(f"  Bot I: RS Leaders         → logs/rs_leaders/state.json", "INFO")
-    log(f"  Capital initial: {INITIAL_CAPITAL_PER_BOT:.0f}€ × 9 = {INITIAL_CAPITAL_PER_BOT*9:.0f}€", "INFO")
+    log(f"  Bot J: Mean Reversion     → logs/mean_reversion/state.json", "INFO")
+    log(f"  Capital initial: {INITIAL_CAPITAL_PER_BOT:.0f}€ × 10 = {INITIAL_CAPITAL_PER_BOT*10:.0f}€", "INFO")
     log(f"{'='*60}", "INFO")
 
     state_a = load_state_a()
@@ -218,6 +230,7 @@ def run():
     state_g = load_trd()
     state_h = load_vcb()
     state_i = load_rsl()
+    state_j = load_mr()
 
     log(f"Bot A capital: {state_a['capital']:.2f}€ | Positions: {list(state_a['positions'].keys())}")
     log(f"Bot B capital: {state_b['capital']:.2f}€ | Positions: {list(state_b['positions'].keys())}")
@@ -228,6 +241,7 @@ def run():
     log(f"Bot G capital: {state_g['capital']:.2f}€ | Positions: {list(state_g['positions'].keys())}")
     log(f"Bot H capital: {state_h['capital']:.2f}€ | Positions: {list(state_h['positions'].keys())}")
     log(f"Bot I capital: {state_i['capital']:.2f}€ | Positions: {list(state_i['positions'].keys())}")
+    log(f"Bot J capital: {state_j['capital']:.2f}€ | Positions: {list(state_j['positions'].keys())}")
 
     while True:
         try:
@@ -380,11 +394,21 @@ def run():
                 f"Trades: {len(state_i['trades'])}"
             )
 
-            # ── 14. Contest summary ───────────────────────────────────────────
-            print_contest_status(state_a, state_b, state_c, state_d, state_e, state_f, state_g, state_h, state_i, ohlcv_daily)
+            # ── 14. Bot J: Mean Reversion ─────────────────────────────────────
+            log(f"\n{Fore.WHITE}--- Bot J: Mean Reversion ---{Style.RESET_ALL}")
+            state_j = run_mr_cycle(state_j, ohlcv_daily, macro)
+            save_mr(state_j)
+            log(
+                f"[J] Capital: {state_j['capital']:.2f}€ | "
+                f"Positions: {list(state_j['positions'].keys())} | "
+                f"Trades: {len(state_j['trades'])}"
+            )
 
-            # ── 15. Drawdown checks ───────────────────────────────────────────
-            for name, state in [("A", state_a), ("B", state_b), ("C", state_c), ("D", state_d), ("E", state_e), ("F", state_f), ("G", state_g), ("H", state_h), ("I", state_i)]:
+            # ── 15. Contest summary ───────────────────────────────────────────
+            print_contest_status(state_a, state_b, state_c, state_d, state_e, state_f, state_g, state_h, state_i, state_j, ohlcv_daily)
+
+            # ── 16. Drawdown checks ───────────────────────────────────────────
+            for name, state in [("A", state_a), ("B", state_b), ("C", state_c), ("D", state_d), ("E", state_e), ("F", state_f), ("G", state_g), ("H", state_h), ("I", state_i), ("J", state_j)]:
                 total = _portfolio_value(state, ohlcv_daily)
                 init = state.get("initial_capital", INITIAL_CAPITAL_PER_BOT)
                 dd = (total - init) / init
@@ -396,10 +420,10 @@ def run():
                         f"Seuil: {config.MAX_DRAWDOWN*100:.0f}%"
                     )
 
-            # ── 16. Snapshot journalier pour Bot A ────────────────────────────
+            # ── 17. Snapshot journalier pour Bot A ────────────────────────────
             bot_a._check_daily_snapshot(state_a)
 
-            # ── 17. Wait for next cycle ───────────────────────────────────────
+            # ── 18. Wait for next cycle ───────────────────────────────────────
             next_run = _next_cycle_utc()
             wait_sec = max(0, (next_run - datetime.now(timezone.utc).replace(tzinfo=None)).total_seconds())
             log(
@@ -419,6 +443,7 @@ def run():
             save_trd(state_g)
             save_vcb(state_h)
             save_rsl(state_i)
+            save_mr(state_j)
             break
         except Exception as e:
             log(f"Erreur inattendue: {e}", "WARN")
