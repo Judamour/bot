@@ -24,6 +24,7 @@ from datetime import datetime
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
 from strategies.supertrend import compute_atr, compute_adx
+from live.notifier import notify
 
 STATE_FILE = "logs/trend/state.json"
 INITIAL_CAPITAL = 1000.0
@@ -167,6 +168,12 @@ def run_trend_cycle(state: dict, daily_cache: dict, macro_context: dict = None) 
                     f"PnL: {pnl:+.2f}€ | {exit_reason}",
                     "BUY" if pnl > 0 else "SELL",
                 )
+                notify(
+                    f"{'✅' if pnl > 0 else '🔴'} <b>Bot G — Trend</b>\n"
+                    f"{'✓' if pnl > 0 else '✗'} <b>{symbol}</b> {exit_reason.upper()}\n"
+                    f"{position['entry']:.4f}€ → {exit_eff:.4f}€\n"
+                    f"PnL : <b>{pnl:+.2f}€</b>"
+                )
                 continue
 
         # ── Entry checks (pas de position sur ce symbole) ──
@@ -210,6 +217,12 @@ def run_trend_cycle(state: dict, daily_cache: dict, macro_context: dict = None) 
                     f"▲ BUY {symbol} | {entry_price:.4f}€ | {size:.6f} units | "
                     f"SL: {stop_loss:.4f}€ (3×ATR) | vol_ann: {annual_vol*100:.1f}% | ADX: {adx:.1f}",
                     "BUY",
+                )
+                notify(
+                    f"📈 <b>Bot G — Trend</b>\n"
+                    f"▲ <b>{symbol}</b> BUY — SMA200+Breakout50j\n"
+                    f"Prix : {entry_price:.4f}€ | Stop : {stop_loss:.4f}€\n"
+                    f"Investi : {total_cost:.2f}€ | Vol : {annual_vol*100:.1f}%"
                 )
             else:
                 # Log seulement si au moins un filtre passe (évite le spam)

@@ -44,6 +44,7 @@ from datetime import datetime
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
+from live.notifier import notify
 
 STATE_FILE  = "logs/bot_z/state.json"
 SHADOW_LOG  = "logs/bot_z/shadow.jsonl"
@@ -643,6 +644,64 @@ def analyze_cross_exposure(all_states: dict, allocation: dict) -> dict:
     return alerts
 
 
+# ── Notifications positions ──────────────────────────────────────────────────
+
+def _notify_position_changes(all_states: dict, prev_positions: dict, engine: str, regime: str):
+    """
+    Détecte les ouvertures/fermetures de positions dans tous les bots Z (A/B/C/G)
+    et envoie une notification Telegram pour chaque changement.
+    Utilisé uniquement pour les bots sans notification native (B, C, G).
+    Bot A gère ses propres notifications dans live/bot.py.
+    """
+    for bot_id in VALID_BOTS:
+        if bot_id == "a":
+            continue  # Bot A notifie lui-même
+        state = all_states.get(bot_id, {})
+        bot_name = BOT_NAMES.get(bot_id, bot_id.upper())
+
+        current_syms = set(state.get("positions", {}).keys())
+        prev_syms = set(prev_positions.get(bot_id, []))
+
+        # Positions ouvertes ce cycle
+        for sym in current_syms - prev_syms:
+            pos = state["positions"][sym]
+            entry = pos.get("entry", 0)
+            size = pos.get("size", 0)
+            cost = pos.get("cost", entry * size)
+            stop = pos.get("stop", 0)
+            stop_str = f" | Stop : {stop:.4f}€" if stop else ""
+            notify(
+                f"📈 <b>Bot {bot_id.upper()} — {bot_name}</b>\n"
+                f"▲ <b>{sym}</b> BUY\n"
+                f"Prix : {entry:.4f}€ | Investi : {cost:.2f}€{stop_str}\n"
+                f"Engine Z : {engine} | Régime : {regime}"
+            )
+
+        # Positions fermées ce cycle
+        for sym in prev_syms - current_syms:
+            trades = state.get("trades", [])
+            last_trade = next(
+                (t for t in reversed(trades) if t.get("symbol") == sym), None
+            )
+            if last_trade:
+                pnl = last_trade.get("pnl", 0)
+                entry_p = last_trade.get("entry_price", 0)
+                exit_p = last_trade.get("exit_price", 0)
+                reason = last_trade.get("reason", "exit")
+                notify(
+                    f"{'✅' if pnl > 0 else '🔴'} <b>Bot {bot_id.upper()} — {bot_name}</b>\n"
+                    f"{'✓' if pnl > 0 else '✗'} <b>{sym}</b> {reason.upper()}\n"
+                    f"{entry_p:.4f}€ → {exit_p:.4f}€\n"
+                    f"PnL : <b>{pnl:+.2f}€</b> | Engine Z : {engine}"
+                )
+            else:
+                notify(
+                    f"⏹ <b>Bot {bot_id.upper()} — {bot_name}</b>\n"
+                    f"<b>{sym}</b> fermé\n"
+                    f"Engine Z : {engine} | Régime : {regime}"
+                )
+
+
 # ── Cycle principal ──────────────────────────────────────────────────────────
 
 def run_bot_z_cycle(macro: dict, ohlcv: dict = None) -> dict:
@@ -673,6 +732,9 @@ def run_bot_z_cycle(macro: dict, ohlcv: dict = None) -> dict:
 
     # 3. Charger state + regime persistence tracking
     state = load_state()
+
+    # Snapshot des positions du cycle précédent (pour détection des changements)
+    prev_positions = state.get("last_positions", {b: [] for b in VALID_BOTS})
 
     # Persistance du régime : confiance pleine après REGIME_PERSIST_DAYS jours
     last_regime_for_persist = state.get("last_regime", regime)
@@ -761,6 +823,15 @@ def run_bot_z_cycle(macro: dict, ohlcv: dict = None) -> dict:
     engine_switched = False
     if days_pending >= META_ENGINE_HYSTERESIS.get(pending_engine, 5):
         engine_switched = (current_engine != pending_engine)
+        if engine_switched:
+            _engine_emojis = {"ENHANCED": "🟢", "OMEGA": "🔵", "OMEGA_V2": "🟡", "PRO": "🔴"}
+            notify(
+                f"🔄 <b>Bot Z — Changement d'engine</b>\n"
+                f"{_engine_emojis.get(prev_engine, '⚪')} {prev_engine} → "
+                f"{_engine_emojis.get(pending_engine, '⚪')} <b>{pending_engine}</b>\n"
+                f"Régime : {regime} | VIX : {vix:.1f}\n"
+                f"Capital Z : {new_z_capital:.2f}€ ({(new_z_capital/INITIAL_CAP-1)*100:+.1f}%)"
+            )
         current_engine = pending_engine
 
     # Raisons de sélection d'engine (pour historique et debug)
@@ -892,7 +963,10 @@ def run_bot_z_cycle(macro: dict, ohlcv: dict = None) -> dict:
         "mtm_live":           (ohlcv is not None),
     }
 
-    # 11. Log shadow
+    # 11. Notifications positions (B, C, G — Bot A gère les siennes)
+    _notify_position_changes(all_states, prev_positions, current_engine, regime)
+
+    # 12. Log shadow
     _log_shadow(summary)
 
     # 12. Mise à jour state
@@ -917,6 +991,7 @@ def run_bot_z_cycle(macro: dict, ohlcv: dict = None) -> dict:
     state["regime_history"] = state["regime_history"][-500:]
     state["allocation_history"].append({"ts": ts, "allocation": {k: v["budget_eur"] for k, v in allocation.items()}})
     state["allocation_history"]  = state["allocation_history"][-500:]
+    state["last_positions"]      = {b: list(all_states.get(b, {}).get("positions", {}).keys()) for b in VALID_BOTS}
     state["last_regime"]         = regime
     state["last_regime_info"]    = regime_info
     state["last_allocation"]     = allocation

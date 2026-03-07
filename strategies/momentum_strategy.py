@@ -18,6 +18,7 @@ from datetime import datetime, date
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
+from live.notifier import notify
 
 STATE_FILE = "logs/momentum/state.json"
 INITIAL_CAPITAL = 1000.0
@@ -145,6 +146,12 @@ def run_momentum_cycle(state: dict, daily_cache: dict, macro_context: dict = Non
                 f"PnL: {pnl:+.2f}€ | ({loss_pct*100:.1f}% < -{STOP_LOSS_PCT*100:.0f}%)",
                 "SELL",
             )
+            notify(
+                f"🔴 <b>Bot B — Momentum</b>\n"
+                f"✗ <b>{symbol}</b> STOP LOSS\n"
+                f"{pos['entry']:.4f}€ → {exit_price:.4f}€\n"
+                f"PnL : <b>{pnl:+.2f}€</b> ({loss_pct*100:.1f}%)"
+            )
 
     # ── 1. Filtre macro (VIX + QQQ) ──
     if macro_context:
@@ -214,6 +221,12 @@ def run_momentum_cycle(state: dict, daily_cache: dict, macro_context: dict = Non
                 f"{pos['entry']:.4f}€ → {exit_price:.4f}€ | PnL: {pnl:+.2f}€ | rotated out",
                 "BUY" if pnl > 0 else "SELL",
             )
+            notify(
+                f"{'✅' if pnl > 0 else '🔴'} <b>Bot B — Momentum</b>\n"
+                f"{'✓' if pnl > 0 else '✗'} <b>{symbol}</b> ROTATION OUT\n"
+                f"{pos['entry']:.4f}€ → {exit_price:.4f}€\n"
+                f"PnL : <b>{pnl:+.2f}€</b>"
+            )
 
     # ── 6. Open positions for new top_N not already held ──
     # Sizing basé sur la valeur totale du portefeuille / TOP_N (équilibré)
@@ -251,6 +264,12 @@ def run_momentum_cycle(state: dict, daily_cache: dict, macro_context: dict = Non
             f"▲ BUY {symbol} | {entry_price:.4f}€ | {size:.4f} unités | "
             f"Score: {scores.get(symbol, 0):.1%} | Coût: {total_cost:.2f}€",
             "BUY",
+        )
+        notify(
+            f"📈 <b>Bot B — Momentum</b>\n"
+            f"▲ <b>{symbol}</b> BUY\n"
+            f"Prix : {entry_price:.4f}€ | Investi : {total_cost:.2f}€\n"
+            f"Score momentum : {scores.get(symbol, 0):.1%}"
         )
 
     state["top_symbols"] = top_symbols

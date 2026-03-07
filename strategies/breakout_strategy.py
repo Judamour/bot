@@ -19,6 +19,7 @@ from datetime import datetime
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
 from strategies.supertrend import compute_atr, compute_adx
+from live.notifier import notify
 
 STATE_FILE = "logs/breakout/state.json"
 INITIAL_CAPITAL = 1000.0
@@ -178,6 +179,12 @@ def run_breakout_cycle(state: dict, daily_cache: dict, macro_context: dict = Non
                     f"PnL: {pnl:+.2f}€ | {exit_reason}",
                     "BUY" if pnl > 0 else "SELL",
                 )
+                notify(
+                    f"{'✅' if pnl > 0 else '🔴'} <b>Bot C — Breakout</b>\n"
+                    f"{'✓' if pnl > 0 else '✗'} <b>{symbol}</b> {exit_reason.upper()}\n"
+                    f"{position['entry']:.4f}€ → {exit_price_eff:.4f}€\n"
+                    f"PnL : <b>{pnl:+.2f}€</b>"
+                )
                 continue  # Don't check entry after closing
 
         # ── Entry checks (no open position for this symbol) ──
@@ -215,6 +222,12 @@ def run_breakout_cycle(state: dict, daily_cache: dict, macro_context: dict = Non
                     f"SL: {stop_loss:.4f}€ | ADX: {adx:.1f} | "
                     f"Breakout: >{dc_upper:.4f}€ | N={atr:.4f}",
                     "BUY",
+                )
+                notify(
+                    f"📈 <b>Bot C — Breakout</b>\n"
+                    f"▲ <b>{symbol}</b> BUY — Donchian 55j\n"
+                    f"Prix : {entry_price:.4f}€ | Stop : {stop_loss:.4f}€\n"
+                    f"Investi : {total_cost:.2f}€ | ADX : {adx:.1f}"
                 )
             else:
                 log(
