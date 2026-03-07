@@ -429,10 +429,10 @@ def backtest_bot_c(daily_cache):
                 pos["stop"] = new_stop
             exit_reason = None
             ep = row["close"]
-            if row["close"] <= pos["stop"]:
+            if row["low"] <= pos["stop"]:
                 exit_reason, ep = "atr_stop", pos["stop"]
-            elif row["close"] < row["don_low"]:
-                exit_reason = "don_exit"
+            elif row["low"] < row["don_low"]:
+                exit_reason, ep = "don_exit", float(row["don_low"])
             if exit_reason:
                 proceeds, tr = _close_pos(pos, ep, exit_reason, dt)
                 capital += proceeds; trades.append(tr); del positions[sym]
