@@ -141,6 +141,23 @@ if results:
                 z_results[label] = z
         except Exception as e:
             print(f"Z {label}: {e}")
+    # ── Variantes test levier ──────────────────────────────────────────────
+    # A : BULL hysteresis 1 semaine (au lieu de 2) → BULL s'active plus vite
+    try:
+        z = backtest_bot_z_meta_v2(results, vix_raw, qqq_raw, daily,
+                                   cfg={"bull_hyst": 1, "lev_engines": {"BULL"}})
+        if z and z.get("equity"):
+            z_results["meta_v2_bull1w"] = z
+    except Exception as e:
+        print(f"Z meta_v2_bull1w: {e}")
+    # B : levier sur BULL + BALANCED (vol targeting plus large)
+    try:
+        z = backtest_bot_z_meta_v2(results, vix_raw, qqq_raw, daily,
+                                   cfg={"lev_engines": {"BULL", "BALANCED"}})
+        if z and z.get("equity"):
+            z_results["meta_v2_lev_bal"] = z
+    except Exception as e:
+        print(f"Z meta_v2_lev_bal: {e}")
 
 # ── Affichage ─────────────────────────────────────────────────────────────────
 print(f"\n{Fore.CYAN}{'='*90}{Style.RESET_ALL}")
@@ -161,12 +178,14 @@ for key, name in BOT_NAMES.items():
 
 print(f"\n{Fore.YELLOW}  ── Bot Z (A+B+C+G, 4 000€ initial) ──{Style.RESET_ALL}")
 Z_LABELS = {
-    "equal_weight":"Equal-Weight A+B+C+G",
-    "regime_pure": "Bot Z Régime pur",
-    "enhanced":    "Bot Z v1 — MO+CB",
-    "omega":       "Bot Z v2 — QualityScore",
-    "omega_v2":    "Bot Z v3 — RiskParity",
-    "meta_v2":     "Bot Z PROD — Meta v2",
+    "equal_weight":    "Equal-Weight A+B+C+G",
+    "regime_pure":     "Bot Z Régime pur",
+    "enhanced":        "Bot Z v1 — MO+CB",
+    "omega":           "Bot Z v2 — QualityScore",
+    "omega_v2":        "Bot Z v3 — RiskParity",
+    "meta_v2":         "Bot Z PROD — Meta v2",
+    "meta_v2_bull1w":  "Test A — BULL hyst 1w + lev×1.3",
+    "meta_v2_lev_bal": "Test B — lev×1.3 BULL+BALANCED",
 }
 for key, name in Z_LABELS.items():
     z = z_results.get(key)

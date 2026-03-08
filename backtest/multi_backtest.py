@@ -2460,7 +2460,7 @@ ENGINE_REGIME_FIT = {
 
 
 def backtest_bot_z_meta_v2(results: dict, vix_s: pd.Series, qqq_df: pd.DataFrame,
-                            daily_cache: dict) -> dict:
+                            daily_cache: dict, cfg: dict = None) -> dict:
     """
     Bot Z Meta v2 — Sélection d'engine data-driven (vs règles statiques en v1) :
 
@@ -2514,6 +2514,7 @@ def backtest_bot_z_meta_v2(results: dict, vix_s: pd.Series, qqq_df: pd.DataFrame
     SHARPE_WIN = 18; VOL_WIN = 4; SLOPE_WIN = 12; CORR_WIN = 4; META_WIN = 6
     PERF_WIN = 12    # fenêtre rolling performance par engine (12 semaines ≈ 3 mois)
     SOFTMAX_BETA = 3.0; CB_RECOVERY = 0.005; TARGET_VOL = 0.20
+    BULL_MAX_LEV = 1.30  # levier max vol-targeting en régime BULL
     CB_TIERS = {
         "BULL": [(-0.25, 0.30)],
         "BALANCED":    [(-0.25, 0.30)],
@@ -2522,6 +2523,13 @@ def backtest_bot_z_meta_v2(results: dict, vix_s: pd.Series, qqq_df: pd.DataFrame
     }
     # Hysteresis en semaines : 7j→2s, 5j→1s, 4j→1s, 3j→1s
     HYSTERESIS = {"BULL": 2, "BALANCED": 1, "PARITY": 1, "SHIELD": 1}
+
+    # cfg override : permet de tester des variantes sans dupliquer la fonction
+    _cfg = cfg or {}
+    if "bull_hyst" in _cfg:
+        HYSTERESIS["BULL"] = _cfg["bull_hyst"]
+    # lev_engines : engines sur lesquels appliquer le levier conditionnel
+    LEV_ENGINES = set(_cfg.get("lev_engines", {"BULL"}))
 
     ks = list(valid.keys())
     ret_history  = {k: [] for k in ks}
@@ -2828,7 +2836,20 @@ def backtest_bot_z_meta_v2(results: dict, vix_s: pd.Series, qqq_df: pd.DataFrame
         elif port_dd > -0.05:
             cb_factor = min(1.0, cb_factor + CB_RECOVERY)
 
-        eq_meta2.append(eq_meta2[-1] * (1 + cb_factor * r_port))
+        # ── Levier conditionnel (vol targeting) ──────────────────────────────
+        # Actif sur les engines dans LEV_ENGINES (par défaut BULL seulement).
+        # Condition : cb sain (>=0.90) + vol récente < TARGET_VOL.
+        lev_factor = 1.0
+        if current_engine in LEV_ENGINES and cb_factor >= 0.90 and len(eq_meta2) >= VOL_WIN + 1:
+            recent_eq = eq_meta2[-(VOL_WIN + 1):]
+            recent_ret = [(recent_eq[j] - recent_eq[j-1]) / recent_eq[j-1]
+                          for j in range(1, len(recent_eq))]
+            pv_weekly = float(np.std(recent_ret)) if len(recent_ret) > 1 else 0.05
+            pv_annual = pv_weekly * math.sqrt(52)
+            if pv_annual < TARGET_VOL and pv_annual > 1e-4:
+                lev_factor = min(BULL_MAX_LEV, TARGET_VOL / pv_annual)
+
+        eq_meta2.append(eq_meta2[-1] * (1 + cb_factor * lev_factor * r_port))
         dates_out.append(dt)
 
     engine_counts = {}
