@@ -936,6 +936,10 @@
 <script>
 // ── Constants ────────────────────────────────────────────────────────────────
 
+// Mapping anciens noms → nouveaux (compatibilité state.json pré-migration)
+const ENGINE_MIGRATE = { ENHANCED:'BULL', OMEGA:'BALANCED', OMEGA_V2:'PARITY', PRO:'SHIELD' };
+function normalizeEngine(e) { return ENGINE_MIGRATE[e] || e || 'BALANCED'; }
+
 const ENGINE_COLORS = {
   BULL: '#00e676',
   BALANCED:    '#00c8ff',
@@ -1016,8 +1020,8 @@ function perfClass(val) {
   if (n < 0) return 'neg';
   return 'neu';
 }
-function engColor(eng) { return ENGINE_COLORS[eng] || '#888'; }
-function engLabel(eng) { return eng; }
+function engColor(eng) { return ENGINE_COLORS[normalizeEngine(eng)] || '#888'; }
+function engLabel(eng) { return normalizeEngine(eng); }
 
 // ── Load Portfolio (Bot Z) ────────────────────────────────────────────────────
 
@@ -1032,8 +1036,8 @@ async function loadPortfolio() {
 }
 
 function renderPortfolio(d) {
-  const engine = d.current_engine || 'BALANCED';
-  const pending = d.pending_engine || engine;
+  const engine = normalizeEngine(d.current_engine || 'BALANCED');
+  const pending = normalizeEngine(d.pending_engine || d.current_engine || 'BALANCED');
   const daysPending = d.days_pending || 0;
   const hystTotal = ENGINE_HYSTERESIS[pending] || 5;
 
@@ -1214,12 +1218,12 @@ function renderZEquityChart(history) {
   if (!history.length) return;
   const labels   = history.map(h => h.ts.slice(0,10));
   const values   = history.map(h => parseFloat(h.total) || 10000);
-  const engines  = history.map(h => h.engine || 'BALANCED');
+  const engines  = history.map(h => normalizeEngine(h.engine || 'BALANCED'));
 
   // Segment colors by engine
   const segColors = history.map((h, i) => {
-    if (i === 0) return engColor(h.engine);
-    return engColor(history[i-1].engine);
+    if (i === 0) return engColor(normalizeEngine(h.engine));
+    return engColor(normalizeEngine(history[i-1].engine));
   });
 
   if (zEquityChart) zEquityChart.destroy();
@@ -1269,7 +1273,7 @@ function renderEngineTimeline(history) {
   const container = document.getElementById('engine-timeline');
   if (!history.length) { container.innerHTML = '<span style="color:var(--muted);font-size:11px">Aucun historique</span>'; return; }
   const dots = history.slice(-60).map(h => {
-    const eng = h.engine || 'BALANCED';
+    const eng = normalizeEngine(h.engine || 'BALANCED');
     const regime = h.regime || 'RANGE';
     const date = h.ts.slice(0,10);
     return `<div class="timeline-dot ${eng}" data-tip="${date} — ${engLabel(eng)} — ${regime}"></div>`;
