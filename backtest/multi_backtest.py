@@ -1226,7 +1226,7 @@ def backtest_bot_z_enhanced(results: dict, vix_s: pd.Series, qqq_df: pd.DataFram
     }
 
 
-# ── 13b. BOT Z PRO — Volatility Targeting + Adaptive Score + Corr Spike ──────
+# ── 13b. BOT Z SHIELD — Volatility Targeting + Adaptive Score + Corr Spike ──────
 
 def backtest_bot_z_pro(results: dict, vix_s: pd.Series, qqq_df: pd.DataFrame,
                        daily_cache: dict) -> dict:
@@ -1393,7 +1393,7 @@ def backtest_bot_z_pro(results: dict, vix_s: pd.Series, qqq_df: pd.DataFrame,
 # Configs des 3 profils — seuls les paramètres de risk management diffèrent.
 # Tous utilisent les mêmes REGIME_WEIGHTS_Z (calibration v2) et le MO.
 ADAPTIVE_PROFILES = {
-    "ENHANCED": {
+    "BULL": {
         # Max croissance — vol targeting off, CB simple -25%, corr quasi-inactif
         "target_vol":   None,   # pas de vol targeting
         "corr_thresh":  0.90,   # seuil corrélation très haut (quasi-désactivé)
@@ -1407,7 +1407,7 @@ ADAPTIVE_PROFILES = {
         "corr_reduce":  0.30,
         "cb_tiers":     [(-0.20, 0.50), (-0.30, 0.30)],
     },
-    "PRO": {
+    "SHIELD": {
         # Protection max — vol targeting strict, CB 3-tiers, corr sensible
         "target_vol":   0.20,
         "corr_thresh":  0.70,
@@ -1419,9 +1419,9 @@ ADAPTIVE_PROFILES = {
 # Jours de confirmation requis pour quitter chaque profil (hysteresis asymétrique)
 # Bear→Bull : lent (évite les faux signaux) | Bull→Bear : rapide (protection)
 ADAPTIVE_HYSTERESIS = {
-    "ENHANCED": 7,   # 7 jours dans ENHANCED avant de pouvoir basculer
+    "BULL": 7,   # 7 jours dans BULL avant de pouvoir basculer
     "BALANCED": 5,
-    "PRO":      3,   # 3 jours dans PRO — on sort vite si le marché rebondit
+    "SHIELD":      3,   # 3 jours dans SHIELD — on sort vite si le marché rebondit
 }
 
 
@@ -1429,22 +1429,22 @@ def _select_profile_raw(vix: float, btc_bearish: bool, qqq_bearish: bool,
                         port_dd: float, avg_corr: float = 0.0) -> str:
     """
     Profil brut selon market state (sans hysteresis).
-    PRO      : dès que conditions défensives sont présentes
-    ENHANCED : bull propre sur tous les critères
+    SHIELD      : dès que conditions défensives sont présentes
+    BULL : bull propre sur tous les critères
     BALANCED : tout le reste (transition, bull fragile)
     """
-    # PRO : au moins une condition défensive forte
+    # SHIELD : au moins une condition défensive forte
     if ((btc_bearish and qqq_bearish)
             or vix > 28
             or avg_corr > 0.70
             or port_dd < -0.12):
-        return "PRO"
-    # ENHANCED : bull propre sur tous les critères
+        return "SHIELD"
+    # BULL : bull propre sur tous les critères
     if (not btc_bearish and not qqq_bearish
             and vix < 22
             and port_dd > -0.05
             and avg_corr < 0.60):
-        return "ENHANCED"
+        return "BULL"
     # BALANCED : transition / bull fragile
     return "BALANCED"
 
@@ -1455,13 +1455,13 @@ def backtest_bot_z_adaptive(results: dict, vix_s: pd.Series, qqq_df: pd.DataFram
     Bot Z Adaptive : méta-switch entre 3 profils selon régime + hysteresis.
 
     Profiles :
-      ENHANCED → max CAGR (bull propre) : Enhanced parameters
+      BULL → max CAGR (bull propre) : Enhanced parameters
       BALANCED → compromis (transition)  : risk management intermédiaire
-      PRO      → protection (bear/stress): vol targeting + multi-tier CB + corr spike
+      SHIELD      → protection (bear/stress): vol targeting + multi-tier CB + corr spike
 
     Hysteresis :
       Évite le flip-flop. Délai de confirmation avant switch :
-        ENHANCED → switch : 7j | BALANCED : 5j | PRO → switch : 3j (protection rapide)
+        BULL → switch : 7j | BALANCED : 5j | SHIELD → switch : 3j (protection rapide)
 
     Switch déclenché par : VIX, BTC trend, QQQ SMA200, corrélation inter-bots, DD port.
     """
@@ -1498,7 +1498,7 @@ def backtest_bot_z_adaptive(results: dict, vix_s: pd.Series, qqq_df: pd.DataFram
     cb_factor     = 1.0
 
     # Hysteresis state
-    current_profile = "ENHANCED"
+    current_profile = "BULL"
     pending_profile = None
     days_pending    = 0
 
@@ -1632,7 +1632,7 @@ def backtest_bot_z_adaptive(results: dict, vix_s: pd.Series, qqq_df: pd.DataFram
         profile_counts[p] = profile_counts.get(p, 0) + 1
     total_days = len(profile_log) or 1
     profile_pct = {p: round(profile_counts.get(p, 0) / total_days * 100, 1)
-                   for p in ["ENHANCED", "BALANCED", "PRO"]}
+                   for p in ["BULL", "BALANCED", "SHIELD"]}
 
     return {
         "name":          "Bot Z Adaptive (E/B/P)",
@@ -1642,7 +1642,7 @@ def backtest_bot_z_adaptive(results: dict, vix_s: pd.Series, qqq_df: pd.DataFram
     }
 
 
-# ── 13d. BOT Z OMEGA — Dynamic Portfolio Optimizer (ER + Risk + Corr) ─────────
+# ── 13d. BOT Z BALANCED — Dynamic Portfolio Optimizer (ER + Risk + Corr) ─────────
 
 def backtest_bot_z_omega(results: dict, vix_s: pd.Series, qqq_df: pd.DataFrame,
                          daily_cache: dict) -> dict:
@@ -1864,7 +1864,7 @@ def backtest_bot_z_omega(results: dict, vix_s: pd.Series, qqq_df: pd.DataFrame,
     }
 
 
-# ── 13e. BOT Z OMEGA V2 — Risk Parity + Meta-Learning ─────────────────────────
+# ── 13e. BOT Z BALANCED V2 — Risk Parity + Meta-Learning ─────────────────────────
 
 def backtest_bot_z_omega_v2(results: dict, vix_s: pd.Series, qqq_df: pd.DataFrame,
                              daily_cache: dict) -> dict:
@@ -2110,27 +2110,27 @@ def backtest_bot_z_omega_v2(results: dict, vix_s: pd.Series, qqq_df: pd.DataFram
 
 # Seuils de sélection d'engine
 META_ENGINE_HYSTERESIS = {
-    "ENHANCED": 7,   # bull → on attend 7 jours avant de confirmer
-    "OMEGA":    5,
-    "OMEGA_V2": 4,
-    "PRO":      3,   # bear → on sort vite (protection rapide)
+    "BULL": 7,   # bull → on attend 7 jours avant de confirmer
+    "BALANCED":    5,
+    "PARITY": 4,
+    "SHIELD":      3,   # bear → on sort vite (protection rapide)
 }
 
 
 def _select_engine_raw(vix: float, btc_bearish: bool, qqq_bearish: bool,
                        port_dd: float, avg_corr: float = 0.0) -> str:
     """Engine brut sans hysteresis — logique de sélection."""
-    # PRO : conditions défensives sévères
+    # SHIELD : conditions défensives sévères
     if (btc_bearish and qqq_bearish) or vix > 30 or port_dd < -0.15:
-        return "PRO"
-    # OMEGA_V2 : stress modéré — risk parity requis
+        return "SHIELD"
+    # PARITY : stress modéré — risk parity requis
     if vix > 24 or port_dd < -0.08 or avg_corr > 0.65:
-        return "OMEGA_V2"
-    # ENHANCED : bull propre sur tous les critères
+        return "PARITY"
+    # BULL : bull propre sur tous les critères
     if not btc_bearish and not qqq_bearish and vix < 20 and port_dd > -0.03:
-        return "ENHANCED"
-    # OMEGA : default — ER/Risk engine standard
-    return "OMEGA"
+        return "BULL"
+    # BALANCED : default — ER/Risk engine standard
+    return "BALANCED"
 
 
 def backtest_bot_z_meta(results: dict, vix_s: pd.Series, qqq_df: pd.DataFrame,
@@ -2138,18 +2138,18 @@ def backtest_bot_z_meta(results: dict, vix_s: pd.Series, qqq_df: pd.DataFrame,
     """
     Bot Z Meta — Méta-sélecteur dynamique entre 4 engines selon le régime :
 
-      ENHANCED  : bull propre (VIX<20, BTC+QQQ bull, DD>-3%)
+      BULL  : bull propre (VIX<20, BTC+QQQ bull, DD>-3%)
                   → poids régime purs v2 (max CAGR)
-      OMEGA     : conditions normales
+      BALANCED     : conditions normales
                   → ER Engine + Risk Engine + Corr Penalty + softmax
-      OMEGA_V2  : stress modéré (VIX>24, DD>-8%, corr>65%)
+      PARITY  : stress modéré (VIX>24, DD>-8%, corr>65%)
                   → Omega + Risk Parity 50% + Meta-Learning
-      PRO       : bear/crise (BTC+QQQ all bearish, VIX>30, DD>-15%)
+      SHIELD       : bear/crise (BTC+QQQ all bearish, VIX>30, DD>-15%)
                   → Omega + Vol Targeting + multi-CB
 
     Hysteresis : 7/5/4/3 jours de confirmation avant switch d'engine.
     """
-    log("Bot Z Meta — Méta-sélecteur ENHANCED/OMEGA/OMEGA_V2/PRO...")
+    log("Bot Z Meta — Méta-sélecteur BULL/BALANCED/PARITY/SHIELD...")
 
     valid = {k: results[k] for k in VALID_BOTS_Z if k in results and results[k]["equity"]}
     if "j" in results and results["j"]["equity"]:
@@ -2179,14 +2179,14 @@ def backtest_bot_z_meta(results: dict, vix_s: pd.Series, qqq_df: pd.DataFrame,
     # 1 semaine ≈ 5 jours → 90j→18s, 20j→4s, 60j→12s, 30j→6s
     SHARPE_WIN = 18; VOL_WIN = 4; SLOPE_WIN = 12; CORR_WIN = 4; META_WIN = 6
     SOFTMAX_BETA = 3.0; CB_RECOVERY = 0.005
-    TARGET_VOL = 0.20  # pour le mode PRO
+    TARGET_VOL = 0.20  # pour le mode SHIELD
 
     # CB par engine (tiers différents)
     CB_TIERS = {
-        "ENHANCED": [(-0.25, 0.30)],
-        "OMEGA":    [(-0.25, 0.30)],
-        "OMEGA_V2": [(-0.20, 0.50), (-0.30, 0.30)],
-        "PRO":      [(-0.10, 0.80), (-0.20, 0.50), (-0.30, 0.30)],
+        "BULL": [(-0.25, 0.30)],
+        "BALANCED":    [(-0.25, 0.30)],
+        "PARITY": [(-0.20, 0.50), (-0.30, 0.30)],
+        "SHIELD":      [(-0.10, 0.80), (-0.20, 0.50), (-0.30, 0.30)],
     }
 
     ks = list(valid.keys())
@@ -2196,8 +2196,8 @@ def backtest_bot_z_meta(results: dict, vix_s: pd.Series, qqq_df: pd.DataFrame,
 
     cb_peak   = initial_total
     cb_factor = 1.0
-    current_engine   = "OMEGA"
-    pending_engine   = "OMEGA"
+    current_engine   = "BALANCED"
+    pending_engine   = "BALANCED"
     days_pending     = 0
     engine_log       = []
 
@@ -2315,14 +2315,14 @@ def backtest_bot_z_meta(results: dict, vix_s: pd.Series, qqq_df: pd.DataFrame,
             m, s = arr.mean(), arr.std()
             return list((arr - m) / s) if s > 1e-8 else [0.0] * len(vals)
 
-        if current_engine == "ENHANCED":
+        if current_engine == "BULL":
             # Poids régime purs v2 (même logique que backtest_bot_z_enhanced)
             total_w = sum(raw_regime_w.get(k, 0) for k in ks) or 1.0
             weights = {k: raw_regime_w.get(k, 0) / total_w for k in ks}
             corr_factor = 1.0
 
         else:
-            # ER/Risk softmax commun à OMEGA, OMEGA_V2, PRO
+            # ER/Risk softmax commun à BALANCED, PARITY, SHIELD
             sharpe_z = dict(zip(ks, _z([er_comp[k]["sharpe"]     for k in ks])))
             pf_z     = dict(zip(ks, _z([er_comp[k]["pf"]         for k in ks])))
             slope_z  = dict(zip(ks, _z([er_comp[k]["slope"]      for k in ks])))
@@ -2351,8 +2351,8 @@ def backtest_bot_z_meta(results: dict, vix_s: pd.Series, qqq_df: pd.DataFrame,
 
             net_score = {k: (er_s[k] - risk_s[k]) * corr_penalty[k] for k in ks}
 
-            # Vol targeting (PRO uniquement)
-            if current_engine == "PRO":
+            # Vol targeting (SHIELD uniquement)
+            if current_engine == "SHIELD":
                 vol_scale = {}
                 for k in ks:
                     if len(ret_history[k]) >= VOL_WIN:
@@ -2368,8 +2368,8 @@ def backtest_bot_z_meta(results: dict, vix_s: pd.Series, qqq_df: pd.DataFrame,
             tot_e = sum(exp_s.values()) or 1.0
             omega_w = {k: exp_s[k] / tot_e for k in ks}
 
-            # Risk Parity blend (OMEGA_V2 50%, PRO 30%)
-            rp_blend = 0.5 if current_engine == "OMEGA_V2" else (0.3 if current_engine == "PRO" else 0.0)
+            # Risk Parity blend (PARITY 50%, SHIELD 30%)
+            rp_blend = 0.5 if current_engine == "PARITY" else (0.3 if current_engine == "SHIELD" else 0.0)
             if rp_blend > 0:
                 inv_v = {k: 1.0 / max(risk_comp[k]["vol"], 0.01) for k in ks}
                 tot_iv = sum(inv_v.values()) or 1.0
@@ -2378,8 +2378,8 @@ def backtest_bot_z_meta(results: dict, vix_s: pd.Series, qqq_df: pd.DataFrame,
             else:
                 blended = omega_w
 
-            # Meta-Learning (OMEGA_V2 + PRO)
-            if current_engine in ("OMEGA_V2", "PRO") and warmup >= max(SHARPE_WIN, META_WIN+1):
+            # Meta-Learning (PARITY + SHIELD)
+            if current_engine in ("PARITY", "SHIELD") and warmup >= max(SHARPE_WIN, META_WIN+1):
                 confidence = {}
                 for k in ks:
                     fh = np.array(ret_history[k])
@@ -2421,7 +2421,7 @@ def backtest_bot_z_meta(results: dict, vix_s: pd.Series, qqq_df: pd.DataFrame,
         engine_counts[e] = engine_counts.get(e, 0) + 1
     total_days = len(engine_log) or 1
     engine_pct = {e: round(engine_counts.get(e, 0) / total_days * 100, 1)
-                  for e in ["ENHANCED", "OMEGA", "OMEGA_V2", "PRO"]}
+                  for e in ["BULL", "BALANCED", "PARITY", "SHIELD"]}
 
     m   = _metrics_portfolio(eq_meta, dates_out, initial_total, weekly=True)
     ann = annual_returns(eq_meta, dates_out)
@@ -2437,10 +2437,10 @@ def backtest_bot_z_meta(results: dict, vix_s: pd.Series, qqq_df: pd.DataFrame,
 
 # Régime-fit par engine : dans quel régime chaque engine performe le mieux
 ENGINE_REGIME_FIT = {
-    "ENHANCED": {"BULL": 1.0, "RANGE": 0.6, "HIGH_VOL": 0.3, "BEAR": 0.1},
-    "OMEGA":    {"BULL": 0.8, "RANGE": 0.8, "HIGH_VOL": 0.7, "BEAR": 0.5},
-    "OMEGA_V2": {"BULL": 0.5, "RANGE": 0.7, "HIGH_VOL": 0.9, "BEAR": 0.8},
-    "PRO":      {"BULL": 0.3, "RANGE": 0.5, "HIGH_VOL": 0.8, "BEAR": 1.0},
+    "BULL": {"BULL": 1.0, "RANGE": 0.6, "HIGH_VOL": 0.3, "BEAR": 0.1},
+    "BALANCED":    {"BULL": 0.8, "RANGE": 0.8, "HIGH_VOL": 0.7, "BEAR": 0.5},
+    "PARITY": {"BULL": 0.5, "RANGE": 0.7, "HIGH_VOL": 0.9, "BEAR": 0.8},
+    "SHIELD":      {"BULL": 0.3, "RANGE": 0.5, "HIGH_VOL": 0.8, "BEAR": 1.0},
 }
 
 
@@ -2455,12 +2455,12 @@ def backtest_bot_z_meta_v2(results: dict, vix_s: pd.Series, qqq_df: pd.DataFrame
                    + 0.10 × diversification      (corr engine vs portefeuille)
 
       Hard rules (non-négociables) :
-        PRO forcé si (BTC+QQQ both bearish ET VIX>26) OU DD<-12%
-        ENHANCED bloqué si BTC ou QQQ bearish
+        SHIELD forcé si (BTC+QQQ both bearish ET VIX>26) OU DD<-12%
+        BULL bloqué si BTC ou QQQ bearish
 
       Seuils recalibrés vs v1 :
-        OMEGA_V2 : VIX>26 (était 24) + DD>-10% (était -8%)
-        PRO      : VIX>32 (était 30) + DD>-12% (était -15%)
+        PARITY : VIX>26 (était 24) + DD>-10% (était -8%)
+        SHIELD      : VIX>32 (était 30) + DD>-12% (était -15%)
     """
     log("Bot Z Meta v2 — Engine Scoring data-driven...")
 
@@ -2493,20 +2493,20 @@ def backtest_bot_z_meta_v2(results: dict, vix_s: pd.Series, qqq_df: pd.DataFrame
         for dt, row in btc_df.iterrows():
             btc_norm[dt] = {"close": row["close"], "ema200": row["ema200"]}
 
-    ENGINE_NAMES = ["ENHANCED", "OMEGA", "OMEGA_V2", "PRO"]
+    ENGINE_NAMES = ["BULL", "BALANCED", "PARITY", "SHIELD"]
     # Paramètres en semaines (données hebdomadaires après resample)
     # 1 semaine ≈ 5 jours → 90j→18s, 20j→4s, 60j→12s, 30j→6s, 60j→12s
     SHARPE_WIN = 18; VOL_WIN = 4; SLOPE_WIN = 12; CORR_WIN = 4; META_WIN = 6
     PERF_WIN = 12    # fenêtre rolling performance par engine (12 semaines ≈ 3 mois)
     SOFTMAX_BETA = 3.0; CB_RECOVERY = 0.005; TARGET_VOL = 0.20
     CB_TIERS = {
-        "ENHANCED": [(-0.25, 0.30)],
-        "OMEGA":    [(-0.25, 0.30)],
-        "OMEGA_V2": [(-0.20, 0.50), (-0.30, 0.30)],
-        "PRO":      [(-0.10, 0.80), (-0.20, 0.50), (-0.30, 0.30)],
+        "BULL": [(-0.25, 0.30)],
+        "BALANCED":    [(-0.25, 0.30)],
+        "PARITY": [(-0.20, 0.50), (-0.30, 0.30)],
+        "SHIELD":      [(-0.10, 0.80), (-0.20, 0.50), (-0.30, 0.30)],
     }
     # Hysteresis en semaines : 7j→2s, 5j→1s, 4j→1s, 3j→1s
-    HYSTERESIS = {"ENHANCED": 2, "OMEGA": 1, "OMEGA_V2": 1, "PRO": 1}
+    HYSTERESIS = {"BULL": 2, "BALANCED": 1, "PARITY": 1, "SHIELD": 1}
 
     ks = list(valid.keys())
     ret_history  = {k: [] for k in ks}
@@ -2519,8 +2519,8 @@ def backtest_bot_z_meta_v2(results: dict, vix_s: pd.Series, qqq_df: pd.DataFrame
 
     cb_peak   = initial_total
     cb_factor = 1.0
-    current_engine = "OMEGA"
-    pending_engine = "OMEGA"
+    current_engine = "BALANCED"
+    pending_engine = "BALANCED"
     days_pending   = 0
     engine_log     = []
 
@@ -2673,20 +2673,30 @@ def backtest_bot_z_meta_v2(results: dict, vix_s: pd.Series, qqq_df: pd.DataFrame
             return conf
 
         def _engine_weights(engine):
-            if engine == "ENHANCED":
-                total_w = sum(raw_regime_w.get(k, 0) for k in ks) or 1.0
-                return {k: raw_regime_w.get(k, 0) / total_w for k in ks}
             net = _er_risk_net()
-            if engine == "OMEGA":
-                return _omega_weights(net)
-            omega_w = _omega_weights(net)
-            if engine == "OMEGA_V2":
-                blended = _rp_weights(0.5, omega_w)
+            balanced_w = _omega_weights(net)  # base pour tous les engines
+
+            if engine == "BALANCED":
+                return balanced_w
+
+            if engine == "BULL":
+                # 60% BALANCED (quality) + 40% tilt momentum (regime weights)
+                total_rw = sum(raw_regime_w.get(k, 0) for k in ks) or 1.0
+                momentum_w = {k: raw_regime_w.get(k, 0) / total_rw for k in ks}
+                blended = {k: 0.60 * balanced_w[k] + 0.40 * momentum_w[k] for k in ks}
+                tot = sum(blended.values()) or 1.0
+                return {k: blended[k] / tot for k in ks}
+
+            if engine == "PARITY":
+                # 60% BALANCED + 40% risk parity pur
+                rp_w = _rp_weights(0.0)  # pure risk parity (blend=0 = 100% RP)
+                blended = {k: 0.60 * balanced_w[k] + 0.40 * rp_w[k] for k in ks}
                 conf = _meta_learning_confidence()
-                adj  = {k: blended[k] * conf[k] for k in ks}
-                tot  = sum(adj.values()) or 1.0
+                adj = {k: blended[k] * conf[k] for k in ks}
+                tot = sum(adj.values()) or 1.0
                 return {k: adj[k] / tot for k in ks}
-            # PRO : vol targeting + RP 30% + meta
+
+            # SHIELD: 40% BALANCED + 60% vol-adjusted quality (plus défensif mais ancré sur quality)
             vs = {}
             for k in ks:
                 if len(ret_history[k]) >= VOL_WIN:
@@ -2694,12 +2704,13 @@ def backtest_bot_z_meta_v2(results: dict, vix_s: pd.Series, qqq_df: pd.DataFrame
                     vs[k] = min(TARGET_VOL / max(v, 1e-8), 3.0)
                 else:
                     vs[k] = 1.0
-            net_pro  = {k: net[k] * vs[k] for k in ks}
-            omega_pro = _omega_weights(net_pro)
-            blended  = _rp_weights(0.3, omega_pro)
-            conf     = _meta_learning_confidence()
-            adj      = {k: blended[k] * conf[k] for k in ks}
-            tot      = sum(adj.values()) or 1.0
+            net_shield = {k: net[k] * vs[k] for k in ks}
+            shield_w = _omega_weights(net_shield)
+            rp_blend = _rp_weights(0.5, shield_w)
+            blended = {k: 0.40 * balanced_w[k] + 0.60 * rp_blend[k] for k in ks}
+            conf = _meta_learning_confidence()
+            adj = {k: blended[k] * conf[k] for k in ks}
+            tot = sum(adj.values()) or 1.0
             return {k: adj[k] / tot for k in ks}
 
         # ── Shadow tracking (tous les engines en parallèle) ──────────────────
@@ -2735,10 +2746,10 @@ def backtest_bot_z_meta_v2(results: dict, vix_s: pd.Series, qqq_df: pd.DataFrame
 
             # 4. Diversification (diversif du shadow engine vs portefeuille)
             div_score = 0.5  # neutre par défaut
-            if len(shadow_ret_hist[eng]) >= CORR_WIN and len(shadow_ret_hist["OMEGA"]) >= CORR_WIN:
+            if len(shadow_ret_hist[eng]) >= CORR_WIN and len(shadow_ret_hist["BALANCED"]) >= CORR_WIN:
                 try:
                     r_eng_arr = np.array(shadow_ret_hist[eng][-CORR_WIN:])
-                    r_ref_arr = np.array(shadow_ret_hist["OMEGA"][-CORR_WIN:])
+                    r_ref_arr = np.array(shadow_ret_hist["BALANCED"][-CORR_WIN:])
                     c = float(np.corrcoef(r_eng_arr, r_ref_arr)[0, 1])
                     div_score = max(0.0, 1.0 - abs(c))
                 except Exception:
@@ -2757,10 +2768,10 @@ def backtest_bot_z_meta_v2(results: dict, vix_s: pd.Series, qqq_df: pd.DataFrame
                         if len(shadow_eq[eng]) > PERF_WIN else 0.0)
             inv_risk_norm = inv_risks[eng] / max_ir
             div_score = 0.5
-            if len(shadow_ret_hist[eng]) >= CORR_WIN and len(shadow_ret_hist["OMEGA"]) >= CORR_WIN:
+            if len(shadow_ret_hist[eng]) >= CORR_WIN and len(shadow_ret_hist["BALANCED"]) >= CORR_WIN:
                 try:
                     c = float(np.corrcoef(shadow_ret_hist[eng][-CORR_WIN:],
-                                          shadow_ret_hist["OMEGA"][-CORR_WIN:])[0, 1])
+                                          shadow_ret_hist["BALANCED"][-CORR_WIN:])[0, 1])
                     div_score = max(0.0, 1.0 - abs(c))
                 except Exception:
                     pass
@@ -2768,10 +2779,10 @@ def backtest_bot_z_meta_v2(results: dict, vix_s: pd.Series, qqq_df: pd.DataFrame
 
         # Appliquer hard rules + choisir l'engine avec le meilleur score
         if force_pro:
-            raw_engine = "PRO"
+            raw_engine = "SHIELD"
         elif block_enhanced:
-            # Choisir parmi OMEGA, OMEGA_V2, PRO selon les scores
-            scores_no_enh = {e: eng_scores[e] for e in ["OMEGA", "OMEGA_V2", "PRO"]}
+            # Choisir parmi BALANCED, PARITY, SHIELD selon les scores
+            scores_no_enh = {e: eng_scores[e] for e in ["BALANCED", "PARITY", "SHIELD"]}
             raw_engine = max(scores_no_enh, key=scores_no_enh.get)
         else:
             raw_engine = max(eng_scores, key=eng_scores.get)
@@ -3158,7 +3169,7 @@ def print_report(results, vix_s, qqq_df, z_results=None, wf=None, mc=None):
             ("adaptive", Fore.CYAN,    "← meta-switch E/B/P + hysteresis 7/5/3j"),
             ("omega",    Fore.WHITE,   "← ER Engine + Risk Engine + Corr Penalty + softmax"),
             ("omega_v2", Fore.GREEN,   "← Omega + Risk Parity + Meta-Learning"),
-            ("meta",     Fore.WHITE,   "← Méta-sélecteur ENHANCED/OMEGA/OMEGA_V2/PRO"),
+            ("meta",     Fore.WHITE,   "← Méta-sélecteur BULL/BALANCED/PARITY/SHIELD"),
             ("meta_v2",  Fore.GREEN,   "← Meta v2 : engine scoring data-driven"),
         ]
         for key, color, note in strategy_order:
@@ -3415,7 +3426,7 @@ def main():
         if z_omega_v2:
             z_results["omega_v2"] = z_omega_v2
 
-        log("Bot Z Meta — Méta-sélecteur ENHANCED/OMEGA/OMEGA_V2/PRO...")
+        log("Bot Z Meta — Méta-sélecteur BULL/BALANCED/PARITY/SHIELD...")
         z_meta = backtest_bot_z_meta(results, vix_s, qqq_df, daily)
         if z_meta:
             z_results["meta"] = z_meta

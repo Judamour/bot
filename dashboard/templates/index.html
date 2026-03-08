@@ -67,10 +67,10 @@
       transition: background 0.2s;
     }
     .engine-chip:hover { background: rgba(255,255,255,0.05); }
-    .engine-chip.ENHANCED { color: var(--eng-enhanced); }
-    .engine-chip.OMEGA    { color: var(--eng-omega); }
-    .engine-chip.OMEGA_V2 { color: var(--eng-omegav2); }
-    .engine-chip.PRO      { color: var(--eng-pro); }
+    .engine-chip.BULL { color: var(--eng-enhanced); }
+    .engine-chip.BALANCED    { color: var(--eng-omega); }
+    .engine-chip.PARITY { color: var(--eng-omegav2); }
+    .engine-chip.SHIELD      { color: var(--eng-pro); }
     .engine-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; animation: pulse 2s infinite; }
     @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
 
@@ -159,10 +159,10 @@
       background: radial-gradient(ellipse at 20% 50%, rgba(var(--eng-rgb),0.08) 0%, transparent 70%);
       pointer-events: none;
     }
-    .engine-hero.ENHANCED { color: var(--eng-enhanced); --eng-rgb: 0,230,118; border-color: rgba(0,230,118,0.35); background: rgba(0,230,118,0.04); }
-    .engine-hero.OMEGA    { color: var(--eng-omega);    --eng-rgb: 0,200,255; border-color: rgba(0,200,255,0.35); background: rgba(0,200,255,0.04); }
-    .engine-hero.OMEGA_V2 { color: var(--eng-omegav2); --eng-rgb: 255,215,64; border-color: rgba(255,215,64,0.35); background: rgba(255,215,64,0.04); }
-    .engine-hero.PRO      { color: var(--eng-pro);      --eng-rgb: 255,68,68; border-color: rgba(255,68,68,0.35); background: rgba(255,68,68,0.04); }
+    .engine-hero.BULL { color: var(--eng-enhanced); --eng-rgb: 0,230,118; border-color: rgba(0,230,118,0.35); background: rgba(0,230,118,0.04); }
+    .engine-hero.BALANCED    { color: var(--eng-omega);    --eng-rgb: 0,200,255; border-color: rgba(0,200,255,0.35); background: rgba(0,200,255,0.04); }
+    .engine-hero.PARITY { color: var(--eng-omegav2); --eng-rgb: 255,215,64; border-color: rgba(255,215,64,0.35); background: rgba(255,215,64,0.04); }
+    .engine-hero.SHIELD      { color: var(--eng-pro);      --eng-rgb: 255,68,68; border-color: rgba(255,68,68,0.35); background: rgba(255,68,68,0.04); }
     .engine-name-big { font-size: clamp(28px, 6vw, 48px); font-weight: 900; line-height: 1; letter-spacing: -0.02em; }
     .engine-subtitle { font-size: 13px; color: var(--muted); margin-top: 6px; font-weight: 400; }
     .engine-desc { font-size: 12px; color: var(--text); margin-top: 12px; line-height: 1.6; max-width: 480px; }
@@ -246,10 +246,10 @@
       width: 12px; height: 12px; border-radius: 3px; flex-shrink: 0;
       cursor: pointer; position: relative;
     }
-    .timeline-dot.ENHANCED { background: var(--eng-enhanced); }
-    .timeline-dot.OMEGA    { background: var(--eng-omega); }
-    .timeline-dot.OMEGA_V2 { background: var(--eng-omegav2); }
-    .timeline-dot.PRO      { background: var(--eng-pro); }
+    .timeline-dot.BULL { background: var(--eng-enhanced); }
+    .timeline-dot.BALANCED    { background: var(--eng-omega); }
+    .timeline-dot.PARITY { background: var(--eng-omegav2); }
+    .timeline-dot.SHIELD      { background: var(--eng-pro); }
     .timeline-regime { width: 12px; height: 4px; border-radius: 2px; flex-shrink: 0; opacity: 0.6; }
     .timeline-regime.BULL     { background: var(--bull); }
     .timeline-regime.BEAR     { background: var(--bear); }
@@ -364,9 +364,9 @@
 <header class="header">
   <div class="header-logo">BOT <span>Z</span></div>
 
-  <div id="hdr-engine-chip" class="engine-chip OMEGA" onclick="switchTab('portfolio')">
+  <div id="hdr-engine-chip" class="engine-chip BALANCED" onclick="switchTab('portfolio')">
     <span class="engine-dot"></span>
-    <span id="hdr-engine-name">OMEGA</span>
+    <span id="hdr-engine-name">BALANCED</span>
   </div>
   <div id="hdr-regime-pill" class="regime-pill RANGE">RANGE</div>
 
@@ -428,8 +428,8 @@
   <div class="portfolio-top-grid">
 
     <!-- Engine Hero -->
-    <div id="engine-hero" class="engine-hero OMEGA">
-      <div class="engine-name-big" id="eng-name">OMEGA</div>
+    <div id="engine-hero" class="engine-hero BALANCED">
+      <div class="engine-name-big" id="eng-name">BALANCED</div>
       <div class="engine-subtitle">Engine actif</div>
       <div class="engine-desc" id="eng-desc">Données insuffisantes — en attente du premier cycle.</div>
 
@@ -457,10 +457,10 @@
     <!-- Engine selector pills (hidden on mobile via doughnut-card class) -->
     <div class="engine-pills-col doughnut-card" style="display:flex; flex-direction:column; gap:8px; padding-top:4px;">
       <div style="font-size:10px; color:var(--muted); text-transform:uppercase; letter-spacing:0.06em; margin-bottom:4px;">Engines</div>
-      <div class="engine-chip ENHANCED" id="pill-ENHANCED" data-tip="BULL max CAGR — Sharpe 1.61">ENHANCED</div>
-      <div class="engine-chip OMEGA"    id="pill-OMEGA"    data-tip="Neutre + quality — Sharpe 1.96">OMEGA</div>
-      <div class="engine-chip OMEGA_V2" id="pill-OMEGA_V2" data-tip="Risk Parity — Sharpe 2.03">OMEGA V2</div>
-      <div class="engine-chip PRO"      id="pill-PRO"      data-tip="Défensif C+G — Sharpe 1.90">PRO</div>
+      <div class="engine-chip BULL" id="pill-BULL" data-tip="BULL max CAGR — Sharpe 1.61">BULL</div>
+      <div class="engine-chip BALANCED"    id="pill-BALANCED"    data-tip="Neutre + quality — Sharpe 1.96">BALANCED</div>
+      <div class="engine-chip PARITY" id="pill-PARITY" data-tip="Risk Parity — Sharpe 2.03">PARITY</div>
+      <div class="engine-chip SHIELD"      id="pill-SHIELD"      data-tip="Défensif C+G — Sharpe 1.90">SHIELD</div>
     </div>
   </div>
 
@@ -541,10 +541,10 @@
   <div class="card" style="margin-bottom:16px;">
     <div class="card-title">Timeline engines (historique)</div>
     <div style="display:flex; gap:16px; flex-wrap:wrap; align-items:center; margin-bottom:10px;">
-      <div style="display:flex; align-items:center; gap:6px;"><div style="width:10px;height:10px;border-radius:2px;background:var(--eng-enhanced)"></div><span style="font-size:10px;color:var(--muted)">ENHANCED</span></div>
-      <div style="display:flex; align-items:center; gap:6px;"><div style="width:10px;height:10px;border-radius:2px;background:var(--eng-omega)"></div><span style="font-size:10px;color:var(--muted)">OMEGA</span></div>
-      <div style="display:flex; align-items:center; gap:6px;"><div style="width:10px;height:10px;border-radius:2px;background:var(--eng-omegav2)"></div><span style="font-size:10px;color:var(--muted)">OMEGA V2</span></div>
-      <div style="display:flex; align-items:center; gap:6px;"><div style="width:10px;height:10px;border-radius:2px;background:var(--eng-pro)"></div><span style="font-size:10px;color:var(--muted)">PRO</span></div>
+      <div style="display:flex; align-items:center; gap:6px;"><div style="width:10px;height:10px;border-radius:2px;background:var(--eng-enhanced)"></div><span style="font-size:10px;color:var(--muted)">BULL</span></div>
+      <div style="display:flex; align-items:center; gap:6px;"><div style="width:10px;height:10px;border-radius:2px;background:var(--eng-omega)"></div><span style="font-size:10px;color:var(--muted)">BALANCED</span></div>
+      <div style="display:flex; align-items:center; gap:6px;"><div style="width:10px;height:10px;border-radius:2px;background:var(--eng-omegav2)"></div><span style="font-size:10px;color:var(--muted)">PARITY</span></div>
+      <div style="display:flex; align-items:center; gap:6px;"><div style="width:10px;height:10px;border-radius:2px;background:var(--eng-pro)"></div><span style="font-size:10px;color:var(--muted)">SHIELD</span></div>
     </div>
     <div class="engine-timeline" id="engine-timeline">
       <span style="color:var(--muted); font-size:11px">Aucun historique</span>
@@ -626,24 +626,24 @@
 // ── Constants ────────────────────────────────────────────────────────────────
 
 const ENGINE_COLORS = {
-  ENHANCED: '#00e676',
-  OMEGA:    '#00c8ff',
-  OMEGA_V2: '#ffd740',
-  PRO:      '#ff4444',
+  BULL: '#00e676',
+  BALANCED:    '#00c8ff',
+  PARITY: '#ffd740',
+  SHIELD:      '#ff4444',
 };
 const ENGINE_DESC = {
-  ENHANCED: 'Régime pur BULL — maximise CAGR en marché haussier. Allocations agressives vers A (Supertrend) et B (Momentum). Backtest 2020-2026 : CAGR +59.8%, Sharpe 1.61, MaxDD -18.9%.',
-  OMEGA:    'Engine neutre — qualité rolling des bots prime les régimes. Softmax sur expected returns. Backtest : CAGR +55.5%, Sharpe 1.96, MaxDD -8.7%.',
-  OMEGA_V2: 'Risk Parity : blend 50% OMEGA + 50% inverse-vol. Favorisé en stress modéré (VIX 20-30). Backtest : CAGR +52.1%, Sharpe 2.03, MaxDD -7.6%.',
-  PRO:      'Défensif pur — surpoids C (Breakout) + G (Trend), Bot B écarté. Activé si BTC+QQQ bearish, VIX>32 ou DD<-12%. Backtest : CAGR +29.9%, Sharpe 1.90, MaxDD -9.1%.',
+  BULL: 'Régime pur BULL — maximise CAGR en marché haussier. Allocations agressives vers A (Supertrend) et B (Momentum). Backtest 2020-2026 : CAGR +59.8%, Sharpe 1.61, MaxDD -18.9%.',
+  BALANCED:    'Engine neutre — qualité rolling des bots prime les régimes. Softmax sur expected returns. Backtest : CAGR +55.5%, Sharpe 1.96, MaxDD -8.7%.',
+  PARITY: 'Risk Parity : blend 50% BALANCED + 50% inverse-vol. Favorisé en stress modéré (VIX 20-30). Backtest : CAGR +52.1%, Sharpe 2.03, MaxDD -7.6%.',
+  SHIELD:      'Défensif pur — surpoids C (Breakout) + G (Trend), Bot B écarté. Activé si BTC+QQQ bearish, VIX>32 ou DD<-12%. Backtest : CAGR +29.9%, Sharpe 1.90, MaxDD -9.1%.',
 };
 const ENGINE_STATS = {
-  ENHANCED: { sharpe: '1.61', maxdd: '-18.9%', cagr: '+59.8%' },
-  OMEGA:    { sharpe: '1.96', maxdd: '-8.7%',  cagr: '+55.5%' },
-  OMEGA_V2: { sharpe: '2.03', maxdd: '-7.6%',  cagr: '+52.1%' },
-  PRO:      { sharpe: '1.90', maxdd: '-9.1%',  cagr: '+29.9%' },
+  BULL: { sharpe: '1.61', maxdd: '-18.9%', cagr: '+59.8%' },
+  BALANCED:    { sharpe: '1.96', maxdd: '-8.7%',  cagr: '+55.5%' },
+  PARITY: { sharpe: '2.03', maxdd: '-7.6%',  cagr: '+52.1%' },
+  SHIELD:      { sharpe: '1.90', maxdd: '-9.1%',  cagr: '+29.9%' },
 };
-const ENGINE_HYSTERESIS = { ENHANCED: 7, OMEGA: 5, OMEGA_V2: 4, PRO: 3 };
+const ENGINE_HYSTERESIS = { BULL: 7, BALANCED: 5, PARITY: 4, SHIELD: 3 };
 const BOT_COLORS = { a: '#58a6ff', b: '#3fb950', c: '#ffa657', g: '#39d353', d: '#c792ea', e: '#ff7b72', f: '#f7c948' };
 const BOT_NAMES  = { a: 'Supertrend+MR', b: 'Momentum', c: 'Breakout', g: 'Trend Multi-Asset', d: 'DeepSeek R1', e: 'Claude Sonnet', f: 'Claude Haiku' };
 const BOT_TYPES  = { a: 'Technique | 4h | 20 symboles', b: 'Dual Momentum | daily | rotation', c: 'Donchian Breakout | daily | BTC/ETH/SOL', g: 'Trend Following | daily | multi-asset' };
@@ -705,7 +705,7 @@ function perfClass(val) {
   return 'neu';
 }
 function engColor(eng) { return ENGINE_COLORS[eng] || '#888'; }
-function engLabel(eng) { return eng === 'OMEGA_V2' ? 'OMEGA V2' : eng; }
+function engLabel(eng) { return eng; }
 
 // ── Load Portfolio (Bot Z) ────────────────────────────────────────────────────
 
@@ -720,7 +720,7 @@ async function loadPortfolio() {
 }
 
 function renderPortfolio(d) {
-  const engine = d.current_engine || 'OMEGA';
+  const engine = d.current_engine || 'BALANCED';
   const pending = d.pending_engine || engine;
   const daysPending = d.days_pending || 0;
   const hystTotal = ENGINE_HYSTERESIS[pending] || 5;
@@ -749,7 +749,7 @@ function renderPortfolio(d) {
   document.getElementById('eng-cagr').textContent   = stats.cagr   || '—';
 
   // Active pill highlight
-  ['ENHANCED','OMEGA','OMEGA_V2','PRO'].forEach(e => {
+  ['BULL','BALANCED','PARITY','SHIELD'].forEach(e => {
     const pill = document.getElementById('pill-' + e);
     if (!pill) return;
     pill.style.opacity = (e === engine) ? '1' : '0.3';
@@ -902,7 +902,7 @@ function renderZEquityChart(history) {
   if (!history.length) return;
   const labels   = history.map(h => h.ts.slice(0,10));
   const values   = history.map(h => parseFloat(h.total) || 10000);
-  const engines  = history.map(h => h.engine || 'OMEGA');
+  const engines  = history.map(h => h.engine || 'BALANCED');
 
   // Segment colors by engine
   const segColors = history.map((h, i) => {
@@ -941,7 +941,7 @@ function renderZEquityChart(history) {
         tooltip: {
           callbacks: {
             title: (items) => items[0].label,
-            label:  (item) => ` ${fmtEur(item.raw)} (engine: ${engLabel(engines[item.dataIndex] || 'OMEGA')})`
+            label:  (item) => ` ${fmtEur(item.raw)} (engine: ${engLabel(engines[item.dataIndex] || 'BALANCED')})`
           }
         }
       },
@@ -957,7 +957,7 @@ function renderEngineTimeline(history) {
   const container = document.getElementById('engine-timeline');
   if (!history.length) { container.innerHTML = '<span style="color:var(--muted);font-size:11px">Aucun historique</span>'; return; }
   const dots = history.slice(-60).map(h => {
-    const eng = h.engine || 'OMEGA';
+    const eng = h.engine || 'BALANCED';
     const regime = h.regime || 'RANGE';
     const date = h.ts.slice(0,10);
     return `<div class="timeline-dot ${eng}" data-tip="${date} — ${engLabel(eng)} — ${regime}"></div>`;

@@ -9,7 +9,7 @@ Architecture Bot Z Meta v2 (validée backtest 2020-2026, Run 10) :
       ↓
   Regime Engine (4 régimes VIX+QQQ+BTC + Momentum Overlay)
       ↓
-  Meta Engine Selector (ENHANCED / OMEGA / OMEGA_V2 / PRO)
+  Meta Engine Selector (BULL / BALANCED / PARITY / SHIELD)
       ↓
   Portfolio Engine (allocation dynamique selon engine actif)
       ↓
@@ -19,22 +19,22 @@ Architecture Bot Z Meta v2 (validée backtest 2020-2026, Run 10) :
 
 Sélection d'engine (Meta v2) :
   Hard rules (non-négociables) :
-    PRO forcé si (BTC+QQQ both bearish ET VIX>26) OU VIX>32 OU DD<-12%
-    ENHANCED bloqué si BTC ou QQQ bearish
+    SHIELD forcé si (BTC+QQQ both bearish ET VIX>26) OU VIX>32 OU DD<-12%
+    BULL bloqué si BTC ou QQQ bearish
 
   Scoring data-driven (si pas de hard rule) :
     score = 0.50 × regime_fit + 0.30 × rolling_quality + 0.20 × inverse_vol
     → engine avec meilleur score (hysteresis 7/5/4/3 jours)
 
 Engines disponibles :
-  ENHANCED  : régime pur v2 (BULL max CAGR) — Sharpe 1.61, MaxDD -18.9%
-  OMEGA     : ER/Risk proxy + softmax quality — base neutre + quality boost
-  OMEGA_V2  : OMEGA + Risk Parity (blend inverse-vol) — Sharpe 2.03, MaxDD -7.6%
-  PRO       : défensif pur C+G, VIX scaling — Sharpe 1.90, MaxDD -9.1%
+  BULL  : régime pur v2 (BULL max CAGR) — Sharpe 1.61, MaxDD -18.9%
+  BALANCED     : ER/Risk proxy + softmax quality — base neutre + quality boost
+  PARITY  : BALANCED + Risk Parity (blend inverse-vol) — Sharpe 2.03, MaxDD -7.6%
+  SHIELD       : défensif pur C+G, VIX scaling — Sharpe 1.90, MaxDD -9.1%
 
 Résultats backtest (2020-2026, 6 ans) :
   Meta v2 : CAGR +43.2% | Sharpe 1.70 | MaxDD -9.6% | 2022 +1.0%
-  Distribution : ENHANCED 17% / OMEGA 30% / OMEGA_V2 28% / PRO 25%
+  Distribution : BULL 17% / BALANCED 30% / PARITY 28% / SHIELD 25%
 """
 import json
 import os
@@ -104,14 +104,14 @@ BOT_NAMES = {
 }
 
 # ── Engine weights — Meta v2 ─────────────────────────────────────────────────
-# ENHANCED = REGIME_WEIGHTS (ci-dessus)
-PRO_WEIGHTS = {
+# BULL = REGIME_WEIGHTS (ci-dessus)
+SHIELD_WEIGHTS = {
     "BULL":     {"a": 0.2, "b": 0.0, "c": 1.8, "g": 1.0},
     "RANGE":    {"a": 0.3, "b": 0.0, "c": 1.8, "g": 1.0},
     "BEAR":     {"a": 0.1, "b": 0.0, "c": 2.0, "g": 1.0},
     "HIGH_VOL": {"a": 0.2, "b": 0.0, "c": 1.8, "g": 1.0},
 }
-OMEGA_WEIGHTS = {  # base neutre + quality scoring fait le tri
+BALANCED_WEIGHTS = {  # base neutre + quality scoring fait le tri
     "BULL":     {"a": 0.9, "b": 1.1, "c": 0.7, "g": 1.0},
     "RANGE":    {"a": 1.0, "b": 0.9, "c": 0.8, "g": 0.9},
     "BEAR":     {"a": 0.4, "b": 0.1, "c": 1.3, "g": 1.1},
@@ -119,12 +119,12 @@ OMEGA_WEIGHTS = {  # base neutre + quality scoring fait le tri
 }
 
 ENGINE_REGIME_FIT = {
-    "ENHANCED": {"BULL": 1.0, "RANGE": 0.6, "HIGH_VOL": 0.3, "BEAR": 0.1},
-    "OMEGA":    {"BULL": 0.8, "RANGE": 0.8, "HIGH_VOL": 0.7, "BEAR": 0.5},
-    "OMEGA_V2": {"BULL": 0.5, "RANGE": 0.7, "HIGH_VOL": 0.9, "BEAR": 0.8},
-    "PRO":      {"BULL": 0.3, "RANGE": 0.5, "HIGH_VOL": 0.8, "BEAR": 1.0},
+    "BULL": {"BULL": 1.0, "RANGE": 0.6, "HIGH_VOL": 0.3, "BEAR": 0.1},
+    "BALANCED":    {"BULL": 0.8, "RANGE": 0.8, "HIGH_VOL": 0.7, "BEAR": 0.5},
+    "PARITY": {"BULL": 0.5, "RANGE": 0.7, "HIGH_VOL": 0.9, "BEAR": 0.8},
+    "SHIELD":      {"BULL": 0.3, "RANGE": 0.5, "HIGH_VOL": 0.8, "BEAR": 1.0},
 }
-META_ENGINE_HYSTERESIS = {"ENHANCED": 7, "OMEGA": 5, "OMEGA_V2": 4, "PRO": 3}
+META_ENGINE_HYSTERESIS = {"BULL": 7, "BALANCED": 5, "PARITY": 4, "SHIELD": 3}
 
 
 # ── Sélecteur d'engine Meta v2 ────────────────────────────────────────────────
@@ -132,15 +132,15 @@ META_ENGINE_HYSTERESIS = {"ENHANCED": 7, "OMEGA": 5, "OMEGA_V2": 4, "PRO": 3}
 def select_engine_live(vix: float, btc_bearish: bool, qqq_bearish: bool,
                        port_dd: float, regime: str,
                        rolling_scores: dict, bot_vols: dict,
-                       current_engine: str = "OMEGA",
+                       current_engine: str = "BALANCED",
                        regime_confidence: float = 1.0,
                        regime_strength: float = 1.0) -> str:
     """
     Sélectionne l'engine optimal pour ce cycle (production, sans shadow tracking).
 
     Hard rules (non-négociables) :
-      PRO forcé si (BTC+QQQ both bearish ET VIX>26) OU VIX>32 OU DD<-12%
-      ENHANCED bloqué si BTC ou QQQ bearish
+      SHIELD forcé si (BTC+QQQ both bearish ET VIX>26) OU VIX>32 OU DD<-12%
+      BULL bloqué si BTC ou QQQ bearish
 
     Scoring (si pas de hard rule) :
       rf    = regime_fit × regime_confidence × regime_strength
@@ -150,7 +150,7 @@ def select_engine_live(vix: float, btc_bearish: bool, qqq_bearish: bool,
     # Hard rules
     force_pro = ((btc_bearish and qqq_bearish and vix > 26) or vix > 32 or port_dd < -0.12)
     if force_pro:
-        return "PRO"
+        return "SHIELD"
     block_enhanced = btc_bearish or qqq_bearish
 
     # Normalisation des proxies de qualité et risque
@@ -163,25 +163,25 @@ def select_engine_live(vix: float, btc_bearish: bool, qqq_bearish: bool,
 
     best_engine = None
     best_score  = -1.0
-    candidates  = ["ENHANCED", "OMEGA", "OMEGA_V2", "PRO"]
+    candidates  = ["BULL", "BALANCED", "PARITY", "SHIELD"]
 
     for eng in candidates:
-        if eng == "ENHANCED" and block_enhanced:
+        if eng == "BULL" and block_enhanced:
             continue
 
         # regime_fit pondéré par confiance × persistance du régime
         rf = ENGINE_REGIME_FIT[eng].get(regime, 0.5) * regime_confidence * regime_strength
 
         # Inverse vol : chaque engine a un profil différent
-        if eng == "PRO":
-            # PRO favorisé quand vol haute
+        if eng == "SHIELD":
+            # SHIELD favorisé quand vol haute
             inv_risk_norm = min(1.0, avg_vol / max(TARGET_VOL, 0.01))
-        elif eng == "OMEGA_V2":
-            # OMEGA_V2 favorisé en stress modéré
+        elif eng == "PARITY":
+            # PARITY favorisé en stress modéré
             stress = max(0.0, (vix - 20) / 20.0)
             inv_risk_norm = min(1.0, 0.3 + stress * 0.7)
         else:
-            # ENHANCED/OMEGA : favorisés quand vol basse
+            # BULL/BALANCED : favorisés quand vol basse
             inv_risk_norm = max(0.0, 1.0 - avg_vol / max(max_vol, 0.01))
 
         score = 0.50 * rf + 0.30 * quality_norm + 0.20 * inv_risk_norm
@@ -194,7 +194,7 @@ def select_engine_live(vix: float, btc_bearish: bool, qqq_bearish: bool,
             best_score  = score
             best_engine = eng
 
-    return best_engine or "OMEGA"
+    return best_engine or "BALANCED"
 
 
 def load_state() -> dict:
@@ -208,8 +208,8 @@ def load_state() -> dict:
         "paper_review_date": PAPER_REVIEW_DATE,
         "cb_peak": INITIAL_CAP,
         "cb_factor": 1.0,
-        "current_engine": "OMEGA",
-        "pending_engine": "OMEGA",
+        "current_engine": "BALANCED",
+        "pending_engine": "BALANCED",
         "days_pending": 0,
         "last_bot_values": {},
         "last_alloc_weights": {},
@@ -516,14 +516,14 @@ def compute_allocation_drift(target_weights: dict, all_states: dict) -> float:
 
 def compute_shadow_allocation(regime: str, all_states: dict, macro: dict,
                               cb_factor: float = 1.0,
-                              engine: str = "ENHANCED") -> dict:
+                              engine: str = "BULL") -> dict:
     """
     Calcule l'allocation Bot Z Meta v2 pour chaque bot.
 
     Structure : engine sélectionné + circuit breaker
-      - Poids par engine/régime (ENHANCED, OMEGA, OMEGA_V2, PRO)
-      - OMEGA_V2 : blend 50% OMEGA + 50% inverse-vol (risk parity)
-      - Modulation par qualité récente (rolling score, sauf PRO)
+      - Poids par engine/régime (BULL, BALANCED, PARITY, SHIELD)
+      - PARITY : blend 50% BALANCED + 50% inverse-vol (risk parity)
+      - Modulation par qualité récente (rolling score, sauf SHIELD)
       - Exposition finale × cb_factor (circuit breaker)
       - Cap par bot 40%
 
@@ -532,11 +532,11 @@ def compute_shadow_allocation(regime: str, all_states: dict, macro: dict,
     vix      = macro.get("vix", 15.0)
 
     # Choisir le tableau de poids selon l'engine
-    if engine == "PRO":
-        base_w = PRO_WEIGHTS.get(regime, PRO_WEIGHTS["RANGE"])
-    elif engine in ("OMEGA", "OMEGA_V2"):
-        base_w = OMEGA_WEIGHTS.get(regime, OMEGA_WEIGHTS["RANGE"])
-    else:  # ENHANCED (défaut)
+    if engine == "SHIELD":
+        base_w = SHIELD_WEIGHTS.get(regime, SHIELD_WEIGHTS["RANGE"])
+    elif engine in ("BALANCED", "PARITY"):
+        base_w = BALANCED_WEIGHTS.get(regime, BALANCED_WEIGHTS["RANGE"])
+    else:  # BULL (défaut)
         base_w = REGIME_WEIGHTS.get(regime, REGIME_WEIGHTS["RANGE"])
 
     regime_w = base_w
@@ -553,14 +553,14 @@ def compute_shadow_allocation(regime: str, all_states: dict, macro: dict,
     for bot_id, state in all_states.items():
         rw      = regime_w.get(bot_id, 0.0)
         quality = compute_rolling_score(bot_id, state)
-        # PRO : pas de boost qualité (défensif pur, C+G fixes)
-        if engine == "PRO":
+        # SHIELD : pas de boost qualité (défensif pur, C+G fixes)
+        if engine == "SHIELD":
             raw_weights[bot_id] = rw
         else:
             raw_weights[bot_id] = rw * quality
 
-    # OMEGA_V2 : blend 50% OMEGA weights + 50% inverse-vol (risk parity)
-    if engine == "OMEGA_V2":
+    # PARITY : blend 50% BALANCED weights + 50% inverse-vol (risk parity)
+    if engine == "PARITY":
         bot_vols = {b: compute_bot_volatility(s) for b, s in all_states.items()}
         max_vol  = max(bot_vols.values()) if bot_vols else TARGET_VOL
         inv_vols = {b: (1.0 / max(v, 0.01)) for b, v in bot_vols.items()}
@@ -800,8 +800,8 @@ def run_bot_z_cycle(macro: dict, ohlcv: dict = None) -> dict:
     bot_vols       = {b: compute_bot_volatility(s)   for b, s in all_states.items()}
 
     # Hysteresis : on attend N jours de confirmation avant de switcher
-    current_engine = state.get("current_engine", "OMEGA")
-    pending_engine = state.get("pending_engine", "OMEGA")
+    current_engine = state.get("current_engine", "BALANCED")
+    pending_engine = state.get("pending_engine", "BALANCED")
     days_pending   = state.get("days_pending", 0)
 
     # Sélection engine avec switch penalty + confidence × persistence
@@ -824,7 +824,7 @@ def run_bot_z_cycle(macro: dict, ohlcv: dict = None) -> dict:
     if days_pending >= META_ENGINE_HYSTERESIS.get(pending_engine, 5):
         engine_switched = (current_engine != pending_engine)
         if engine_switched:
-            _engine_emojis = {"ENHANCED": "🟢", "OMEGA": "🔵", "OMEGA_V2": "🟡", "PRO": "🔴"}
+            _engine_emojis = {"BULL": "🟢", "BALANCED": "🔵", "PARITY": "🟡", "SHIELD": "🔴"}
             notify(
                 f"🔄 <b>Bot Z — Changement d'engine</b>\n"
                 f"{_engine_emojis.get(prev_engine, '⚪')} {prev_engine} → "
@@ -854,12 +854,12 @@ def run_bot_z_cycle(macro: dict, ohlcv: dict = None) -> dict:
         "prev_engine":        prev_engine,
     }
 
-    # CB seuils adaptés par engine (PRO plus sensible)
+    # CB seuils adaptés par engine (SHIELD plus sensible)
     cb_tiers = {
-        "ENHANCED": [(-0.25, CB_MIN_FACTOR)],
-        "OMEGA":    [(-0.25, CB_MIN_FACTOR)],
-        "OMEGA_V2": [(-0.20, 0.50), (-0.30, CB_MIN_FACTOR)],
-        "PRO":      [(-0.10, 0.80), (-0.20, 0.50), (-0.30, CB_MIN_FACTOR)],
+        "BULL": [(-0.25, CB_MIN_FACTOR)],
+        "BALANCED":    [(-0.25, CB_MIN_FACTOR)],
+        "PARITY": [(-0.20, 0.50), (-0.30, CB_MIN_FACTOR)],
+        "SHIELD":      [(-0.10, 0.80), (-0.20, 0.50), (-0.30, CB_MIN_FACTOR)],
     }
     tiers = cb_tiers.get(current_engine, [(-0.25, CB_MIN_FACTOR)])
     target_factor = 1.0
@@ -911,7 +911,7 @@ def run_bot_z_cycle(macro: dict, ohlcv: dict = None) -> dict:
         warnings_list.append(
             f"CIRCUIT BREAKER actif — DD={port_dd*100:.1f}% | expo={cb_factor_final*100:.0f}%"
         )
-    if current_engine != "ENHANCED":
+    if current_engine != "BULL":
         warnings_list.append(f"Engine actif : {current_engine} (pending={pending_engine}, j={days_pending})")
     if vix > CASH_VIX_THRESHOLD:
         warnings_list.append(f"HIGH_VOL forcé (VIX={vix:.1f} > {CASH_VIX_THRESHOLD})")
@@ -1037,9 +1037,9 @@ def print_bot_z_summary(summary: dict):
     days      = summary.get("days_running", 0)
     review    = summary.get("paper_review", PAPER_REVIEW_DATE)
     cb_c      = Fore.RED if cb_active else Fore.GREEN
-    engine    = summary.get("current_engine", "ENHANCED")
-    eng_colors = {"ENHANCED": Fore.GREEN, "OMEGA": Fore.CYAN,
-                  "OMEGA_V2": Fore.YELLOW, "PRO": Fore.RED}
+    engine    = summary.get("current_engine", "BULL")
+    eng_colors = {"BULL": Fore.GREEN, "BALANCED": Fore.CYAN,
+                  "PARITY": Fore.YELLOW, "SHIELD": Fore.RED}
     ec        = eng_colors.get(engine, Fore.WHITE)
 
     print(f"\n{Fore.CYAN}{'─'*78}")

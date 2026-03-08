@@ -1,3 +1,4 @@
+
 """
 Runner backtest multi-symboles — parallèle, rapport global.
 

@@ -163,10 +163,10 @@ print(f"\n{Fore.YELLOW}  ── Bot Z (A+B+C+G, 4 000€ initial) ──{Style.R
 Z_LABELS = {
     "equal_weight":"Equal-Weight A+B+C+G",
     "regime_pure": "Bot Z Régime pur",
-    "enhanced":    "Bot Z Enhanced",
-    "omega":       "Bot Z Omega",
-    "omega_v2":    "Bot Z Omega v2",
-    "meta_v2":     "Bot Z Meta v2 (PROD)",
+    "enhanced":    "Bot Z v1 — MO+CB",
+    "omega":       "Bot Z v2 — QualityScore",
+    "omega_v2":    "Bot Z v3 — RiskParity",
+    "meta_v2":     "Bot Z PROD — Meta v2",
 }
 for key, name in Z_LABELS.items():
     z = z_results.get(key)
