@@ -343,9 +343,14 @@ def process_symbol(
             news=news if news else None,
             soft_filters=soft_filters,
         )
-        log(f"{symbol} — Claude: {'✓ CONFIRME' if confirme else '✗ IGNORE'} | {raison}", "INFO")
-        log_signal("CLAUDE_FILTER", symbol, {
-            "decision": "CONFIRME" if confirme else "IGNORE",
+        # ── MODE SHADOW : Claude consulté mais décision non appliquée ────────
+        # Bot A tourne en pur technique depuis 2026-03-08.
+        # L'avis Claude est loggé en CLAUDE_SHADOW pour analyse au 2026-04-30 :
+        # "est-ce que les trades que Claude aurait bloqués étaient mauvais ?"
+        log(f"{symbol} — Claude shadow: {'✓ AURAIT CONFIRMÉ' if confirme else '✗ AURAIT IGNORÉ'} | {raison}", "INFO")
+        log_signal("CLAUDE_SHADOW", symbol, {
+            "claude_decision": "CONFIRME" if confirme else "IGNORE",
+            "claude_applied": False,   # ← clé pour filtrer en analyse
             "raison": raison,
             "adx": round(adx, 2),
             "rsi": round(float(last["rsi"]), 2),
@@ -357,10 +362,7 @@ def process_symbol(
             "btc_trend": btc_context.get("btc_trend") if btc_context else None,
             "rotation_factor": vix_factor,
         })
-
-        if not confirme:
-            log_signal("BUY_SKIP_CLAUDE", symbol, {"raison": raison, "price": current_price})
-            return state
+        # NE PAS bloquer le trade — Bot A décide sur le signal technique seul
 
         effective_buy = current_price * (1 + config.SLIPPAGE)
         base_eur = max(config.POSITION_MIN_EUR, state["capital"] * config.POSITION_SIZE_PCT)
