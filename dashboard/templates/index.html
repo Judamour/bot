@@ -385,6 +385,10 @@
       <div class="header-kpi-val" id="hdr-vix">—</div>
       <div class="header-kpi-lbl">VIX</div>
     </div>
+    <div class="header-kpi" style="border-left:1px solid var(--border);padding-left:16px">
+      <div class="header-kpi-val" id="hdr-countdown" style="font-variant-numeric:tabular-nums;letter-spacing:0.03em">—</div>
+      <div class="header-kpi-lbl" id="hdr-clock">— Paris</div>
+    </div>
   </div>
 </header>
 
@@ -1515,6 +1519,44 @@ async function init() {
 }
 
 init();
+
+// ── Countdown prochain cycle + heure Paris ────────────────────────────────
+const CYCLE_HOURS_UTC = [3, 7, 11, 15, 19, 23];
+
+function nextCycleUTC() {
+  const now = new Date();
+  const nowUTC = now.getTime() + now.getTimezoneOffset() * 60000; // ms depuis epoch en UTC
+  const d = new Date(nowUTC);
+  const h = d.getUTCHours(), m = d.getUTCMinutes(), s = d.getUTCSeconds();
+  const nowSec = h * 3600 + m * 60 + s;
+
+  for (const ch of CYCLE_HOURS_UTC) {
+    const cycleSec = ch * 3600;
+    if (cycleSec > nowSec) return cycleSec - nowSec; // secondes restantes
+  }
+  // Dernier cycle passé → prochain demain à 3h UTC
+  return (24 * 3600 - nowSec) + CYCLE_HOURS_UTC[0] * 3600;
+}
+
+function updateClock() {
+  // Heure Paris (Europe/Paris gère CET/CEST automatiquement)
+  const paris = new Intl.DateTimeFormat('fr-FR', {
+    timeZone: 'Europe/Paris',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false
+  }).format(new Date());
+
+  const rem = nextCycleUTC();
+  const hh = String(Math.floor(rem / 3600)).padStart(2, '0');
+  const mm = String(Math.floor((rem % 3600) / 60)).padStart(2, '0');
+  const ss = String(rem % 60).padStart(2, '0');
+
+  const el = document.getElementById('hdr-countdown');
+  const cl = document.getElementById('hdr-clock');
+  if (el) el.textContent = `${hh}:${mm}:${ss}`;
+  if (cl) cl.textContent = `${paris} Paris`;
+}
+updateClock();
+setInterval(updateClock, 1000);
 
 // Auto-refresh every 60s
 setInterval(() => {
