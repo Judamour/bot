@@ -781,6 +781,25 @@ def run_bot_z_cycle(macro: dict, ohlcv: dict = None) -> dict:
         for b in VALID_BOTS
     }
     weighted_return = sum(prev_weights.get(b, 0) * cycle_returns.get(b, 0) for b in VALID_BOTS)
+
+    # Sanity cap : un retour > 15% sur un cycle 4h signale un saut de données
+    # (ex : Bot Z crashé → sub-bots ont accumulé des gains → faux "mega-cycle")
+    # On recale z_capital sur la somme réelle des bots dans ce cas
+    MAX_CYCLE_RETURN = 0.15
+    if abs(weighted_return) > MAX_CYCLE_RETURN:
+        sum_prev = sum(prev_bot_values.get(b, 0) for b in VALID_BOTS)
+        sum_curr = sum(bot_values.get(b, 0) for b in VALID_BOTS)
+        if sum_prev > 0 and sum_curr > 0:
+            # Recalage : z_capital × ratio réel des portefeuilles
+            corrected_capital = z_capital * (sum_curr / sum_prev)
+            log(
+                f"[BOT Z] SANITY: weighted_return={weighted_return:.1%} > {MAX_CYCLE_RETURN:.0%} "
+                f"(données sautées — bot Z crashé ?) → recalage z_capital "
+                f"{z_capital:.0f}€ → {corrected_capital:.0f}€ (ratio bots {sum_curr:.0f}/{sum_prev:.0f})",
+                "WARNING"
+            )
+            weighted_return = sum_curr / sum_prev - 1  # retour réel sur la période manquée
+
     new_z_capital   = max(0.0, z_capital * (1 + weighted_return))
 
     cb_peak   = max(state.get("cb_peak", INITIAL_CAP), new_z_capital)
@@ -983,6 +1002,7 @@ def run_bot_z_cycle(macro: dict, ohlcv: dict = None) -> dict:
     _log_shadow(summary)
 
     # 12. Mise à jour state
+    state["initial_capital"]     = INITIAL_CAP  # toujours synchronisé avec la constante
     state["cb_peak"]             = round(cb_peak, 2)
     state["cb_factor"]           = round(cb_factor, 3)
     state["z_capital"]           = round(new_z_capital, 2)
