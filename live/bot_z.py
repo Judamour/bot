@@ -885,9 +885,20 @@ def run_bot_z_cycle(macro: dict, ohlcv: dict = None) -> dict:
     # 5. Allocation Meta v2 (engine sélectionné + CB final)
     allocation = compute_shadow_allocation(regime, all_states, macro, cb_factor_final, current_engine)
 
-    # 6. Budget dispatch — écriture logs/bot_z/budget.json pour les sub-bots
+    # 6. Budget dispatch — risk parity blend + écriture logs/bot_z/budget.json
     alloc_weights = {b: allocation[b]["weight_final"] for b in VALID_BOTS if b in allocation}
-    budget = {b: round(new_z_capital * cb_factor_final * alloc_weights.get(b, 0.0), 2) for b in VALID_BOTS}
+
+    # Risk parity : 60% poids engine/régime + 40% inverse-vol (stabilise la contribution au risque)
+    valid_vols = {b: max(bot_vols.get(b, TARGET_PORTFOLIO_VOL), 0.05) for b in VALID_BOTS}
+    inv_vol_raw = {b: 1.0 / valid_vols[b] for b in VALID_BOTS}
+    total_inv = sum(inv_vol_raw.values())
+    inv_vol_w = {b: inv_vol_raw[b] / total_inv for b in VALID_BOTS}
+    blended = {b: 0.60 * alloc_weights.get(b, 0.0) + 0.40 * inv_vol_w.get(b, 0.0) for b in VALID_BOTS}
+    total_b = sum(blended.values())
+    if total_b > 0:
+        blended = {b: v / total_b for b, v in blended.items()}
+
+    budget = {b: round(new_z_capital * cb_factor_final * blended.get(b, 0.0), 2) for b in VALID_BOTS}
     _write_budget(budget)
 
     # 7. Analyse exposition croisée + drift d'allocation

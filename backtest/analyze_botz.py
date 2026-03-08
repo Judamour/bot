@@ -61,6 +61,87 @@ def load_shadow(path: str) -> list:
     return records
 
 
+def compute_mcps(records: list) -> dict | None:
+    """Marginal Contribution to Portfolio Sharpe (MCPS) — méthode hedge fund.
+
+    Pour chaque bot, calcule si son ajout augmente ou réduit le Sharpe global.
+    Utilise les bot_values de shadow.jsonl (valeurs € par bot à chaque cycle).
+    Nécessite 20+ cycles pour être significatif.
+    """
+    bot_ids = ["a", "b", "c", "g"]
+    bot_value_series = {b: [] for b in bot_ids}
+
+    for r in records:
+        bv = r.get("bot_values", {})
+        if bv and all(b in bv and bv[b] > 0 for b in bot_ids):
+            for b in bot_ids:
+                bot_value_series[b].append(float(bv[b]))
+
+    n = min(len(v) for v in bot_value_series.values())
+    if n < 10:
+        return None
+
+    # Returns cycle par cycle pour chaque bot
+    bot_returns = {}
+    for b in bot_ids:
+        vals = bot_value_series[b][:n]
+        bot_returns[b] = [(vals[i] / vals[i-1] - 1) if vals[i-1] > 0 else 0.0
+                          for i in range(1, n)]
+
+    m = n - 1  # nombre de returns
+
+    def mean(xs):
+        return sum(xs) / len(xs) if xs else 0.0
+
+    def std(xs):
+        if len(xs) < 2:
+            return 0.0
+        mu = mean(xs)
+        return math.sqrt(sum((x - mu) ** 2 for x in xs) / len(xs))
+
+    def sharpe(rets):
+        if len(rets) < 3:
+            return 0.0
+        mu, sigma = mean(rets), std(rets)
+        if sigma == 0:
+            return 0.0
+        return mu / sigma * math.sqrt(6 * 365)  # 6 cycles/jour
+
+    def corr(x, y):
+        mx, my = mean(x), mean(y)
+        num = sum((xi - mx) * (yi - my) for xi, yi in zip(x, y))
+        dx = std(x) * len(x) ** 0.5
+        dy = std(y) * len(y) ** 0.5
+        return num / (dx * dy) if dx > 0 and dy > 0 else 0.0
+
+    # Portfolio = moyenne équipondérée des 4 bots
+    port_rets = [sum(bot_returns[b][i] for b in bot_ids) / len(bot_ids) for i in range(m)]
+    port_sharpe = sharpe(port_rets)
+
+    results = {}
+    for b in bot_ids:
+        rets_b = bot_returns[b]
+        rho = corr(rets_b, port_rets)
+        sharpe_b = sharpe(rets_b)
+        mcps = sharpe_b - rho * port_sharpe  # contribution marginale
+
+        # Sharpe portfolio sans ce bot
+        others = [bid for bid in bot_ids if bid != b]
+        port_without = [sum(bot_returns[bid][i] for bid in others) / len(others) for i in range(m)]
+        sharpe_without = sharpe(port_without)
+        incremental = port_sharpe - sharpe_without  # >0 = bot utile
+
+        results[b] = {
+            "sharpe_solo": round(sharpe_b, 3),
+            "corr_to_portfolio": round(rho, 3),
+            "mcps": round(mcps, 3),
+            "sharpe_without": round(sharpe_without, 3),
+            "incremental_sharpe": round(incremental, 3),
+        }
+
+    return {"port_sharpe": round(port_sharpe, 3), "bots": results, "n_cycles": m}
+
+
 def fmt_pct(val, sign=True):
     v = float(val)
     return (("+" if v >= 0 and sign else "") + f"{v:.2f}%")
@@ -470,7 +551,31 @@ def analyze(records: list, export_csv: bool = False):
     else:
         print(f"  {DIM}BTC realized vol : données absentes (cycles pré-v2+){RST}")
 
-    # ── 10. Recommandations ────────────────────────────────────────────────────
+    # ── 10. MCPS — Contribution marginale au Sharpe ──────────────────────────
+    separator("MCPS — CONTRIBUTION MARGINALE AU SHARPE (méthode hedge fund)")
+    mcps_data = compute_mcps(records)
+    if mcps_data is None:
+        print(f"  {DIM}Données insuffisantes (<10 cycles avec bot_values) — relancer après 2 semaines{RST}")
+    else:
+        nb = mcps_data["n_cycles"]
+        ps = mcps_data["port_sharpe"]
+        print(f"  Sharpe portfolio actuel : {C}{ps:+.3f}{RST}  ({nb} cycles analysés)")
+        print(f"  {'Bot':<22} {'Sharpe solo':>12} {'Corr/Portfolio':>15} {'MCPS':>8} {'Sharpe sans':>12} {'Incrémental':>12}  Verdict")
+        separator()
+        for b in ["a", "b", "c", "g"]:
+            d = mcps_data["bots"].get(b, {})
+            name = BOT_NAMES.get(b, b.upper())
+            col = G if d.get("incremental_sharpe", 0) > 0 else R
+            verdict = "UTILE" if d.get("incremental_sharpe", 0) > 0 else "RETIRE"
+            mcps_col = G if d.get("mcps", 0) > 0 else R
+            print(f"  {name:<22} {d.get('sharpe_solo',0):>+12.3f} {d.get('corr_to_portfolio',0):>+15.3f} "
+                  f"{mcps_col}{d.get('mcps',0):>+8.3f}{RST} {d.get('sharpe_without',0):>+12.3f} "
+                  f"{col}{d.get('incremental_sharpe',0):>+12.3f}{RST}  {col}{verdict}{RST}")
+        print(f"\n  {DIM}MCPS > 0 → bot contribue positivement au Sharpe global.{RST}")
+        print(f"  {DIM}Incrémental < 0 → retirer ce bot améliorerait le portfolio.{RST}")
+        print(f"  {DIM}Règle hedge fund : bot accepté si Sharpe_bot > ρ × Sharpe_portfolio{RST}")
+
+    # ── 11. Recommandations ───────────────────────────────────────────────────
     separator("RECOMMANDATIONS PRÉ-LIVE")
     recs = []
 

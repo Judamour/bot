@@ -75,6 +75,24 @@ init(autoreset=True)
 STATE_A_FILE = "logs/supertrend/state.json"
 CYCLE_HOURS_UTC = [3, 7, 11, 15, 19, 23]
 INITIAL_CAPITAL_PER_BOT = 1000.0
+Z_BUDGET_FILE = "logs/bot_z/budget.json"
+
+
+def _apply_z_budget(state: dict, z_budget_eur: float) -> dict:
+    """Applique l'allocation Bot Z à l'état d'un sub-bot en scalant le capital proportionnellement.
+
+    Si Bot Z alloue 4 000€ à Bot A (qui avait 1 000€ initial), le capital disponible
+    est multiplié ×4 tout en préservant le ratio de PnL accumulé.
+    """
+    prev = state.get("z_budget_eur", state.get("initial_capital", INITIAL_CAPITAL_PER_BOT))
+    if prev <= 0:
+        prev = INITIAL_CAPITAL_PER_BOT
+    if abs(z_budget_eur - prev) / prev > 0.02:  # changement > 2% → rescale
+        scale = z_budget_eur / prev
+        state["capital"] = round(state["capital"] * scale, 2)
+        state["initial_capital"] = round(z_budget_eur, 2)
+    state["z_budget_eur"] = round(z_budget_eur, 2)
+    return state
 
 
 # ── State A management ───────────────────────────────────────────────────────
@@ -290,6 +308,19 @@ def run():
                     f"Capital: {z_summary.get('z_capital_eur', z_summary.get('total_simulated_eur',0)):.2f}€ | "
                     f"Régime: {z_summary.get('regime','?')} | MTM: {'live' if z_summary.get('mtm_live') else 'entry-price'} | "
                     f"Budget: {z_summary.get('budget',{})}")
+
+                # Dispatch capital Bot Z → sub-bots (scaling proportionnel)
+                z_budget_alloc = z_summary.get("budget", {})
+                if z_budget_alloc:
+                    state_a = _apply_z_budget(state_a, z_budget_alloc.get("a", INITIAL_CAPITAL_PER_BOT))
+                    state_b = _apply_z_budget(state_b, z_budget_alloc.get("b", INITIAL_CAPITAL_PER_BOT))
+                    state_c = _apply_z_budget(state_c, z_budget_alloc.get("c", INITIAL_CAPITAL_PER_BOT))
+                    state_g = _apply_z_budget(state_g, z_budget_alloc.get("g", INITIAL_CAPITAL_PER_BOT))
+                    log(f"[Z→] Budget dispatché — A:{z_budget_alloc.get('a',0):.0f}€ "
+                        f"B:{z_budget_alloc.get('b',0):.0f}€ "
+                        f"C:{z_budget_alloc.get('c',0):.0f}€ "
+                        f"G:{z_budget_alloc.get('g',0):.0f}€")
+
             except Exception as ez:
                 log(f"Bot Z erreur (non bloquant): {ez}", "WARN")
 

@@ -148,12 +148,14 @@ def run_breakout_cycle(state: dict, daily_cache: dict, macro_context: dict = Non
         if position:
             exit_reason = None
             exit_price = current_price
+            low_price = float(last["low"])  # check sur le LOW, pas le close (stops intraday)
 
-            if current_price <= position["stop"]:
+            if low_price <= position["stop"]:
                 exit_reason = "stop_loss"
                 exit_price = position["stop"]
-            elif current_price < dc_lower_exit:
+            elif low_price < dc_lower_exit:
                 exit_reason = "donchian_exit"
+                exit_price = dc_lower_exit
 
             if exit_reason:
                 exit_price_eff = exit_price * (1 - config.SLIPPAGE)
