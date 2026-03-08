@@ -4,11 +4,13 @@ Bot Z Meta v2+ — Documentation complète (mise à jour 2026-03-06)
 SOURCE DE VÉRITÉ : architecture live Bot Z Meta v2
 Backtests → docs/BACKTEST_RESULTS.md | Stratégies → docs/BOTS.md
 
-STATUT RÉEL (important avant de lire) :
-  Bot Z = allocateur ANALYTIQUE (pas encore exécutif)
-  Il calcule l'allocation et écrit budget.json, mais A/B/C/G
-  tradent encore avec leur capital propre (1 000€ chacun).
-  Budget dispatch branché prévu après revue 2026-04-30.
+STATUT RÉEL (mis à jour 2026-03-08) :
+  Bot Z = PILOTE EXÉCUTIF (dispatch capital actif depuis 2026-03-08)
+  Il calcule l'allocation, écrit budget.json ET scale le capital
+  de chaque sub-bot proportionnellement à chaque cycle.
+  A/B/C/G tradent maintenant avec leur part réelle du capital Z.
+  Allocation = 60% engine/régime + 40% inverse-vol (risk parity).
+  Capital initial : 1 000€ × 4 bots → rescalé vers allocation Z réelle.
 
 ---
 
