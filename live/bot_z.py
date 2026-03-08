@@ -471,7 +471,9 @@ def compute_btc_realized_vol(ohlcv: dict) -> float:
     """
     btc_df = None
     if ohlcv:
-        btc_df = ohlcv.get("BTC/EUR") or ohlcv.get("BTC/USDT")
+        btc_df = ohlcv.get("BTC/EUR")
+        if btc_df is None:
+            btc_df = ohlcv.get("BTC/USDT")
     if btc_df is None or btc_df.empty:
         return 0.0
     closes = btc_df["close"].dropna()
