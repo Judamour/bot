@@ -143,36 +143,49 @@ Univers de trading (16 actifs)
   └────────────────────────┴─────────────────────────────────────────────┘
 
 ---
-Résultats backtest 10 ans (2016-2026) — Run 17 FINAL
+Résultats backtest 10 ans (2016-2026) — Run 18 FINAL (2026-03-08)
 
-  ┌──────────────────────┬────────┬────────┬─────────┐
-  │                      │  CAGR  │ Sharpe │  MaxDD  │
-  ├──────────────────────┼────────┼────────┼─────────┤
-  │ Bot A seul           │ +49.3% │  2.43  │  -68.3% │
-  ├──────────────────────┼────────┼────────┼─────────┤
-  │ Bot Z Meta v2 (PROD) │ +38.2% │  1.92  │  -10.1% │
-  ├──────────────────────┼────────┼────────┼─────────┤
-  │ S&P 500 (benchmark)  │ +12.9% │  0.77  │  -33.9% │
-  ├──────────────────────┼────────┼────────┼─────────┤
-  │ BTC buy & hold       │ +65.5% │  0.91  │  -82.7% │
-  └──────────────────────┴────────┴────────┴─────────┘
+  ┌──────────────────────────┬────────┬────────┬─────────┬──────────┐
+  │                          │  CAGR  │ Sharpe │  MaxDD  │  Final   │
+  ├──────────────────────────┼────────┼────────┼─────────┼──────────┤
+  │ Bot A seul               │ +49.3% │  2.43  │  -68.3% │  55 008€ │
+  ├──────────────────────────┼────────┼────────┼─────────┼──────────┤
+  │ Bot B — Momentum         │ +36.8% │  0.77  │  -67.8% │  23 097€ │
+  ├──────────────────────────┼────────┼────────┼─────────┼──────────┤
+  │ Bot C — Breakout (réel)  │  +0.6% │  0.21  │   -7.8% │   1 057€ │
+  ├──────────────────────────┼────────┼────────┼─────────┼──────────┤
+  │ Bot G — Trend            │ +23.4% │  0.65  │  -22.6% │   8 179€ │
+  ├──────────────────────────┼────────┼────────┼─────────┼──────────┤
+  │ Bot Z Meta v2 (PROD)     │ +38.2% │  1.92  │  -10.1% │  84 985€ │
+  ├──────────────────────────┼────────┼────────┼─────────┼──────────┤
+  │ S&P 500 (benchmark)      │ +12.9% │  0.77  │  -33.9% │       —  │
+  ├──────────────────────────┼────────┼────────┼─────────┼──────────┤
+  │ NASDAQ-100               │ +19.9% │  0.93  │  -35.1% │       —  │
+  ├──────────────────────────┼────────┼────────┼─────────┼──────────┤
+  │ BTC buy & hold           │ +65.4% │  0.90  │  -82.7% │       —  │
+  └──────────────────────────┴────────┴────────┴─────────┴──────────┘
 
   Clé du système : Bot A fait +49% mais avec -68% de drawdown.
   Bot Z réduit ce drawdown à -10.1% en diversifiant et en protégeant en
   bear market, au prix d'un CAGR légèrement inférieur (+38.2%).
   Sharpe 1.92 vs 0.77 pour le S&P 500 → rendement ajusté au risque 2.5× supérieur.
 
+  Note Bot C : résultats corrigés (stop loss intraday sur LOW, non sur CLOSE).
+  Edge non prouvé sur 10 ans. Rôle : diversification défensive uniquement.
+
 ---
 Statut paper trading (démarré 2026-03-08)
 
-  Bot Z : 10 000€ | Engine actuel : SHIELD (VIX 29.5, BTC bear, F&G 12/100)
+  Bot Z : 10 000€ | Engine actuel : SHIELD (VIX 29.5, BTC bear)
+  z_capital_history : [10 000, 10 000, 10 000, 10 000, 10 000, 10 000, 10 000] ← stable
+  Budget dispatché : A=1 402€ | B=1 000€ | C=4 600€ | G=2 998€
   Revue prévue : 2026-04-30
 
   À vérifier le 30 avril :
   - Fréquence switchs engine < 0.3/semaine ?
   - % temps en SHIELD < 30% ?
   - MaxDD live < 12% ?
-  - Drift allocation < 15% ?
+  - Drift allocation < 15% (actuellement 35% — normal en début de paper) ?
   - Engine BULL activé au moins une fois ?
 
   Passage en live : désactiver PAPER_TRADING=true dans .env sur le VPS.
