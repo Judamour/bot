@@ -792,11 +792,10 @@ def run_bot_z_cycle(macro: dict, ohlcv: dict = None) -> dict:
         if sum_prev > 0 and sum_curr > 0:
             # Recalage : z_capital × ratio réel des portefeuilles
             corrected_capital = z_capital * (sum_curr / sum_prev)
-            log(
+            print(
                 f"[BOT Z] SANITY: weighted_return={weighted_return:.1%} > {MAX_CYCLE_RETURN:.0%} "
                 f"(données sautées — bot Z crashé ?) → recalage z_capital "
-                f"{z_capital:.0f}€ → {corrected_capital:.0f}€ (ratio bots {sum_curr:.0f}/{sum_prev:.0f})",
-                "WARNING"
+                f"{z_capital:.0f}€ → {corrected_capital:.0f}€ (ratio bots {sum_curr:.0f}/{sum_prev:.0f})"
             )
             weighted_return = sum_curr / sum_prev - 1  # retour réel sur la période manquée
 
