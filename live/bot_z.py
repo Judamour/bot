@@ -1006,7 +1006,10 @@ def run_bot_z_cycle(macro: dict, ohlcv: dict = None) -> dict:
     state["cb_factor"]           = round(cb_factor, 3)
     state["z_capital"]           = round(new_z_capital, 2)
     state["z_capital_history"]   = z_capital_history
-    state["last_bot_values"]     = bot_values
+    # Référence pour le prochain cycle = budget dispatché (pas les valeurs pre-dispatch).
+    # Sinon : pre-dispatch=4000€ → post-dispatch=10000€ → faux retour +150% au cycle suivant.
+    state["last_bot_values"]     = {b: round(budget.get(b, bot_values.get(b, 0)), 2) for b in VALID_BOTS}
+    state["last_bot_raw_values"] = bot_values  # valeurs réelles pour debug/MTM
     state["last_alloc_weights"]  = alloc_weights
     state["current_engine"]      = current_engine
     state["pending_engine"]      = pending_engine
