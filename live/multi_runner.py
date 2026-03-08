@@ -311,27 +311,18 @@ def run():
                     f"Régime: {z_summary.get('regime','?')} | MTM: {'live' if z_summary.get('mtm_live') else 'entry-price'} | "
                     f"Budget: {z_summary.get('budget',{})}")
 
-                # Dispatch capital Bot Z → sub-bots (scaling proportionnel)
+                # Budget dispatch Bot Z → sub-bots : DÉSACTIVÉ jusqu'à revue 2026-04-30
+                # Raison : le scaling proportionnel corrompt les states si Bot Z crashe
+                # (les bots continuent à trader pendant le crash, puis le "mega-cycle"
+                # de rattrapage explose z_capital et produit des budgets aberrants).
+                # Réactiver après validation paper 3 mois avec données réelles.
+                # TODO 2026-04-30 : rebrancher _apply_z_budget avec sanity checks
                 z_budget_alloc = z_summary.get("budget", {})
                 if z_budget_alloc:
-                    state_a = _apply_z_budget(state_a, z_budget_alloc.get("a", INITIAL_CAPITAL_PER_BOT))
-                    state_b = _apply_z_budget(state_b, z_budget_alloc.get("b", INITIAL_CAPITAL_PER_BOT))
-                    state_c = _apply_z_budget(state_c, z_budget_alloc.get("c", INITIAL_CAPITAL_PER_BOT))
-                    state_g = _apply_z_budget(state_g, z_budget_alloc.get("g", INITIAL_CAPITAL_PER_BOT))
-                    log(f"[Z→] Budget dispatché — A:{z_budget_alloc.get('a',0):.0f}€ "
+                    log(f"[Z] Budget calculé (non dispatché) — A:{z_budget_alloc.get('a',0):.0f}€ "
                         f"B:{z_budget_alloc.get('b',0):.0f}€ "
                         f"C:{z_budget_alloc.get('c',0):.0f}€ "
                         f"G:{z_budget_alloc.get('g',0):.0f}€")
-
-                    # Notifier si budget a changé significativement (>15% sur n'importe quel bot)
-                    budget_changed = any(
-                        abs(z_budget_alloc.get(b, 0) - _prev_budget.get(b, 0)) / max(_prev_budget.get(b, 1), 1) > 0.15
-                        for b in z_budget_alloc
-                    )
-                    if budget_changed:
-                        from live.notifier import notify_z_dispatch
-                        notify_z_dispatch(z_budget_alloc, z_summary.get('z_capital_eur', 10000), z_summary.get('current_engine', '?'))
-                        _prev_budget = dict(z_budget_alloc)
 
             except Exception as ez:
                 log(f"Bot Z erreur (non bloquant): {ez}", "WARN")
