@@ -121,7 +121,12 @@ for key, fn in BOT_FUNCS.items():
 z_results = {}
 if results:
     try:
-        z_results = backtest_bot_z_portfolio(results, vix_raw, qqq_raw)
+        zp = backtest_bot_z_portfolio(results, vix_raw, qqq_raw)
+        # Extraire equal_weight et regime_pure du résultat de portfolio
+        if zp.get("equal"):
+            z_results["equal_weight"] = zp["equal"]
+        if zp.get("z"):
+            z_results["regime_pure"] = zp["z"]
     except Exception as e:
         print(f"Z portfolio: {e}")
     for label, fn in [
@@ -167,12 +172,15 @@ for key, name in Z_LABELS.items():
     z = z_results.get(key)
     if z is None or not z.get("equity"):
         continue
-    m = compute_metrics(z.get("trades", []), z["equity"], INITIAL * 4)
-    c = Fore.GREEN if m["cagr"] > 0 else Fore.RED
-    print(f"  {name:<34} {c}{m['cagr']:>+7.1f}%{Style.RESET_ALL}"
-          f" {m['sharpe']:>8.2f} {m['max_dd']:>7.1f}%"
-          f" {m['trades']:>8} {m['win_rate']:>6.1f}%"
-          f" {m['final']:>9.0f}€")
+    # Utiliser les métriques pré-calculées par _metrics_portfolio (CAGR correct sur dates réelles)
+    m = z.get("metrics") or {}
+    if not m:
+        continue
+    c = Fore.GREEN if m.get("cagr", 0) > 0 else Fore.RED
+    print(f"  {name:<34} {c}{m.get('cagr', 0):>+7.1f}%{Style.RESET_ALL}"
+          f" {m.get('sharpe', 0):>8.2f} {m.get('max_dd', 0):>7.1f}%"
+          f" {m.get('trades', 0):>8} {m.get('win_rate', 0):>6.1f}%"
+          f" {m.get('final', 0):>9.0f}€")
 
 print(f"{Fore.CYAN}{'='*90}{Style.RESET_ALL}")
 
@@ -238,13 +246,13 @@ for key in BOT_FUNCS:
                  "final_eur": m["final"], "profit_factor": m["profit_factor"]})
 for key, name in Z_LABELS.items():
     z = z_results.get(key)
-    if z and z.get("equity"):
-        m = compute_metrics(z.get("trades", []), z["equity"], INITIAL * 4)
+    if z and z.get("equity") and z.get("metrics"):
+        m = z["metrics"]
         rows.append({"bot": f"Z-{key.upper()}", "strategy": name,
-                     "period": "2016-2026", "cagr_pct": m["cagr"],
-                     "sharpe": m["sharpe"], "max_dd_pct": m["max_dd"],
-                     "trades": m["trades"], "win_rate_pct": m["win_rate"],
-                     "final_eur": m["final"], "profit_factor": 0})
+                     "period": "2016-2026", "cagr_pct": m.get("cagr", 0),
+                     "sharpe": m.get("sharpe", 0), "max_dd_pct": m.get("max_dd", 0),
+                     "trades": 0, "win_rate_pct": 0,
+                     "final_eur": m.get("final", 0), "profit_factor": 0})
 pd.DataFrame(rows).to_csv(f"{RESULTS}/run10y_summary.csv", index=False)
 print(f"\nSauvegardé : {RESULTS}/run10y_summary.csv")
 
@@ -276,10 +284,10 @@ try:
     for key, name in Z_LABELS.items():
         z = z_results.get(key)
         if not z or not z.get("equity") or not z.get("dates"): continue
-        m = compute_metrics(z.get("trades",[]), z["equity"], INITIAL*4)
+        m = z.get("metrics") or {}
         lw = 2.5 if key == "meta_v2" else 1.2
         ax2.plot(pd.DatetimeIndex(z["dates"]), z["equity"],
-                 label=f"{name} | CAGR {m['cagr']:+.1f}% | Sharpe {m['sharpe']:.2f} | MaxDD {m['max_dd']:.1f}%",
+                 label=f"{name} | CAGR {m.get('cagr',0):+.1f}% | Sharpe {m.get('sharpe',0):.2f} | MaxDD {m.get('max_dd',0):.1f}%",
                  color=colors_z.get(key,"#7f8c8d"), linewidth=lw, alpha=0.9)
     ax2.set_title("Bot Z Portfolio (4 000€ — A+B+C+G)")
     ax2.set_ylabel("Capital (€)")
