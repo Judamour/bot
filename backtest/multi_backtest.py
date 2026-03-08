@@ -946,7 +946,18 @@ def _get_regime_at_dt(dt, vix_s, qqq_df) -> str:
         return "RANGE"
 
 
-def _metrics_portfolio(equity_list, dates_list, init):
+def _resample_weekly(dates, equity):
+    """Resample a daily equity curve to weekly (last day of each week).
+    Eliminates daily mark-to-market noise from open crypto positions.
+    """
+    if not dates or not equity:
+        return dates, equity
+    s = pd.Series(equity, index=pd.DatetimeIndex(dates))
+    ws = s.resample("W").last().dropna()
+    return list(ws.index), list(ws.values)
+
+
+def _metrics_portfolio(equity_list, dates_list, init, weekly=False):
     """Métriques sur une equity curve (CAGR, Sharpe, MaxDD)."""
     if not equity_list or len(equity_list) < 2:
         return {"cagr": 0, "sharpe": 0, "max_dd": 0, "final": init,
@@ -955,7 +966,8 @@ def _metrics_portfolio(equity_list, dates_list, init):
     n_years = (dates_list[-1] - dates_list[0]).days / 365.25
     cagr = ((eq[-1] / init) ** (1 / n_years) - 1) * 100 if n_years > 0.1 else 0
     ret = pd.Series(eq).pct_change().dropna()
-    sharpe = float(ret.mean() / ret.std() * math.sqrt(252)) if ret.std() > 0 else 0
+    ann_factor = math.sqrt(52) if weekly else math.sqrt(252)
+    sharpe = float(ret.mean() / ret.std() * ann_factor) if ret.std() > 0 else 0
     peak = np.maximum.accumulate(eq)
     max_dd = float(((eq - peak) / (peak + 1e-10) * 100).min())
     return {"cagr": round(cagr, 2), "sharpe": round(sharpe, 2),
@@ -983,18 +995,23 @@ def backtest_bot_z_portfolio(results: dict, vix_s: pd.Series, qqq_df: pd.DataFra
         log("Bot Z: pas assez de bots valides.", Fore.YELLOW)
         return {}
 
-    # Intersection des dates communes
-    date_sets = [set(r["dates"]) for r in valid.values()]
+    # Rééchantillonner à fréquence hebdomadaire (élimine le bruit MtM journalier crypto)
+    weekly_valid = {}
+    for k, r in valid.items():
+        wd, we = _resample_weekly(r["dates"], r["equity"])
+        weekly_valid[k] = {"dates": wd, "equity": we}
+
+    # Intersection des dates communes (hebdomadaires)
+    date_sets = [set(r["dates"]) for r in weekly_valid.values()]
     common_dates = sorted(set.intersection(*date_sets))
     if not common_dates:
         log("Bot Z: pas de dates communes.", Fore.YELLOW)
         return {}
 
-    # Normalisé : returns quotidiens de chaque bot (base 1.0 = départ)
+    # Normalisé : returns hebdomadaires de chaque bot (base 1.0 = départ)
     bot_norm = {}
-    for k, r in valid.items():
-        idx = {d: v / INITIAL for d, v in zip(r["dates"], r["equity"])}
-        bot_norm[k] = idx
+    for k, r in weekly_valid.items():
+        bot_norm[k] = {d: v / INITIAL for d, v in zip(r["dates"], r["equity"])}
 
     n_bots       = len(valid)
     initial_total = INITIAL * n_bots   # 4000€
@@ -1061,10 +1078,10 @@ def backtest_bot_z_portfolio(results: dict, vix_s: pd.Series, qqq_df: pd.DataFra
 
         dates_out.append(dt)
 
-    # Métriques
-    m_equal  = _metrics_portfolio(eq_equal,  dates_out, initial_total)
-    m_z      = _metrics_portfolio(eq_z,      dates_out, initial_total)
-    m_hybrid = _metrics_portfolio(eq_hybrid, dates_out, initial_total)
+    # Métriques (weekly=True car equity curves resamplées hebdomadairement)
+    m_equal  = _metrics_portfolio(eq_equal,  dates_out, initial_total, weekly=True)
+    m_z      = _metrics_portfolio(eq_z,      dates_out, initial_total, weekly=True)
+    m_hybrid = _metrics_portfolio(eq_hybrid, dates_out, initial_total, weekly=True)
 
     # Retours annuels
     ann_equal  = annual_returns(eq_equal,  dates_out)
@@ -1107,7 +1124,13 @@ def backtest_bot_z_enhanced(results: dict, vix_s: pd.Series, qqq_df: pd.DataFram
     if len(valid) < 2:
         return {}
 
-    date_sets = [set(r["dates"]) for r in valid.values()]
+    # Rééchantillonner à fréquence hebdomadaire (élimine le bruit MtM journalier crypto)
+    weekly_valid = {}
+    for k, r in valid.items():
+        wd, we = _resample_weekly(r["dates"], r["equity"])
+        weekly_valid[k] = {"dates": wd, "equity": we}
+
+    date_sets = [set(r["dates"]) for r in weekly_valid.values()]
     common_dates = sorted(set.intersection(*date_sets))
     if not common_dates:
         return {}
@@ -1116,7 +1139,7 @@ def backtest_bot_z_enhanced(results: dict, vix_s: pd.Series, qqq_df: pd.DataFram
     initial_total = INITIAL * n_bots
 
     bot_norm = {}
-    for k, r in valid.items():
+    for k, r in weekly_valid.items():
         bot_norm[k] = {d: v / INITIAL for d, v in zip(r["dates"], r["equity"])}
 
     # BTC EMA200 series
@@ -1194,7 +1217,7 @@ def backtest_bot_z_enhanced(results: dict, vix_s: pd.Series, qqq_df: pd.DataFram
         eq_enhanced.append(eq_enhanced[-1] * (1 + r_final))
         dates_out.append(dt)
 
-    m = _metrics_portfolio(eq_enhanced, dates_out, initial_total)
+    m = _metrics_portfolio(eq_enhanced, dates_out, initial_total, weekly=True)
     ann = annual_returns(eq_enhanced, dates_out)
     return {
         "name": "Bot Z Enhanced (MO + CB)",
@@ -1640,7 +1663,13 @@ def backtest_bot_z_omega(results: dict, vix_s: pd.Series, qqq_df: pd.DataFrame,
     if len(valid) < 2:
         return {}
 
-    date_sets = [set(r["dates"]) for r in valid.values()]
+    # Rééchantillonner à fréquence hebdomadaire (élimine le bruit MtM journalier crypto)
+    weekly_valid = {}
+    for k, r in valid.items():
+        wd, we = _resample_weekly(r["dates"], r["equity"])
+        weekly_valid[k] = {"dates": wd, "equity": we}
+
+    date_sets = [set(r["dates"]) for r in weekly_valid.values()]
     common_dates = sorted(set.intersection(*date_sets))
     if not common_dates:
         return {}
@@ -1649,7 +1678,7 @@ def backtest_bot_z_omega(results: dict, vix_s: pd.Series, qqq_df: pd.DataFrame,
     initial_total = INITIAL * n_bots
 
     bot_norm = {}
-    for k, r in valid.items():
+    for k, r in weekly_valid.items():
         bot_norm[k] = {d: v / INITIAL for d, v in zip(r["dates"], r["equity"])}
 
     # BTC EMA200 (momentum overlay)
@@ -1825,7 +1854,7 @@ def backtest_bot_z_omega(results: dict, vix_s: pd.Series, qqq_df: pd.DataFrame,
         eq_omega.append(eq_omega[-1] * (1 + cb_factor * r_port))
         dates_out.append(dt)
 
-    m   = _metrics_portfolio(eq_omega, dates_out, initial_total)
+    m   = _metrics_portfolio(eq_omega, dates_out, initial_total, weekly=True)
     ann = annual_returns(eq_omega, dates_out)
     return {
         "name":    "Bot Z Omega (ER+Risk+Corr)",
@@ -1861,7 +1890,13 @@ def backtest_bot_z_omega_v2(results: dict, vix_s: pd.Series, qqq_df: pd.DataFram
     if len(valid) < 2:
         return {}
 
-    date_sets = [set(r["dates"]) for r in valid.values()]
+    # Rééchantillonner à fréquence hebdomadaire (élimine le bruit MtM journalier crypto)
+    weekly_valid = {}
+    for k, r in valid.items():
+        wd, we = _resample_weekly(r["dates"], r["equity"])
+        weekly_valid[k] = {"dates": wd, "equity": we}
+
+    date_sets = [set(r["dates"]) for r in weekly_valid.values()]
     common_dates = sorted(set.intersection(*date_sets))
     if not common_dates:
         return {}
@@ -1870,7 +1905,7 @@ def backtest_bot_z_omega_v2(results: dict, vix_s: pd.Series, qqq_df: pd.DataFram
     initial_total = INITIAL * len(VALID_BOTS_Z)  # toujours 4×1000€ comme base de comparaison
 
     bot_norm = {}
-    for k, r in valid.items():
+    for k, r in weekly_valid.items():
         bot_norm[k] = {d: v / INITIAL for d, v in zip(r["dates"], r["equity"])}
 
     # BTC EMA200 (momentum overlay)
@@ -2060,7 +2095,7 @@ def backtest_bot_z_omega_v2(results: dict, vix_s: pd.Series, qqq_df: pd.DataFram
         eq_v2.append(eq_v2[-1] * (1 + cb_factor * r_port))
         dates_out.append(dt)
 
-    m   = _metrics_portfolio(eq_v2, dates_out, initial_total)
+    m   = _metrics_portfolio(eq_v2, dates_out, initial_total, weekly=True)
     ann = annual_returns(eq_v2, dates_out)
     return {
         "name":    "Bot Z Omega v2 (RP+ML)",
@@ -2384,7 +2419,7 @@ def backtest_bot_z_meta(results: dict, vix_s: pd.Series, qqq_df: pd.DataFrame,
     engine_pct = {e: round(engine_counts.get(e, 0) / total_days * 100, 1)
                   for e in ["ENHANCED", "OMEGA", "OMEGA_V2", "PRO"]}
 
-    m   = _metrics_portfolio(eq_meta, dates_out, initial_total)
+    m   = _metrics_portfolio(eq_meta, dates_out, initial_total, weekly=True)
     ann = annual_returns(eq_meta, dates_out)
     return {
         "name":         "Bot Z Meta (E/Ω/Ω2/P)",
@@ -2431,7 +2466,13 @@ def backtest_bot_z_meta_v2(results: dict, vix_s: pd.Series, qqq_df: pd.DataFrame
     if len(valid) < 2:
         return {}
 
-    date_sets = [set(r["dates"]) for r in valid.values()]
+    # Rééchantillonner à fréquence hebdomadaire (élimine le bruit MtM journalier crypto)
+    weekly_valid = {}
+    for k, r in valid.items():
+        wd, we = _resample_weekly(r["dates"], r["equity"])
+        weekly_valid[k] = {"dates": wd, "equity": we}
+
+    date_sets = [set(r["dates"]) for r in weekly_valid.values()]
     common_dates = sorted(set.intersection(*date_sets))
     if not common_dates:
         return {}
@@ -2439,7 +2480,7 @@ def backtest_bot_z_meta_v2(results: dict, vix_s: pd.Series, qqq_df: pd.DataFrame
     initial_total = INITIAL * len(VALID_BOTS_Z)
 
     bot_norm = {}
-    for k, r in valid.items():
+    for k, r in weekly_valid.items():
         bot_norm[k] = {d: v / INITIAL for d, v in zip(r["dates"], r["equity"])}
 
     btc_df = daily_cache.get("BTC/EUR")
@@ -2764,7 +2805,7 @@ def backtest_bot_z_meta_v2(results: dict, vix_s: pd.Series, qqq_df: pd.DataFrame
     engine_pct = {e: round(engine_counts.get(e, 0) / total_days * 100, 1)
                   for e in ENGINE_NAMES}
 
-    m   = _metrics_portfolio(eq_meta2, dates_out, initial_total)
+    m   = _metrics_portfolio(eq_meta2, dates_out, initial_total, weekly=True)
     ann = annual_returns(eq_meta2, dates_out)
     return {
         "name":         "Bot Z Meta v2 (scored)",
