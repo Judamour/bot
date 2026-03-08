@@ -2179,7 +2179,8 @@ def backtest_bot_z_meta(results: dict, vix_s: pd.Series, qqq_df: pd.DataFrame,
     # 1 semaine ≈ 5 jours → 90j→18s, 20j→4s, 60j→12s, 30j→6s
     SHARPE_WIN = 18; VOL_WIN = 4; SLOPE_WIN = 12; CORR_WIN = 4; META_WIN = 6
     SOFTMAX_BETA = 3.0; CB_RECOVERY = 0.005
-    TARGET_VOL = 0.20  # pour le mode SHIELD
+    TARGET_VOL = 0.20  # vol annuelle cible (SHIELD + leverage conditionnel BULL)
+    BULL_MAX_LEV = 1.30  # levier max en régime BULL (vol targeting conditionnel)
 
     # CB par engine (tiers différents)
     CB_TIERS = {
@@ -2412,7 +2413,21 @@ def backtest_bot_z_meta(results: dict, vix_s: pd.Series, qqq_df: pd.DataFrame,
         elif port_dd > -0.05:
             cb_factor = min(1.0, cb_factor + CB_RECOVERY)
 
-        eq_meta.append(eq_meta[-1] * (1 + cb_factor * r_port))
+        # ── Levier conditionnel BULL (volatility targeting) ───────────────────
+        # Principe : en régime BULL, si la vol portefeuille est basse (< TARGET_VOL),
+        # on augmente l'exposition jusqu'à TARGET_VOL. Capped à BULL_MAX_LEV (1.30×).
+        # Uniquement si CB en bonne santé (cb_factor > 0.9) pour éviter amplifier les crises.
+        lev_factor = 1.0
+        if current_engine == "BULL" and cb_factor >= 0.90 and len(eq_meta) >= VOL_WIN + 1:
+            recent_eq = eq_meta[-(VOL_WIN + 1):]
+            recent_ret = [(recent_eq[j] - recent_eq[j-1]) / recent_eq[j-1]
+                          for j in range(1, len(recent_eq))]
+            port_vol_weekly = float(np.std(recent_ret)) if len(recent_ret) > 1 else 0.05
+            port_vol_annual = port_vol_weekly * math.sqrt(52)
+            if port_vol_annual < TARGET_VOL and port_vol_annual > 1e-4:
+                lev_factor = min(BULL_MAX_LEV, TARGET_VOL / port_vol_annual)
+
+        eq_meta.append(eq_meta[-1] * (1 + cb_factor * lev_factor * r_port))
         dates_out.append(dt)
 
     # Stats engines
