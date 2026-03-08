@@ -1,0 +1,179 @@
+Architecture du système — Bot Trading
+Mise à jour : 2026-03-08
+
+---
+Vue d'ensemble — Qui fait quoi
+
+  ┌──────────────────────────────────────────────────────────────┐
+  │                       BOT Z (PILOTE)                        │
+  │                   Capital : 10 000€                         │
+  │             Tourne EN PREMIER à chaque cycle (4h)           │
+  │                                                             │
+  │  1. Lit les marchés (VIX, BTC, QQQ)                        │
+  │  2. Détecte le régime (BULL / HIGH_VOL / BEAR / RANGE)      │
+  │  3. Choisit un ENGINE (BULL/BALANCED/PARITY/SHIELD)         │
+  │  4. Calcule l'allocation optimale pour chaque bot           │
+  │  5. DISPATCHE le capital → A, B, C, G                       │
+  └──────┬──────────┬──────────┬───────────────────────────────┘
+         │          │          │           │
+      Bot A      Bot B      Bot C       Bot G
+   (ex:1402€)  (ex:1000€) (ex:4600€) (ex:2998€)
+   trade avec  trade avec  trade avec  trade avec
+   ce capital  ce capital  ce capital  ce capital
+
+  Le capital dispatché varie à chaque cycle selon l'engine actif.
+  Total dispatché = toujours 10 000€ × cb_factor (circuit breaker).
+
+---
+Les 4 Engines de Bot Z — Quand chacun s'active
+
+  ┌──────────┬──────────────────────────┬──────────────────────────────────────────────────────┬────────────────────────────────────────────┐
+  │  Engine  │      Régime marché       │              Allocation (exemple 10 000€)             │                  Condition                 │
+  ├──────────┼──────────────────────────┼──────────────────────────────────────────────────────┼────────────────────────────────────────────┤
+  │ BULL     │ Marché haussier propre   │ Surpondère Bot A (momentum fort). Levier ×1.3 max.   │ BTC bull + QQQ bull + VIX < 22            │
+  ├──────────┼──────────────────────────┼──────────────────────────────────────────────────────┼────────────────────────────────────────────┤
+  │ BALANCED │ Neutre / incertain       │ 100% QualityScore — proportionnel aux performances   │ Situation normale (défaut)                 │
+  ├──────────┼──────────────────────────┼──────────────────────────────────────────────────────┼────────────────────────────────────────────┤
+  │ PARITY   │ Stress modéré            │ 60% QualityScore + 40% Risk Parity (vol inverse)     │ VIX entre 22 et 32                         │
+  ├──────────┼──────────────────────────┼──────────────────────────────────────────────────────┼────────────────────────────────────────────┤
+  │ SHIELD   │ Bear / crise             │ Fuit Bot A, surpondère C et G (défensifs)             │ VIX > 32 ou DD < -12% ou BTC+QQQ bearish  │
+  └──────────┴──────────────────────────┴──────────────────────────────────────────────────────┴────────────────────────────────────────────┘
+
+  Hard rules (non-négociables) :
+  - SHIELD forcé si (BTC+QQQ bearish ET VIX>26) OU VIX>32 OU drawdown portefeuille < -12%
+  - BULL bloqué si BTC ou QQQ en tendance baissière
+
+  Hysteresis (confirmation avant switch) :
+  - BULL : 2 semaines | BALANCED : 1 semaine | PARITY : 1 semaine | SHIELD : 1 semaine
+
+---
+Les 4 Bots gérés par Bot Z (A/B/C/G)
+
+  ┌─────┬───────────────────┬────────────────────────────────────────────────────────────────┬──────────────────────────────────────┬───────────────────┐
+  │ Bot │     Stratégie     │                          Ce qu'il fait                         │           Signal d'entrée            │     Stop loss     │
+  ├─────┼───────────────────┼────────────────────────────────────────────────────────────────┼──────────────────────────────────────┼───────────────────┤
+  │ A   │ Supertrend + MR   │ Achète sur tendance forte (crypto + xStocks). Claude en shadow │ Supertrend UP + 7 filtres techniques │ ATR trailing × 3  │
+  ├─────┼───────────────────┼────────────────────────────────────────────────────────────────┼──────────────────────────────────────┼───────────────────┤
+  │ B   │ Momentum          │ Rotation hebdo vers les 4 actifs les plus performants          │ Top momentum 1m/3m/6m                │ -12% par position │
+  ├─────┼───────────────────┼────────────────────────────────────────────────────────────────┼──────────────────────────────────────┼───────────────────┤
+  │ C   │ Breakout          │ Achète sur cassure de canal Donchian 55j (Turtle System)       │ Close > Donchian 55j + ADX > 20      │ 2 × ATR           │
+  ├─────┼───────────────────┼────────────────────────────────────────────────────────────────┼──────────────────────────────────────┼───────────────────┤
+  │ G   │ Trend Multi-Asset │ Suit la tendance sur 16 actifs avec vol targeting              │ SMA50 > SMA200 + breakout 50j        │ ATR trailing × 3  │
+  └─────┴───────────────────┴────────────────────────────────────────────────────────────────┴──────────────────────────────────────┴───────────────────┘
+
+  Note Bot A : Claude AI consulté à chaque signal BUY mais en mode "shadow" jusqu'au
+  30 avril — la décision est loggée pour validation a posteriori, pas appliquée.
+
+---
+Les 3 Bots hors Bot Z (Lab LLM — désactivés)
+
+  ┌─────┬───────────────────┬──────────────────────────────────┐
+  │ Bot │      Modèle       │               Rôle               │
+  ├─────┼───────────────────┼──────────────────────────────────┤
+  │ D   │ DeepSeek R1       │ Le LLM décide seul BUY/SELL/HOLD │
+  ├─────┼───────────────────┼──────────────────────────────────┤
+  │ E   │ Claude Sonnet 4.6 │ Idem                             │
+  ├─────┼───────────────────┼──────────────────────────────────┤
+  │ F   │ Claude Haiku 4.5  │ Idem (petit modèle témoin)       │
+  └─────┴───────────────────┴──────────────────────────────────┘
+
+  Désactivés — trop coûteux en tokens pour le moment.
+
+---
+Cycle de vie complet (toutes les 4h)
+
+  Heure H :
+    1. Fetch macro (VIX, BTC trend, QQQ regime, Fear & Greed)
+    2. Fetch OHLCV 4h (16 symboles, 45j) + OHLCV daily (16 symboles, 220j)
+
+    3. BOT Z tourne EN PREMIER :
+       a. Calcule régime + engine (SHIELD ce soir — VIX 29.5, BTC bear)
+       b. Score qualité de chaque bot (Sharpe roulant, vol, corrélation)
+       c. Dispatch capital : A=1402€, B=1000€, C=4600€, G=2998€
+       d. Sauvegarde les states scalés immédiatement (protection crash)
+       e. Logue dans shadow.jsonl (historique pour revue 30 avril)
+
+    4. Bot A tourne avec 1 402€ :
+       - Calcule Supertrend + 7 filtres sur tous les 16 actifs
+       - Signal BUY → Claude consulté (shadow, non bloquant) → position ouverte
+       - Stop ATR trailing mis à jour
+
+    5. Bot B tourne avec 1 000€ :
+       - Calcule momentum 1m/3m/6m sur tous les actifs
+       - Rotation hebdo vers les 4 meilleurs si conditions OK
+
+    6. Bot C tourne avec 4 600€ :
+       - Calcule Donchian 55j sur BTC, ETH, SOL
+       - Cassure → position + stop 2×ATR N
+
+    7. Bot G tourne avec 2 998€ :
+       - SMA200 + SMA50 sur 16 actifs
+       - Sizing adaptatif (vol targeting 15%)
+
+    Heure H+4 : prochain cycle
+
+---
+Données utilisées par le système
+
+  ┌──────────────────┬────────────────────────────────────────────┬────────────────────────┐
+  │      Source      │                 Pour quoi                  │       Fréquence        │
+  ├──────────────────┼────────────────────────────────────────────┼────────────────────────┤
+  │ Binance (public) │ OHLCV crypto + BTC context + funding rates │ Chaque cycle (4h)      │
+  ├──────────────────┼────────────────────────────────────────────┼────────────────────────┤
+  │ yfinance         │ OHLCV xStocks + VIX + news                 │ Chaque cycle           │
+  ├──────────────────┼────────────────────────────────────────────┼────────────────────────┤
+  │ Kraken           │ Prix live + ordres paper                   │ Chaque cycle           │
+  ├──────────────────┼────────────────────────────────────────────┼────────────────────────┤
+  │ alternative.me   │ Fear & Greed Index                         │ Chaque cycle           │
+  ├──────────────────┼────────────────────────────────────────────┼────────────────────────┤
+  │ Claude Haiku     │ Filtre BUY Bot A (shadow — log only)       │ Par signal BUY détecté │
+  └──────────────────┴────────────────────────────────────────────┴────────────────────────┘
+
+---
+Univers de trading (16 actifs)
+
+  ┌────────────────────────┬─────────────────────────────────────────────┐
+  │       Catégorie        │                   Actifs                    │
+  ├────────────────────────┼─────────────────────────────────────────────┤
+  │ Crypto (5)             │ BTC/EUR, ETH/EUR, SOL/EUR, BNB/EUR, TON/EUR │
+  ├────────────────────────┼─────────────────────────────────────────────┤
+  │ xStocks tech/semis (6) │ NVDAx, AAPLx, MSFTx, AMDx, AVGOx, GOOGx    │
+  ├────────────────────────┼─────────────────────────────────────────────┤
+  │ xStocks autres (5)     │ METAx, PLTRx, GLDx, NFLXx, CRWDx            │
+  └────────────────────────┴─────────────────────────────────────────────┘
+
+---
+Résultats backtest 10 ans (2016-2026) — Run 17 FINAL
+
+  ┌──────────────────────┬────────┬────────┬─────────┐
+  │                      │  CAGR  │ Sharpe │  MaxDD  │
+  ├──────────────────────┼────────┼────────┼─────────┤
+  │ Bot A seul           │ +49.3% │  2.43  │  -68.3% │
+  ├──────────────────────┼────────┼────────┼─────────┤
+  │ Bot Z Meta v2 (PROD) │ +38.2% │  1.92  │  -10.1% │
+  ├──────────────────────┼────────┼────────┼─────────┤
+  │ S&P 500 (benchmark)  │ +12.9% │  0.77  │  -33.9% │
+  ├──────────────────────┼────────┼────────┼─────────┤
+  │ BTC buy & hold       │ +65.5% │  0.91  │  -82.7% │
+  └──────────────────────┴────────┴────────┴─────────┘
+
+  Clé du système : Bot A fait +49% mais avec -68% de drawdown.
+  Bot Z réduit ce drawdown à -10.1% en diversifiant et en protégeant en
+  bear market, au prix d'un CAGR légèrement inférieur (+38.2%).
+  Sharpe 1.92 vs 0.77 pour le S&P 500 → rendement ajusté au risque 2.5× supérieur.
+
+---
+Statut paper trading (démarré 2026-03-08)
+
+  Bot Z : 10 000€ | Engine actuel : SHIELD (VIX 29.5, BTC bear, F&G 12/100)
+  Revue prévue : 2026-04-30
+
+  À vérifier le 30 avril :
+  - Fréquence switchs engine < 0.3/semaine ?
+  - % temps en SHIELD < 30% ?
+  - MaxDD live < 12% ?
+  - Drift allocation < 15% ?
+  - Engine BULL activé au moins une fois ?
+
+  Passage en live : désactiver PAPER_TRADING=true dans .env sur le VPS.
+  Le bot bascule automatiquement sur Kraken réel (API déjà configurée).
