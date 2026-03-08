@@ -394,6 +394,7 @@
   <button class="nav-btn" onclick="switchTab('strategies')">Strategies <span class="nav-badge" id="nb-strat">4</span></button>
   <button class="nav-btn" onclick="switchTab('lab')">Lab LLM <span class="nav-badge">D/E/F</span></button>
   <button class="nav-btn" onclick="switchTab('logs')">Logs</button>
+  <button class="nav-btn" onclick="switchTab('docs')">Documentation</button>
 </nav>
 
 <!-- ── Bottom Nav (mobile only) ──────────────────────────────── -->
@@ -409,6 +410,10 @@
   <button class="bnav-btn" onclick="switchTab('lab')" id="bnav-lab">
     <span class="bnav-icon">🧪</span>
     <span class="bnav-lbl">Lab</span>
+  </button>
+  <button class="bnav-btn" onclick="switchTab('docs')" id="bnav-docs">
+    <span class="bnav-icon">📖</span>
+    <span class="bnav-lbl">Docs</span>
   </button>
   <button class="bnav-btn" onclick="switchTab('logs')" id="bnav-logs">
     <span class="bnav-icon">📋</span>
@@ -619,6 +624,312 @@
   <div class="log-box" id="log-box">Chargement...</div>
 </div><!-- /tab-logs -->
 
+<!-- ═══════════════════════════════════════════════════════════════
+     TAB — DOCUMENTATION
+═══════════════════════════════════════════════════════════════ -->
+<div id="tab-docs" class="tab-content">
+
+  <!-- Architecture générale -->
+  <div class="section-row" style="margin-top:0">
+    <div class="section-title">Architecture du système</div>
+    <div class="section-line"></div>
+  </div>
+
+  <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:20px 24px;margin-bottom:20px;font-size:13px;line-height:1.8">
+    <p style="color:var(--muted);margin:0 0 12px">Le système est organisé en <strong style="color:var(--text)">3 couches</strong> :</p>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-bottom:16px">
+      <div style="background:var(--surface2);border-radius:8px;padding:14px 16px;border-left:3px solid #00e676">
+        <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Layer 1 — Stratégies</div>
+        <div style="font-weight:700;margin-bottom:4px">Bots A · B · C · G</div>
+        <div style="font-size:11px;color:var(--muted)">Chacun génère ses propres signaux et trades. Capital alloué par Bot Z.</div>
+      </div>
+      <div style="background:var(--surface2);border-radius:8px;padding:14px 16px;border-left:3px solid #00c8ff">
+        <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Layer 2 — Engines</div>
+        <div style="font-weight:700;margin-bottom:4px">BULL · BALANCED · PARITY · SHIELD</div>
+        <div style="font-size:11px;color:var(--muted)">4 profils d'allocation. Chacun pond&egrave;re A/B/C/G différemment selon le régime.</div>
+      </div>
+      <div style="background:var(--surface2);border-radius:8px;padding:14px 16px;border-left:3px solid #ffd740">
+        <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Layer 3 — Pilote</div>
+        <div style="font-weight:700;margin-bottom:4px">Bot Z Meta v2</div>
+        <div style="font-size:11px;color:var(--muted)">Détecte le régime marché, sélectionne l'engine, dispatche le capital, tracke le portefeuille.</div>
+      </div>
+    </div>
+    <div style="font-family:monospace;font-size:11px;background:var(--bg);border-radius:6px;padding:12px 16px;color:var(--muted);line-height:2">
+      VIX + BTC + QQQ → <span style="color:#ffd740">Détection régime</span> → <span style="color:#00c8ff">Sélection engine</span> → <span style="color:#00e676">Dispatch capital A/B/C/G</span><br>
+      ↑ Cycle toutes les 4h · Bot Z tourne en PREMIER avant les sous-bots
+    </div>
+  </div>
+
+  <!-- Bots individuels -->
+  <div class="section-row">
+    <div class="section-title">Les 4 stratégies supervisées</div>
+    <div class="section-line"></div>
+  </div>
+
+  <div style="overflow-x:auto;margin-bottom:20px">
+    <table style="width:100%;border-collapse:collapse;font-size:12px">
+      <thead>
+        <tr style="border-bottom:1px solid var(--border)">
+          <th style="text-align:left;padding:10px 12px;color:var(--muted);font-weight:600;white-space:nowrap">Bot</th>
+          <th style="text-align:left;padding:10px 12px;color:var(--muted);font-weight:600">Stratégie</th>
+          <th style="text-align:left;padding:10px 12px;color:var(--muted);font-weight:600">Signal d'entrée</th>
+          <th style="text-align:left;padding:10px 12px;color:var(--muted);font-weight:600">Univers</th>
+          <th style="text-align:right;padding:10px 12px;color:var(--muted);font-weight:600">Stop</th>
+          <th style="text-align:right;padding:10px 12px;color:var(--muted);font-weight:600">CAGR 10a</th>
+          <th style="text-align:right;padding:10px 12px;color:var(--muted);font-weight:600">Sharpe</th>
+          <th style="text-align:right;padding:10px 12px;color:var(--muted);font-weight:600">MaxDD</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr style="border-bottom:1px solid rgba(255,255,255,0.05)">
+          <td style="padding:10px 12px;font-weight:800;color:#00e676">A</td>
+          <td style="padding:10px 12px">Supertrend + MR<br><span style="font-size:10px;color:var(--muted)">+ filtre Claude AI</span></td>
+          <td style="padding:10px 12px;color:var(--muted);font-size:11px">Supertrend UP · EMA50/200 · RSI&lt;70 · ADX&gt;22 · Volume · HH/HL</td>
+          <td style="padding:10px 12px;font-size:11px">Crypto + xStocks (16)</td>
+          <td style="padding:10px 12px;text-align:right;font-size:11px">3×ATR trailing</td>
+          <td style="padding:10px 12px;text-align:right;color:#00e676;font-weight:700">+49.3%</td>
+          <td style="padding:10px 12px;text-align:right">2.43</td>
+          <td style="padding:10px 12px;text-align:right;color:#ff4444">-68.3%</td>
+        </tr>
+        <tr style="border-bottom:1px solid rgba(255,255,255,0.05)">
+          <td style="padding:10px 12px;font-weight:800;color:#00c8ff">B</td>
+          <td style="padding:10px 12px">Dual Momentum<br><span style="font-size:10px;color:var(--muted)">Antonacci style</span></td>
+          <td style="padding:10px 12px;color:var(--muted);font-size:11px">Top 4 momentum (1m/3m/6m) — rotation hebdo</td>
+          <td style="padding:10px 12px;font-size:11px">Tous symboles</td>
+          <td style="padding:10px 12px;text-align:right;font-size:11px">-12% position</td>
+          <td style="padding:10px 12px;text-align:right;color:#00e676;font-weight:700">+36.8%</td>
+          <td style="padding:10px 12px;text-align:right">0.77</td>
+          <td style="padding:10px 12px;text-align:right;color:#ff4444">-67.8%</td>
+        </tr>
+        <tr style="border-bottom:1px solid rgba(255,255,255,0.05)">
+          <td style="padding:10px 12px;font-weight:800;color:#ffd740">C</td>
+          <td style="padding:10px 12px">Donchian Breakout<br><span style="font-size:10px;color:var(--muted)">Turtle System 2</span></td>
+          <td style="padding:10px 12px;color:var(--muted);font-size:11px">Close &gt; Donchian 55j · ADX &gt; 20</td>
+          <td style="padding:10px 12px;font-size:11px">BTC · ETH · SOL</td>
+          <td style="padding:10px 12px;text-align:right;font-size:11px">2×ATR N-stop</td>
+          <td style="padding:10px 12px;text-align:right;color:var(--muted);font-weight:700">+0.6%</td>
+          <td style="padding:10px 12px;text-align:right">0.21</td>
+          <td style="padding:10px 12px;text-align:right;color:#00e676">-7.8%</td>
+        </tr>
+        <tr>
+          <td style="padding:10px 12px;font-weight:800;color:#ff9f43">G</td>
+          <td style="padding:10px 12px">Trend Multi-Asset<br><span style="font-size:10px;color:var(--muted)">CTA style · Vol targeting</span></td>
+          <td style="padding:10px 12px;color:var(--muted);font-size:11px">SMA50 &gt; SMA200 · breakout 50j · ADX &gt; 20</td>
+          <td style="padding:10px 12px;font-size:11px">16 actifs</td>
+          <td style="padding:10px 12px;text-align:right;font-size:11px">3×ATR trailing</td>
+          <td style="padding:10px 12px;text-align:right;color:#00e676;font-weight:700">+23.4%</td>
+          <td style="padding:10px 12px;text-align:right">0.65</td>
+          <td style="padding:10px 12px;text-align:right;color:var(--muted)">-22.6%</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Engines Meta v2 -->
+  <div class="section-row">
+    <div class="section-title">Les 4 engines de Bot Z</div>
+    <div class="section-line"></div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px;margin-bottom:20px">
+
+    <div style="background:var(--surface);border:1px solid rgba(0,230,118,0.3);border-radius:var(--radius);padding:18px 20px">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+        <div style="width:10px;height:10px;border-radius:50%;background:#00e676;flex-shrink:0"></div>
+        <span style="font-weight:800;font-size:15px;color:#00e676">BULL</span>
+        <span style="margin-left:auto;font-size:10px;background:rgba(0,230,118,.12);color:#00e676;padding:2px 8px;border-radius:99px">hyst. 2 semaines</span>
+      </div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:10px;line-height:1.6"><strong style="color:var(--text)">Condition :</strong> BTC bull + QQQ bull + VIX &lt; 22 pendant 2 semaines consécutives</div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:10px;line-height:1.6"><strong style="color:var(--text)">Composition :</strong> Poids régime pur (Bot A dominant ~50%) + levier vol-targeting ×1.30 max si vol portefeuille &lt; 20%</div>
+      <div style="font-size:11px;color:var(--muted);line-height:1.6"><strong style="color:var(--text)">Objectif :</strong> Capture maximale des bull markets crypto. Seul engine avec levier.</div>
+      <div style="display:flex;gap:16px;margin-top:12px;padding-top:12px;border-top:1px solid rgba(255,255,255,0.07)">
+        <div><div style="font-size:15px;font-weight:700;color:#00e676">+38.2%</div><div style="font-size:10px;color:var(--muted)">CAGR Meta v2</div></div>
+        <div><div style="font-size:15px;font-weight:700">1.92</div><div style="font-size:10px;color:var(--muted)">Sharpe</div></div>
+        <div><div style="font-size:15px;font-weight:700;color:#ff9f43">-10.1%</div><div style="font-size:10px;color:var(--muted)">MaxDD</div></div>
+      </div>
+    </div>
+
+    <div style="background:var(--surface);border:1px solid rgba(0,200,255,0.3);border-radius:var(--radius);padding:18px 20px">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+        <div style="width:10px;height:10px;border-radius:50%;background:#00c8ff;flex-shrink:0"></div>
+        <span style="font-weight:800;font-size:15px;color:#00c8ff">BALANCED</span>
+        <span style="margin-left:auto;font-size:10px;background:rgba(0,200,255,.12);color:#00c8ff;padding:2px 8px;border-radius:99px">hyst. 1 semaine</span>
+      </div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:10px;line-height:1.6"><strong style="color:var(--text)">Condition :</strong> Régime par défaut — actif quand aucune condition spéciale n'est remplie</div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:10px;line-height:1.6"><strong style="color:var(--text)">Composition :</strong> 100% QualityScore — Softmax sur Sharpe / PF / Slope rolling 18 semaines. Base de tous les autres engines.</div>
+      <div style="font-size:11px;color:var(--muted);line-height:1.6"><strong style="color:var(--text)">Objectif :</strong> Allocation neutre data-driven. Récompense les bots qui performent réellement.</div>
+      <div style="display:flex;gap:16px;margin-top:12px;padding-top:12px;border-top:1px solid rgba(255,255,255,0.07)">
+        <div><div style="font-size:15px;font-weight:700;color:#00e676">+50.5%</div><div style="font-size:10px;color:var(--muted)">CAGR standalone</div></div>
+        <div><div style="font-size:15px;font-weight:700">2.08</div><div style="font-size:10px;color:var(--muted)">Sharpe</div></div>
+        <div><div style="font-size:15px;font-weight:700;color:#00e676">-9.9%</div><div style="font-size:10px;color:var(--muted)">MaxDD</div></div>
+      </div>
+    </div>
+
+    <div style="background:var(--surface);border:1px solid rgba(255,215,64,0.3);border-radius:var(--radius);padding:18px 20px">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+        <div style="width:10px;height:10px;border-radius:50%;background:#ffd740;flex-shrink:0"></div>
+        <span style="font-weight:800;font-size:15px;color:#ffd740">PARITY</span>
+        <span style="margin-left:auto;font-size:10px;background:rgba(255,215,64,.12);color:#ffd740;padding:2px 8px;border-radius:99px">hyst. 1 semaine</span>
+      </div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:10px;line-height:1.6"><strong style="color:var(--text)">Condition :</strong> Stress modéré — VIX entre 22 et 32, ou légère pression marché</div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:10px;line-height:1.6"><strong style="color:var(--text)">Composition :</strong> 60% BALANCED + 40% Risk Parity (inverse-vol). Réduit Bot A/B, surpondère G (Trend) et C (Breakout).</div>
+      <div style="font-size:11px;color:var(--muted);line-height:1.6"><strong style="color:var(--text)">Objectif :</strong> Limiter la volatilité portefeuille en période d'incertitude sans sortir complètement des marchés.</div>
+      <div style="display:flex;gap:16px;margin-top:12px;padding-top:12px;border-top:1px solid rgba(255,255,255,0.07)">
+        <div><div style="font-size:15px;font-weight:700;color:#00e676">+20.9%</div><div style="font-size:10px;color:var(--muted)">CAGR standalone</div></div>
+        <div><div style="font-size:15px;font-weight:700">1.93</div><div style="font-size:10px;color:var(--muted)">Sharpe</div></div>
+        <div><div style="font-size:15px;font-weight:700;color:#00e676">-5.1%</div><div style="font-size:10px;color:var(--muted)">MaxDD</div></div>
+      </div>
+    </div>
+
+    <div style="background:var(--surface);border:1px solid rgba(255,68,68,0.3);border-radius:var(--radius);padding:18px 20px">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+        <div style="width:10px;height:10px;border-radius:50%;background:#ff4444;flex-shrink:0"></div>
+        <span style="font-weight:800;font-size:15px;color:#ff4444">SHIELD</span>
+        <span style="margin-left:auto;font-size:10px;background:rgba(255,68,68,.12);color:#ff4444;padding:2px 8px;border-radius:99px">hyst. 1 semaine</span>
+      </div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:10px;line-height:1.6"><strong style="color:var(--text)">Condition (hard rules) :</strong> BTC+QQQ tous deux bearish ET VIX&gt;26 — OU VIX&gt;32 — OU DD portefeuille &lt;-12%</div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:10px;line-height:1.6"><strong style="color:var(--text)">Composition :</strong> 40% BALANCED + 60% défensif vol-scaled (surpondère les bots les moins volatils)</div>
+      <div style="font-size:11px;color:var(--muted);line-height:1.6"><strong style="color:var(--text)">Objectif :</strong> Préserver le capital en crise. Backtest : 2018 -0.6%, 2022 -0.5%.</div>
+      <div style="display:flex;gap:16px;margin-top:12px;padding-top:12px;border-top:1px solid rgba(255,255,255,0.07)">
+        <div><div style="font-size:15px;font-weight:700;color:#ffd740">+29.9%</div><div style="font-size:10px;color:var(--muted)">CAGR standalone</div></div>
+        <div><div style="font-size:15px;font-weight:700">1.90</div><div style="font-size:10px;color:var(--muted)">Sharpe</div></div>
+        <div><div style="font-size:15px;font-weight:700;color:#00e676">-9.1%</div><div style="font-size:10px;color:var(--muted)">MaxDD</div></div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Autonomie Bot Z -->
+  <div class="section-row">
+    <div class="section-title">Autonomie de Bot Z — ce qu'il fait et ce qu'il ne fait pas</div>
+    <div class="section-line"></div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:20px">
+    <div style="background:rgba(0,230,118,0.05);border:1px solid rgba(0,230,118,0.2);border-radius:var(--radius);padding:16px 20px">
+      <div style="font-size:11px;font-weight:700;color:#00e676;text-transform:uppercase;letter-spacing:.06em;margin-bottom:12px">Ce qu'il fait ✓</div>
+      <ul style="margin:0;padding-left:16px;font-size:12px;color:var(--muted);line-height:2">
+        <li>Détecte le régime marché (VIX + BTC + QQQ) à chaque cycle</li>
+        <li>Sélectionne l'engine avec hysteresis (évite les micro-switchs)</li>
+        <li>Calcule l'allocation optimale A/B/C/G selon l'engine</li>
+        <li>Écrit le budget dans <code>budget.json</code> avant les sous-bots</li>
+        <li>Scale le capital des sous-bots proportionnellement (<code>_apply_z_budget</code>)</li>
+        <li>Tracke son propre capital (<code>z_capital</code>) cycle par cycle</li>
+        <li>Loggue tout dans <code>shadow.jsonl</code> pour analyse</li>
+        <li>Applique le circuit breaker si DD trop fort</li>
+        <li>Lève l'exposition ×1.30 en BULL si vol basse (vol targeting)</li>
+      </ul>
+    </div>
+    <div style="background:rgba(255,68,68,0.05);border:1px solid rgba(255,68,68,0.2);border-radius:var(--radius);padding:16px 20px">
+      <div style="font-size:11px;font-weight:700;color:#ff4444;text-transform:uppercase;letter-spacing:.06em;margin-bottom:12px">Limitations ✗</div>
+      <ul style="margin:0;padding-left:16px;font-size:12px;color:var(--muted);line-height:2">
+        <li>Ne peut pas fermer les positions ouvertes des sous-bots</li>
+        <li>Le budget ne s'applique qu'aux nouvelles entrées</li>
+        <li>Si Bot A a une position ouverte de 3 000€ et que SHIELD est activé, Bot A garde sa position jusqu'à son propre signal de sortie</li>
+        <li>Mark-to-market approximatif (estimation, pas lecture directe des ordres)</li>
+      </ul>
+      <div style="margin-top:12px;font-size:11px;color:var(--muted);font-style:italic">Bot Z est un allocateur de capital prospectif — il contrôle l'avenir, pas le passé.</div>
+    </div>
+  </div>
+
+  <!-- Résultats backtest de référence -->
+  <div class="section-row">
+    <div class="section-title">Résultats backtest 10 ans (2016-2026) — Run 17 PROD</div>
+    <div class="section-line"></div>
+  </div>
+
+  <div style="overflow-x:auto;margin-bottom:20px">
+    <table style="width:100%;border-collapse:collapse;font-size:12px">
+      <thead>
+        <tr style="border-bottom:1px solid var(--border)">
+          <th style="text-align:left;padding:10px 12px;color:var(--muted);font-weight:600">Stratégie</th>
+          <th style="text-align:right;padding:10px 12px;color:var(--muted);font-weight:600">CAGR</th>
+          <th style="text-align:right;padding:10px 12px;color:var(--muted);font-weight:600">Sharpe</th>
+          <th style="text-align:right;padding:10px 12px;color:var(--muted);font-weight:600">MaxDD</th>
+          <th style="text-align:right;padding:10px 12px;color:var(--muted);font-weight:600">Final (4 000€)</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr style="border-bottom:1px solid rgba(255,255,255,0.05);background:rgba(0,200,255,0.04)">
+          <td style="padding:10px 12px;font-weight:700;color:#00c8ff">Bot Z v2 — QualityScore (BALANCED pur)</td>
+          <td style="padding:10px 12px;text-align:right;color:#00e676;font-weight:700">+50.5%</td>
+          <td style="padding:10px 12px;text-align:right;font-weight:700">2.08</td>
+          <td style="padding:10px 12px;text-align:right;color:#00e676">-9.9%</td>
+          <td style="padding:10px 12px;text-align:right">236 506€</td>
+        </tr>
+        <tr style="border-bottom:1px solid rgba(255,255,255,0.05);background:rgba(0,230,118,0.06)">
+          <td style="padding:10px 12px;font-weight:700;color:#00e676">Bot Z PROD — Meta v2 ← en production</td>
+          <td style="padding:10px 12px;text-align:right;color:#00e676;font-weight:700">+38.2%</td>
+          <td style="padding:10px 12px;text-align:right;font-weight:700">1.92</td>
+          <td style="padding:10px 12px;text-align:right;color:#ffd740">-10.1%</td>
+          <td style="padding:10px 12px;text-align:right">85 036€</td>
+        </tr>
+        <tr style="border-bottom:1px solid rgba(255,255,255,0.05)">
+          <td style="padding:10px 12px;color:var(--muted)">Equal-Weight A+B+C+G</td>
+          <td style="padding:10px 12px;text-align:right">+41.4%</td>
+          <td style="padding:10px 12px;text-align:right">1.24</td>
+          <td style="padding:10px 12px;text-align:right;color:#ff4444">-27.1%</td>
+          <td style="padding:10px 12px;text-align:right;color:var(--muted)">127 323€</td>
+        </tr>
+        <tr style="border-bottom:1px solid rgba(255,255,255,0.05)">
+          <td style="padding:10px 12px;color:var(--muted)">S&amp;P 500</td>
+          <td style="padding:10px 12px;text-align:right">+12.9%</td>
+          <td style="padding:10px 12px;text-align:right">0.77</td>
+          <td style="padding:10px 12px;text-align:right;color:#ff4444">-33.9%</td>
+          <td style="padding:10px 12px;text-align:right;color:var(--muted)">—</td>
+        </tr>
+        <tr>
+          <td style="padding:10px 12px;color:var(--muted)">NASDAQ-100</td>
+          <td style="padding:10px 12px;text-align:right">+19.9%</td>
+          <td style="padding:10px 12px;text-align:right">0.93</td>
+          <td style="padding:10px 12px;text-align:right;color:#ff4444">-35.1%</td>
+          <td style="padding:10px 12px;text-align:right;color:var(--muted)">—</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Paramètres clés -->
+  <div class="section-row">
+    <div class="section-title">Paramètres clés</div>
+    <div class="section-line"></div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;margin-bottom:20px">
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px 16px">
+      <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Capital paper</div>
+      <div style="font-size:18px;font-weight:800">10 000€</div>
+      <div style="font-size:11px;color:var(--muted);margin-top:4px">4 bots × 2 500€ initial</div>
+    </div>
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px 16px">
+      <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Cycle</div>
+      <div style="font-size:18px;font-weight:800">4h</div>
+      <div style="font-size:11px;color:var(--muted);margin-top:4px">Bot Z tourne en premier</div>
+    </div>
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px 16px">
+      <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Univers</div>
+      <div style="font-size:18px;font-weight:800">16 actifs</div>
+      <div style="font-size:11px;color:var(--muted);margin-top:4px">5 crypto + 11 xStocks</div>
+    </div>
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px 16px">
+      <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Vol target</div>
+      <div style="font-size:18px;font-weight:800">20%</div>
+      <div style="font-size:11px;color:var(--muted);margin-top:4px">Levier BULL ×1.30 max</div>
+    </div>
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px 16px">
+      <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Circuit Breaker</div>
+      <div style="font-size:18px;font-weight:800">-12%</div>
+      <div style="font-size:11px;color:var(--muted);margin-top:4px">DD → force SHIELD</div>
+    </div>
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px 16px">
+      <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Prochaine revue</div>
+      <div style="font-size:18px;font-weight:800">2026-04-30</div>
+      <div style="font-size:11px;color:var(--muted);margin-top:4px">Ne pas modifier avant</div>
+    </div>
+  </div>
+
+</div><!-- /tab-docs -->
+
 </div><!-- /main -->
 
 
@@ -632,18 +943,19 @@ const ENGINE_COLORS = {
   SHIELD:      '#ff4444',
 };
 const ENGINE_DESC = {
-  BULL: 'Régime pur BULL — maximise CAGR en marché haussier. Allocations agressives vers A (Supertrend) et B (Momentum). Backtest 2020-2026 : CAGR +59.8%, Sharpe 1.61, MaxDD -18.9%.',
-  BALANCED:    'Engine neutre — qualité rolling des bots prime les régimes. Softmax sur expected returns. Backtest : CAGR +55.5%, Sharpe 1.96, MaxDD -8.7%.',
-  PARITY: 'Risk Parity : blend 50% BALANCED + 50% inverse-vol. Favorisé en stress modéré (VIX 20-30). Backtest : CAGR +52.1%, Sharpe 2.03, MaxDD -7.6%.',
-  SHIELD:      'Défensif pur — surpoids C (Breakout) + G (Trend), Bot B écarté. Activé si BTC+QQQ bearish, VIX>32 ou DD<-12%. Backtest : CAGR +29.9%, Sharpe 1.90, MaxDD -9.1%.',
+  BULL:     'Marché haussier propre — BTC+QQQ bull ET VIX<22. Composition : poids régime pur (Bot A dominant) + levier vol-targeting ×1.30 max si vol<20%. Activé après 2 semaines consécutives de conditions bull. Capture maximale des tendances crypto.',
+  BALANCED: 'Engine par défaut — qualité data-driven. Composition : 100% QualityScore (Softmax sur Sharpe/PF/Slope rolling 18 semaines). Actif dès 1 semaine stable. Socle de tous les autres engines.',
+  PARITY:   'Stress modéré — VIX 22-32 ou légère pression marché. Composition : 60% BALANCED + 40% Risk Parity (inverse-vol). Réduit l\'exposition aux bots les plus volatils (Bot A/B) au profit de G/C.',
+  SHIELD:   'Bear / crise — forcé si BTC+QQQ tous deux bearish ET VIX>26, ou VIX>32, ou DD portefeuille <-12%. Composition : 40% BALANCED + 60% défensif vol-scaled. Protection prioritaire sur performance.',
 };
 const ENGINE_STATS = {
-  BULL: { sharpe: '1.61', maxdd: '-18.9%', cagr: '+59.8%' },
-  BALANCED:    { sharpe: '1.96', maxdd: '-8.7%',  cagr: '+55.5%' },
-  PARITY: { sharpe: '2.03', maxdd: '-7.6%',  cagr: '+52.1%' },
-  SHIELD:      { sharpe: '1.90', maxdd: '-9.1%',  cagr: '+29.9%' },
+  BULL:     { sharpe: '1.92', maxdd: '-10.1%', cagr: '+38.2%' },
+  BALANCED: { sharpe: '2.08', maxdd: '-9.9%',  cagr: '+50.5%' },
+  PARITY:   { sharpe: '1.93', maxdd: '-5.1%',  cagr: '+20.9%' },
+  SHIELD:   { sharpe: '1.90', maxdd: '-9.1%',  cagr: '+29.9%' },
 };
-const ENGINE_HYSTERESIS = { BULL: 7, BALANCED: 5, PARITY: 4, SHIELD: 3 };
+// Hysteresis en semaines (données hebdomadaires depuis Run 14)
+const ENGINE_HYSTERESIS = { BULL: 2, BALANCED: 1, PARITY: 1, SHIELD: 1 };
 const BOT_COLORS = { a: '#58a6ff', b: '#3fb950', c: '#ffa657', g: '#39d353', d: '#c792ea', e: '#ff7b72', f: '#f7c948' };
 const BOT_NAMES  = { a: 'Supertrend+MR', b: 'Momentum', c: 'Breakout', g: 'Trend Multi-Asset', d: 'DeepSeek R1', e: 'Claude Sonnet', f: 'Claude Haiku' };
 const BOT_TYPES  = { a: 'Technique | 4h | 20 symboles', b: 'Dual Momentum | daily | rotation', c: 'Donchian Breakout | daily | BTC/ETH/SOL', g: 'Trend Following | daily | multi-asset' };
@@ -668,7 +980,7 @@ function switchTab(tab) {
   document.getElementById('tab-' + tab).classList.add('active');
 
   // Top nav
-  const tabs = ['portfolio','strategies','lab','logs'];
+  const tabs = ['portfolio','strategies','lab','logs','docs'];
   const idx = tabs.indexOf(tab);
   const navBtns = document.querySelectorAll('.nav-btn');
   if (idx >= 0 && navBtns[idx]) navBtns[idx].classList.add('active');
