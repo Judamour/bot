@@ -114,6 +114,20 @@ def clear_api_alert(api: str):
     )
 
 
+def notify_z_dispatch(budget: dict, z_capital: float, engine: str):
+    """Notifie le dispatch de budget Bot Z vers les sub-bots."""
+    total_dispatched = sum(budget.values())
+    lines = [f"💰 <b>Bot Z — Budget dispatché</b>",
+             f"Engine: <b>{engine}</b> | Capital: <b>{z_capital:.0f}€</b>",
+             ""]
+    for bot_id, amount in sorted(budget.items()):
+        pct = amount / z_capital * 100 if z_capital > 0 else 0
+        bar = "█" * int(pct / 10) + "░" * (10 - int(pct / 10))
+        lines.append(f"Bot {bot_id.upper()}: <b>{amount:.0f}€</b> ({pct:.0f}%) {bar}")
+    lines.append(f"\nTotal: <b>{total_dispatched:.0f}€</b> / {z_capital:.0f}€")
+    notify("\n".join(lines))
+
+
 def resend_pending_alerts():
     """
     Renvoie toutes les alertes actives (appelé au début de chaque cycle).

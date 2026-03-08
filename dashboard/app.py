@@ -406,6 +406,8 @@ def api_portfolio():
             "z_budget_eur": budget.get(bot_id, alloc.get("budget_eur", 0)),
             "z_budget_pct": alloc.get("budget_pct", 0),
             "z_weight_final": alloc.get("weight_final", 0),
+            "bot_vol": state.get("bot_vol", alloc.get("bot_vol", None)),
+            "initial_capital": metrics["initial_capital"],
         }
 
     z_capital = z_state.get("z_capital", z_state.get("total_simulated_eur", 10000.0))

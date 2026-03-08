@@ -250,6 +250,8 @@ def run():
     state_i = load_rsl()
     state_j = load_mr()
 
+    _prev_budget = {}  # Track previous budget for change detection
+
     log(f"Bot A capital: {state_a['capital']:.2f}€ | Positions: {list(state_a['positions'].keys())}")
     log(f"Bot B capital: {state_b['capital']:.2f}€ | Positions: {list(state_b['positions'].keys())}")
     log(f"Bot C capital: {state_c['capital']:.2f}€ | Positions: {list(state_c['positions'].keys())}")
@@ -320,6 +322,16 @@ def run():
                         f"B:{z_budget_alloc.get('b',0):.0f}€ "
                         f"C:{z_budget_alloc.get('c',0):.0f}€ "
                         f"G:{z_budget_alloc.get('g',0):.0f}€")
+
+                    # Notifier si budget a changé significativement (>15% sur n'importe quel bot)
+                    budget_changed = any(
+                        abs(z_budget_alloc.get(b, 0) - _prev_budget.get(b, 0)) / max(_prev_budget.get(b, 1), 1) > 0.15
+                        for b in z_budget_alloc
+                    )
+                    if budget_changed:
+                        from live.notifier import notify_z_dispatch
+                        notify_z_dispatch(z_budget_alloc, z_summary.get('z_capital_eur', 10000), z_summary.get('current_engine', '?'))
+                        _prev_budget = dict(z_budget_alloc)
 
             except Exception as ez:
                 log(f"Bot Z erreur (non bloquant): {ez}", "WARN")

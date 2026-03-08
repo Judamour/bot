@@ -85,7 +85,7 @@
     .regime-pill.RANGE    { color: var(--range);   background: rgba(0,200,255,0.12); }
     .regime-pill.HIGH_VOL { color: var(--highvol); background: rgba(255,159,67,0.12); }
 
-    /* ── Nav ── */
+    /* ── Top Nav (desktop) ── */
     .nav {
       display: flex; gap: 0;
       background: var(--bg2);
@@ -98,7 +98,7 @@
       font-family: inherit; font-size: 12px; font-weight: 600; cursor: pointer;
       border-bottom: 2px solid transparent; white-space: nowrap;
       transition: color 0.15s, border-color 0.15s;
-      letter-spacing: 0.03em;
+      letter-spacing: 0.03em; min-height: 44px;
     }
     .nav-btn:hover { color: var(--text); }
     .nav-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
@@ -106,6 +106,28 @@
       display: inline-block; background: var(--surface3); color: var(--muted);
       border-radius: 99px; font-size: 9px; padding: 1px 6px; margin-left: 5px;
     }
+
+    /* ── Bottom Nav (mobile only) ── */
+    .bottom-nav {
+      display: none;
+      position: fixed; bottom: 0; left: 0; right: 0; z-index: 200;
+      background: rgba(7,12,22,0.97);
+      backdrop-filter: blur(12px);
+      border-top: 1px solid var(--border);
+      height: 60px;
+      padding: 0;
+      padding-bottom: env(safe-area-inset-bottom);
+    }
+    .bnav-btn {
+      flex: 1; display: flex; flex-direction: column; align-items: center;
+      justify-content: center; gap: 2px;
+      background: none; border: none; color: var(--muted);
+      font-family: inherit; cursor: pointer; padding: 6px 0;
+      min-height: 44px; transition: color 0.15s;
+    }
+    .bnav-btn.active { color: var(--accent); }
+    .bnav-icon { font-size: 18px; line-height: 1; }
+    .bnav-lbl { font-size: 9px; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600; }
 
     /* ── Main layout ── */
     .main { padding: 24px; max-width: 1400px; margin: 0 auto; }
@@ -125,7 +147,6 @@
     .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
     .grid-4 { display: grid; grid-template-columns: repeat(4,1fr); gap: 16px; }
     @media (max-width: 1100px) { .grid-4 { grid-template-columns: 1fr 1fr; } }
-    @media (max-width: 700px)  { .grid-2,.grid-3,.grid-4 { grid-template-columns: 1fr; } }
 
     /* ── Engine Hero ── */
     .engine-hero {
@@ -142,7 +163,7 @@
     .engine-hero.OMEGA    { color: var(--eng-omega);    --eng-rgb: 0,200,255; border-color: rgba(0,200,255,0.35); background: rgba(0,200,255,0.04); }
     .engine-hero.OMEGA_V2 { color: var(--eng-omegav2); --eng-rgb: 255,215,64; border-color: rgba(255,215,64,0.35); background: rgba(255,215,64,0.04); }
     .engine-hero.PRO      { color: var(--eng-pro);      --eng-rgb: 255,68,68; border-color: rgba(255,68,68,0.35); background: rgba(255,68,68,0.04); }
-    .engine-name-big { font-size: 48px; font-weight: 900; line-height: 1; letter-spacing: -0.02em; }
+    .engine-name-big { font-size: clamp(28px, 6vw, 48px); font-weight: 900; line-height: 1; letter-spacing: -0.02em; }
     .engine-subtitle { font-size: 13px; color: var(--muted); margin-top: 6px; font-weight: 400; }
     .engine-desc { font-size: 12px; color: var(--text); margin-top: 12px; line-height: 1.6; max-width: 480px; }
     .engine-meta { display: flex; gap: 24px; margin-top: 20px; flex-wrap: wrap; }
@@ -154,10 +175,17 @@
     .hysteresis-bar { height: 4px; background: rgba(255,255,255,0.1); border-radius: 2px; overflow: hidden; }
     .hysteresis-fill { height: 100%; background: currentColor; border-radius: 2px; transition: width 0.5s ease; }
 
+    /* ── Portfolio top grid ── */
+    .portfolio-top-grid {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 16px;
+      align-items: start;
+      margin-bottom: 16px;
+    }
+
     /* ── KPI row ── */
-    .kpi-grid { display: grid; grid-template-columns: repeat(5,1fr); gap: 12px; }
-    @media (max-width: 900px) { .kpi-grid { grid-template-columns: repeat(3,1fr); } }
-    @media (max-width: 600px) { .kpi-grid { grid-template-columns: repeat(2,1fr); } }
+    .kpi-grid { display: grid; grid-template-columns: repeat(6,1fr); gap: 12px; }
     .kpi-card {
       background: var(--surface); border: 1px solid var(--border);
       border-radius: var(--radius-sm); padding: 16px 18px;
@@ -170,7 +198,8 @@
     .neu { color: var(--text); }
 
     /* ── Allocation table ── */
-    .alloc-table { width: 100%; border-collapse: collapse; }
+    .alloc-table-wrap { overflow-x: auto; }
+    .alloc-table { width: 100%; border-collapse: collapse; min-width: 500px; }
     .alloc-table th { text-align: left; font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; padding: 6px 8px; border-bottom: 1px solid var(--border); }
     .alloc-table td { padding: 10px 8px; border-bottom: 1px solid rgba(29,46,70,0.4); vertical-align: middle; }
     .alloc-table tr:last-child td { border-bottom: none; }
@@ -203,6 +232,10 @@
     .strategy-budget-label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
     .strategy-budget-val { font-size: 15px; font-weight: 700; color: var(--accent); }
     .strategy-chart-wrap { height: 80px; position: relative; }
+    .strategy-capital-row {
+      display: flex; align-items: center; justify-content: space-between;
+      font-size: 11px; color: var(--muted); padding: 0 2px;
+    }
 
     /* ── Lab LLM ── */
     .lab-badge { font-size: 9px; padding: 2px 8px; border-radius: 99px; background: rgba(179,136,255,0.15); color: var(--purple); border: 1px solid rgba(179,136,255,0.3); font-weight: 700; letter-spacing: 0.06em; }
@@ -260,6 +293,69 @@
       font-size: 10px; padding: 4px 8px; border-radius: 4px; white-space: nowrap;
       border: 1px solid var(--border); pointer-events: none; z-index: 99;
     }
+
+    /* ══════════════════════════════════════════════════════════════
+       MOBILE-FIRST — breakpoint < 768px
+    ══════════════════════════════════════════════════════════════ */
+    @media (max-width: 768px) {
+      /* Show bottom nav, hide top nav */
+      .bottom-nav { display: flex; }
+      .nav { display: none; }
+
+      /* Header compact */
+      .header { padding: 0 12px; gap: 10px; height: 48px; }
+      #hdr-regime-pill { display: none; }
+      .header-kpi-val { font-size: 13px; }
+      /* Hide 3rd KPI (VIX) on mobile */
+      .header-kpis .header-kpi:last-child { display: none; }
+
+      /* Main padding + bottom nav clearance */
+      .main { padding: 12px; padding-bottom: 70px; }
+
+      /* KPI grid: 3 cols on mobile */
+      .kpi-grid { grid-template-columns: repeat(3, 1fr); gap: 8px; }
+      .kpi-val { font-size: 16px; }
+      .kpi-card { padding: 12px 10px; }
+
+      /* Portfolio top grid: single column */
+      .portfolio-top-grid { grid-template-columns: 1fr !important; }
+      .doughnut-card { display: none; }
+
+      /* Engine hero: compact padding */
+      .engine-hero { padding: 16px 20px; }
+      .engine-meta { gap: 16px; }
+      .engine-meta-val { font-size: 15px; }
+
+      /* Strategy cards: single column */
+      .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
+
+      /* Strategy chart taller on mobile */
+      .strategy-chart-wrap { height: 180px; }
+
+      /* Log box smaller */
+      .log-box { max-height: 400px; }
+
+      /* Engine pills selector: horizontal scroll on mobile */
+      .engine-pills-col {
+        display: flex; flex-direction: row !important; gap: 6px !important;
+        overflow-x: auto; padding-bottom: 4px;
+      }
+      .engine-pills-col > div:first-child { display: none; } /* hide label */
+
+      /* Charts on mobile */
+      .chart-wrap canvas { height: 180px !important; }
+    }
+
+    /* ── Tablet 768-1024px ── */
+    @media (min-width: 768px) and (max-width: 1024px) {
+      .kpi-grid { grid-template-columns: repeat(3, 1fr); }
+      .main { padding: 16px; }
+    }
+
+    /* ── Desktop > 1024px ── */
+    @media (min-width: 1025px) {
+      .kpi-grid { grid-template-columns: repeat(6, 1fr); }
+    }
   </style>
 </head>
 <body>
@@ -292,13 +388,34 @@
   </div>
 </header>
 
-<!-- ── Nav ───────────────────────────────────────────────────── -->
+<!-- ── Top Nav (desktop) ──────────────────────────────────────── -->
 <nav class="nav">
   <button class="nav-btn active" onclick="switchTab('portfolio')">Portfolio Z</button>
   <button class="nav-btn" onclick="switchTab('strategies')">Strategies <span class="nav-badge" id="nb-strat">4</span></button>
   <button class="nav-btn" onclick="switchTab('lab')">Lab LLM <span class="nav-badge">D/E/F</span></button>
   <button class="nav-btn" onclick="switchTab('logs')">Logs</button>
 </nav>
+
+<!-- ── Bottom Nav (mobile only) ──────────────────────────────── -->
+<nav class="bottom-nav">
+  <button class="bnav-btn active" onclick="switchTab('portfolio')" id="bnav-portfolio">
+    <span class="bnav-icon">📊</span>
+    <span class="bnav-lbl">Portfolio</span>
+  </button>
+  <button class="bnav-btn" onclick="switchTab('strategies')" id="bnav-strategies">
+    <span class="bnav-icon">🤖</span>
+    <span class="bnav-lbl">Bots</span>
+  </button>
+  <button class="bnav-btn" onclick="switchTab('lab')" id="bnav-lab">
+    <span class="bnav-icon">🧪</span>
+    <span class="bnav-lbl">Lab</span>
+  </button>
+  <button class="bnav-btn" onclick="switchTab('logs')" id="bnav-logs">
+    <span class="bnav-icon">📋</span>
+    <span class="bnav-lbl">Logs</span>
+  </button>
+</nav>
+
 
 <!-- ═══════════════════════════════════════════════════════════════
      TAB: PORTFOLIO Z
@@ -307,11 +424,11 @@
 
 <div id="tab-portfolio" class="tab-content active">
 
-  <!-- Engine hero + KPIs -->
-  <div style="display:grid; grid-template-columns: 1fr auto; gap:16px; align-items:start; margin-bottom:16px;">
+  <!-- Engine hero + selector -->
+  <div class="portfolio-top-grid">
 
     <!-- Engine Hero -->
-    <div id="engine-hero" class="engine-hero OMEGA" style="flex:1">
+    <div id="engine-hero" class="engine-hero OMEGA">
       <div class="engine-name-big" id="eng-name">OMEGA</div>
       <div class="engine-subtitle">Engine actif</div>
       <div class="engine-desc" id="eng-desc">Données insuffisantes — en attente du premier cycle.</div>
@@ -337,8 +454,8 @@
       </div>
     </div>
 
-    <!-- Engine selector pills -->
-    <div style="display:flex; flex-direction:column; gap:8px; padding-top:4px;">
+    <!-- Engine selector pills (hidden on mobile via doughnut-card class) -->
+    <div class="engine-pills-col doughnut-card" style="display:flex; flex-direction:column; gap:8px; padding-top:4px;">
       <div style="font-size:10px; color:var(--muted); text-transform:uppercase; letter-spacing:0.06em; margin-bottom:4px;">Engines</div>
       <div class="engine-chip ENHANCED" id="pill-ENHANCED" data-tip="BULL max CAGR — Sharpe 1.61">ENHANCED</div>
       <div class="engine-chip OMEGA"    id="pill-OMEGA"    data-tip="Neutre + quality — Sharpe 1.96">OMEGA</div>
@@ -347,7 +464,7 @@
     </div>
   </div>
 
-  <!-- KPI row -->
+  <!-- KPI row (6 cards) -->
   <div class="kpi-grid" style="margin-bottom:16px;">
     <div class="kpi-card">
       <div class="kpi-val" id="kpi-capital">10 000€</div>
@@ -374,6 +491,11 @@
       <div class="kpi-lbl">Exposition CB</div>
       <div class="kpi-sub" id="kpi-cb-sub">Circuit Breaker</div>
     </div>
+    <div class="kpi-card">
+      <div class="kpi-val" id="kpi-dispatch">—</div>
+      <div class="kpi-lbl">Dispatch Z</div>
+      <div class="kpi-sub" id="kpi-dispatch-sub">Budget A/B/C/G</div>
+    </div>
   </div>
 
   <!-- Charts + Allocation -->
@@ -384,7 +506,7 @@
         <canvas id="z-equity-chart"></canvas>
       </div>
     </div>
-    <div class="card">
+    <div class="card doughnut-card">
       <div class="card-title">Allocation dispatching</div>
       <div style="position:relative; height:220px;">
         <canvas id="alloc-chart"></canvas>
@@ -395,21 +517,24 @@
   <!-- Allocation table -->
   <div class="card" style="margin-bottom:16px;">
     <div class="card-title">Budget dispatché par Bot Z — Stratégies actives</div>
-    <table class="alloc-table">
-      <thead>
-        <tr>
-          <th>Stratégie</th>
-          <th>Budget alloué</th>
-          <th>% Capital</th>
-          <th>Poids régime</th>
-          <th>Poids qualité</th>
-          <th>Positions</th>
-        </tr>
-      </thead>
-      <tbody id="alloc-tbody">
-        <tr><td colspan="6" style="color:var(--muted); text-align:center; padding:20px">Chargement...</td></tr>
-      </tbody>
-    </table>
+    <div class="alloc-table-wrap">
+      <table class="alloc-table">
+        <thead>
+          <tr>
+            <th>Stratégie</th>
+            <th>Budget alloué</th>
+            <th>% Capital</th>
+            <th>Poids régime</th>
+            <th>Qualité (P&L)</th>
+            <th>Vol</th>
+            <th>Positions</th>
+          </tr>
+        </thead>
+        <tbody id="alloc-tbody">
+          <tr><td colspan="7" style="color:var(--muted); text-align:center; padding:20px">Chargement...</td></tr>
+        </tbody>
+      </table>
+    </div>
   </div>
 
   <!-- Engine timeline -->
@@ -489,7 +614,7 @@
   <div class="section-row" style="margin-top:0">
     <div class="section-title">Logs multi_runner</div>
     <div class="section-line"></div>
-    <button onclick="loadLogs()" style="background:var(--surface2);border:1px solid var(--border);color:var(--muted);padding:4px 12px;border-radius:6px;cursor:pointer;font-size:11px;font-family:inherit">Rafraichir</button>
+    <button onclick="loadLogs()" style="background:var(--surface2);border:1px solid var(--border);color:var(--muted);padding:4px 12px;border-radius:6px;cursor:pointer;font-size:11px;font-family:inherit;min-height:44px">Rafraichir</button>
   </div>
   <div class="log-box" id="log-box">Chargement...</div>
 </div><!-- /tab-logs -->
@@ -530,7 +655,7 @@ let allocChart   = null;
 let stratCharts  = {};
 let historyData  = [];
 
-// ── Tab switching — lazy load pour éviter Chart.js resize loop dans display:none ──
+// ── Tab switching — lazy load + bottom nav sync ───────────────────────────────
 
 let _stratLoaded = false;
 let _labLoaded   = false;
@@ -538,9 +663,21 @@ let _labLoaded   = false;
 function switchTab(tab) {
   document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
   document.querySelectorAll('.nav-btn').forEach(el => el.classList.remove('active'));
+  document.querySelectorAll('.bnav-btn').forEach(el => el.classList.remove('active'));
+
   document.getElementById('tab-' + tab).classList.add('active');
-  const idx = ['portfolio','strategies','lab','logs'].indexOf(tab);
-  document.querySelectorAll('.nav-btn')[idx].classList.add('active');
+
+  // Top nav
+  const tabs = ['portfolio','strategies','lab','logs'];
+  const idx = tabs.indexOf(tab);
+  const navBtns = document.querySelectorAll('.nav-btn');
+  if (idx >= 0 && navBtns[idx]) navBtns[idx].classList.add('active');
+
+  // Bottom nav
+  const bnavBtn = document.getElementById('bnav-' + tab);
+  if (bnavBtn) bnavBtn.classList.add('active');
+
+  // Lazy load
   if (tab === 'logs') loadLogs();
   if (tab === 'strategies' && !_stratLoaded) { _stratLoaded = true; loadStrategies(); }
   if (tab === 'lab'        && !_labLoaded)   { _labLoaded   = true; loadLab(); }
@@ -658,6 +795,13 @@ function renderPortfolio(d) {
   const pnlSubEl = document.getElementById('kpi-pnl-sub');
   pnlSubEl.textContent = (d.days_running || 0) + ' jours | revue ' + (d.paper_review || '—');
 
+  // Dispatch Z KPI
+  const budget = d.budget || {};
+  const totalDispatched = Object.values(budget).reduce((a,b) => a + parseFloat(b||0), 0);
+  const dispatchEl = document.getElementById('kpi-dispatch');
+  dispatchEl.textContent = fmtEur(totalDispatched);
+  document.getElementById('kpi-dispatch-sub').textContent = 'sur ' + fmtEur(capital) + ' total';
+
   // Allocation table
   renderAllocTable(d);
 
@@ -678,16 +822,11 @@ function renderPortfolio(d) {
 
 function renderAllocTable(d) {
   const strategies = d.strategies || {};
-  const alloc = {};
-  // Build alloc from strategies data
-  Object.entries(strategies).forEach(([k, v]) => {
-    alloc[k] = { budget_eur: v.z_budget_eur, budget_pct: v.z_budget_pct, weight_regime: v.z_weight_final, positions: v.positions };
-  });
 
   const tbody = document.getElementById('alloc-tbody');
   const bots = Object.entries(strategies);
   if (!bots.length) {
-    tbody.innerHTML = '<tr><td colspan="6" style="color:var(--muted);text-align:center;padding:20px">En attente du premier cycle Bot Z...</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="7" style="color:var(--muted);text-align:center;padding:20px">En attente du premier cycle Bot Z...</td></tr>';
     return;
   }
 
@@ -698,6 +837,7 @@ function renderAllocTable(d) {
     const posHtml = posArr.length
       ? posArr.slice(0,4).map(p => `<span class="pos-chip">${p.symbol || p}</span>`).join('')
       : '<span style="color:var(--muted)">—</span>';
+    const botVol = info.bot_vol != null ? fmt(info.bot_vol * 100, 1) + '%' : '—';
     return `<tr>
       <td><div class="bot-name-cell"><div class="bot-dot" style="background:${color}"></div>${BOT_NAMES[bid] || bid}</div></td>
       <td style="font-weight:700;color:var(--accent)">${fmtEur(info.z_budget_eur)}</td>
@@ -709,6 +849,7 @@ function renderAllocTable(d) {
       </td>
       <td style="color:var(--muted)">${fmt(info.z_weight_final,3)}</td>
       <td><span style="color:var(--text)">${fmt(info.pnl_pct,2)}% (${fmtEur(info.pnl_eur)})</span></td>
+      <td style="color:var(--purple)">${botVol}</td>
       <td><div class="pos-chips">${posHtml}</div></td>
     </tr>`;
   }).join('');
@@ -721,8 +862,9 @@ function renderAllocChart(d) {
   const colors = Object.keys(strategies).map(k => BOT_COLORS[k] || '#888');
 
   if (allocChart) allocChart.destroy();
-  const ctx = document.getElementById('alloc-chart').getContext('2d');
-  allocChart = new Chart(ctx, {
+  const ctx = document.getElementById('alloc-chart');
+  if (!ctx) return;
+  allocChart = new Chart(ctx.getContext('2d'), {
     type: 'doughnut',
     data: {
       labels,
@@ -864,6 +1006,11 @@ function renderStrategyCards(strategies) {
         </div>
       </div>
 
+      <div class="strategy-capital-row">
+        <span>Capital réel bot</span>
+        <span style="color:var(--text);font-weight:600">${fmtEur(s.capital)}</span>
+      </div>
+
       <div class="strategy-kpis">
         <div>
           <div class="strategy-kpi-val ${perfClass(perf)}">${fmtPct(perf)}</div>
@@ -995,18 +1142,30 @@ async function loadLab() {
 
 // ── Logs ──────────────────────────────────────────────────────────────────────
 
+function colorLog(line) {
+  const esc = escHtml(line);
+  if (esc.includes('[Z→]') || esc.includes('z_budget') || esc.includes('Budget dispatch'))
+    return `<span style="color:var(--accent)">${esc}</span>`;
+  if (esc.includes('[WARN]') || esc.includes('WARN'))
+    return `<span class="log-warn">${esc}</span>`;
+  if (esc.includes('[ERROR]') || esc.includes('ERROR') || esc.includes('ERREUR'))
+    return `<span class="log-error">${esc}</span>`;
+  if (esc.includes('[BUY]') || esc.includes('▲ BUY'))
+    return `<span class="log-ok">${esc}</span>`;
+  if (esc.includes('[SELL]') || esc.includes('CLOSE') || esc.includes('✓') || esc.includes('✗'))
+    return `<span style="color:var(--orange)">${esc}</span>`;
+  if (esc.includes('[INFO]') || esc.includes('---') || esc.includes('Cycle'))
+    return `<span class="log-info">${esc}</span>`;
+  if (esc.includes('risk parity') || esc.includes('MCPS'))
+    return `<span style="color:var(--purple)">${esc}</span>`;
+  return `<span style="color:var(--muted)">${esc}</span>`;
+}
+
 async function loadLogs() {
   try {
     const r = await fetch('/api/log');
     const d = await r.json();
-    const lines = (d.lines || []).map(l => {
-      let cls = '';
-      if (l.includes('[OK]') || l.includes('✓')) cls = 'log-ok';
-      else if (l.includes('[WARN]') || l.includes('⚠')) cls = 'log-warn';
-      else if (l.includes('[ERROR]') || l.includes('Erreur')) cls = 'log-error';
-      else if (l.includes('[MULTI]') || l.includes('[INFO]')) cls = 'log-info';
-      return `<div class="${cls}">${escHtml(l)}</div>`;
-    }).join('');
+    const lines = (d.lines || []).map(l => `<div>${colorLog(l)}</div>`).join('');
     const box = document.getElementById('log-box');
     box.innerHTML = lines || '<span style="color:var(--muted)">Aucun log disponible</span>';
     box.scrollTop = box.scrollHeight;
