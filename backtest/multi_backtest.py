@@ -1267,11 +1267,11 @@ def backtest_bot_z_pro(results: dict, vix_s: pd.Series, qqq_df: pd.DataFrame,
             btc_norm[dt] = {"close": row["close"], "ema200": row["ema200"]}
 
     TARGET_VOL  = 0.20   # vol annuelle cible pour chaque bot (20%)
-    VOL_WIN     = 20     # fenêtre vol réalisée (jours)
-    SHARPE_WIN  = 90     # fenêtre rolling Sharpe (jours)
-    CORR_WIN    = 20     # fenêtre corrélation inter-bots (jours)
+    VOL_WIN     = 4      # fenêtre vol réalisée (semaines, ex-20j)
+    SHARPE_WIN  = 18     # fenêtre rolling Sharpe (semaines, ex-90j)
+    CORR_WIN    = 4      # fenêtre corrélation inter-bots (semaines, ex-20j)
     CORR_THRESH = 0.70   # seuil corrélation → réduction expo
-    CB_RECOVERY = 0.005  # récupération CB +0.5%/jour
+    CB_RECOVERY = 0.005  # récupération CB +0.5%/semaine
 
     ret_history = {k: [] for k in valid}
     cb_peak     = initial_total
@@ -1490,8 +1490,8 @@ def backtest_bot_z_adaptive(results: dict, vix_s: pd.Series, qqq_df: pd.DataFram
             btc_norm[dt] = {"close": row["close"], "ema200": row["ema200"]}
 
     CB_RECOVERY = 0.005
-    VOL_WIN     = 20
-    CORR_WIN    = 20
+    VOL_WIN     = 4   # semaines (ex-20j)
+    CORR_WIN    = 4   # semaines (ex-20j)
 
     ret_history   = {k: [] for k in valid}
     cb_peak       = initial_total
@@ -1688,10 +1688,11 @@ def backtest_bot_z_omega(results: dict, vix_s: pd.Series, qqq_df: pd.DataFrame,
         for dt, row in btc_df.iterrows():
             btc_norm[dt] = {"close": row["close"], "ema200": row["ema200"]}
 
-    SHARPE_WIN   = 90
-    VOL_WIN      = 20
-    SLOPE_WIN    = 60
-    CORR_WIN     = 20
+    # Paramètres en semaines (données hebdomadaires après resample)
+    SHARPE_WIN   = 18   # ex-90j
+    VOL_WIN      = 4    # ex-20j
+    SLOPE_WIN    = 12   # ex-60j
+    CORR_WIN     = 4    # ex-20j
     SOFTMAX_BETA = 3.0   # concentration des poids (plus élevé = plus concentré)
     CB_THRESHOLD = -0.25
     CB_MIN_FACTOR = 0.30
@@ -1915,11 +1916,12 @@ def backtest_bot_z_omega_v2(results: dict, vix_s: pd.Series, qqq_df: pd.DataFram
         for dt, row in btc_df.iterrows():
             btc_norm[dt] = {"close": row["close"], "ema200": row["ema200"]}
 
-    SHARPE_WIN    = 90
-    VOL_WIN       = 20
-    SLOPE_WIN     = 60
-    CORR_WIN      = 20
-    META_WIN      = 30    # fenêtre meta-learning (30j)
+    # Paramètres en semaines (données hebdomadaires après resample)
+    SHARPE_WIN    = 18    # ex-90j
+    VOL_WIN       = 4     # ex-20j
+    SLOPE_WIN     = 12    # ex-60j
+    CORR_WIN      = 4     # ex-20j
+    META_WIN      = 6     # ex-30j (meta-learning)
     SOFTMAX_BETA  = 3.0
     CB_THRESHOLD  = -0.25
     CB_MIN_FACTOR = 0.30
@@ -2173,7 +2175,9 @@ def backtest_bot_z_meta(results: dict, vix_s: pd.Series, qqq_df: pd.DataFrame,
         for dt, row in btc_df.iterrows():
             btc_norm[dt] = {"close": row["close"], "ema200": row["ema200"]}
 
-    SHARPE_WIN = 90; VOL_WIN = 20; SLOPE_WIN = 60; CORR_WIN = 20; META_WIN = 30
+    # Paramètres en semaines (données hebdomadaires après resample)
+    # 1 semaine ≈ 5 jours → 90j→18s, 20j→4s, 60j→12s, 30j→6s
+    SHARPE_WIN = 18; VOL_WIN = 4; SLOPE_WIN = 12; CORR_WIN = 4; META_WIN = 6
     SOFTMAX_BETA = 3.0; CB_RECOVERY = 0.005
     TARGET_VOL = 0.20  # pour le mode PRO
 
@@ -2490,8 +2494,10 @@ def backtest_bot_z_meta_v2(results: dict, vix_s: pd.Series, qqq_df: pd.DataFrame
             btc_norm[dt] = {"close": row["close"], "ema200": row["ema200"]}
 
     ENGINE_NAMES = ["ENHANCED", "OMEGA", "OMEGA_V2", "PRO"]
-    SHARPE_WIN = 90; VOL_WIN = 20; SLOPE_WIN = 60; CORR_WIN = 20; META_WIN = 30
-    PERF_WIN = 60    # fenêtre rolling performance par engine
+    # Paramètres en semaines (données hebdomadaires après resample)
+    # 1 semaine ≈ 5 jours → 90j→18s, 20j→4s, 60j→12s, 30j→6s, 60j→12s
+    SHARPE_WIN = 18; VOL_WIN = 4; SLOPE_WIN = 12; CORR_WIN = 4; META_WIN = 6
+    PERF_WIN = 12    # fenêtre rolling performance par engine (12 semaines ≈ 3 mois)
     SOFTMAX_BETA = 3.0; CB_RECOVERY = 0.005; TARGET_VOL = 0.20
     CB_TIERS = {
         "ENHANCED": [(-0.25, 0.30)],
@@ -2499,7 +2505,8 @@ def backtest_bot_z_meta_v2(results: dict, vix_s: pd.Series, qqq_df: pd.DataFrame
         "OMEGA_V2": [(-0.20, 0.50), (-0.30, 0.30)],
         "PRO":      [(-0.10, 0.80), (-0.20, 0.50), (-0.30, 0.30)],
     }
-    HYSTERESIS = {"ENHANCED": 7, "OMEGA": 5, "OMEGA_V2": 4, "PRO": 3}
+    # Hysteresis en semaines : 7j→2s, 5j→1s, 4j→1s, 3j→1s
+    HYSTERESIS = {"ENHANCED": 2, "OMEGA": 1, "OMEGA_V2": 1, "PRO": 1}
 
     ks = list(valid.keys())
     ret_history  = {k: [] for k in ks}
