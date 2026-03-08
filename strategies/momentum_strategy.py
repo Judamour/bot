@@ -16,9 +16,20 @@ import os
 import sys
 from datetime import datetime, date
 
+import pytz
+
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
 from live.notifier import notify
+
+
+def _is_us_market_open() -> bool:
+    """Vérifie si la bourse US est ouverte (lundi-vendredi, 9h30-16h ET)."""
+    try:
+        et = datetime.now(pytz.timezone("America/New_York"))
+        return et.weekday() < 5 and 9 * 60 + 30 <= et.hour * 60 + et.minute <= 16 * 60
+    except Exception:
+        return True
 
 STATE_FILE = "logs/momentum/state.json"
 INITIAL_CAPITAL = 1000.0
@@ -235,6 +246,10 @@ def run_momentum_cycle(state: dict, daily_cache: dict, macro_context: dict = Non
     target_per_pos = total_portfolio / TOP_N  # Cible uniforme par position
 
     for symbol in to_buy:
+        if symbol in config.XSTOCKS and not _is_us_market_open():
+            log(f"{symbol} — Marché US fermé, BUY ignoré")
+            continue
+
         df = daily_cache.get(symbol)
         if df is None:
             log(f"{symbol} — No data, skipping entry", "WARN")
