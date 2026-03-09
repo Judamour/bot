@@ -466,8 +466,8 @@ def api_portfolio():
         "target_weights":      last_alloc,
         "prev_engine_smooth":  prev_smooth,
         "days_running":        z_state.get("days_running", 0),
-        "paper_start":         z_state.get("paper_start_date", ""),
-        "paper_review":        z_state.get("paper_review_date", ""),
+        "paper_start":         z_state.get("paper_start_date", "2026-03-06"),
+        "paper_review":        z_state.get("paper_review_date") or "2026-04-30",
     })
 
 

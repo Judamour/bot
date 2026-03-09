@@ -904,7 +904,9 @@ def run_bot_z_cycle(macro: dict, ohlcv: dict = None) -> dict:
         pending_engine = raw_engine
         days_pending   = 0
     else:
-        days_pending += 1
+        # Plafonner au seuil d'hystérésis pour éviter compteur infini
+        hyst_max = META_ENGINE_HYSTERESIS.get(pending_engine, 5)
+        days_pending = min(days_pending + 1, hyst_max)
 
     engine_switched = False
     if days_pending >= META_ENGINE_HYSTERESIS.get(pending_engine, 5):
@@ -1010,8 +1012,14 @@ def run_bot_z_cycle(macro: dict, ohlcv: dict = None) -> dict:
         warnings_list.append(
             f"CIRCUIT BREAKER actif — DD={port_dd*100:.1f}% | expo={cb_factor_final*100:.0f}%"
         )
-    if current_engine != "BULL":
-        warnings_list.append(f"Engine actif : {current_engine} (pending={pending_engine}, j={days_pending})")
+    elif vol_factor > 1.05:
+        n_hist = len(z_capital_history)
+        warnings_list.append(
+            f"Vol targeting — levier ×{vol_factor:.2f} (port_vol={portfolio_vol:.0%} < cible 20% | {n_hist} cycles)"
+        )
+    # N'alerter que si un changement est en attente (pending ≠ actif)
+    if pending_engine != current_engine:
+        warnings_list.append(f"Changement pending : {current_engine} → {pending_engine} (j={days_pending}/{META_ENGINE_HYSTERESIS.get(pending_engine,5)})")
     if vix > CASH_VIX_THRESHOLD:
         warnings_list.append(f"HIGH_VOL forcé (VIX={vix:.1f} > {CASH_VIX_THRESHOLD})")
     if btc_vol > BTC_HIGH_VOL_THRESHOLD:
