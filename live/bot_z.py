@@ -1101,9 +1101,24 @@ def run_bot_z_cycle(macro: dict, ohlcv: dict = None) -> dict:
     state["cb_factor"]           = round(cb_factor, 3)
     state["z_capital"]           = round(new_z_capital, 2)
     state["z_capital_history"]   = z_capital_history
-    # Référence pour le prochain cycle = budget dispatché (pas les valeurs pre-dispatch).
-    # Sinon : pre-dispatch=4000€ → post-dispatch=10000€ → faux retour +150% au cycle suivant.
-    state["last_bot_values"]     = {b: round(budget.get(b, bot_values.get(b, 0)), 2) for b in VALID_BOTS}
+    # Référence pour le prochain cycle = valeur réelle POST-dispatch de chaque bot.
+    # Pour les bots sans positions (B/C/G) : post-dispatch = cash_scalé = budget.
+    # Pour Bot A avec positions ouvertes : cash_scalé + positions_au_prix_marché.
+    # Utiliser budget seul cause un faux gain : budget=1976€ mais valeur réelle=2065€ (87€ positions)
+    # → le cycle suivant voit +4.5% de retour phantom → z_capital gonflé.
+    _post_dispatch_vals = {}
+    for _b in VALID_BOTS:
+        _s_b      = all_states.get(_b, {})
+        _old_bud  = _s_b.get("z_budget_eur", _s_b.get("initial_capital", INITIAL_CAP / max(len(VALID_BOTS), 1)))
+        _new_bud  = budget.get(_b, _old_bud)
+        _scale    = _new_bud / _old_bud if _old_bud > 0 else 1.0
+        _cash     = _s_b.get("capital", 0.0) * _scale
+        _pos_val  = sum(
+            mtm_prices.get(sym, p.get("entry", 0)) * p.get("size", 0)
+            for sym, p in _s_b.get("positions", {}).items()
+        )
+        _post_dispatch_vals[_b] = round(_cash + _pos_val, 2)
+    state["last_bot_values"]     = _post_dispatch_vals
     state["last_bot_raw_values"] = bot_values  # valeurs réelles pour debug/MTM
     state["last_alloc_weights"]  = blended  # poids réels du budget (blended = 60% engine + 40% inv-vol + caps + smooth)
     state["current_engine"]      = current_engine
