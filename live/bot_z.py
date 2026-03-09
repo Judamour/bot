@@ -83,6 +83,23 @@ BTC_HIGH_VOL_THRESHOLD = 0.80   # vol réalisée BTC > 80% annualisé → force 
 CORR_REDUCE_THRESHOLD  = 0.70   # corrélation inter-bots > 70% → réduction exposition ×0.80
 REGIME_PERSIST_DAYS    = 7      # jours pour confiance pleine dans un régime (persist factor)
 
+# ── Weight caps — garde-fous contre sur-concentration ────────────────────────
+# Bot C : +0.6% CAGR réel corrigé → cap à 25% (était 64% en SHIELD, trop haut)
+# Bot G : vrai stabilisateur (+23.4%) → peut monter à 55% en SHIELD
+# Bot A : peut descendre à 5% en SHIELD (mais jamais 0 — moteur principal)
+WEIGHT_CAPS = {
+    "a": {"min": 0.05, "max": 0.50},
+    "b": {"min": 0.00, "max": 0.30},
+    "c": {"min": 0.00, "max": 0.25},
+    "g": {"min": 0.15, "max": 0.55},
+}
+
+# ── Transition smooth entre engines ──────────────────────────────────────────
+# Asymétrie : réagir vite en crise, prudemment sur les rebonds
+TRANSITION_SPEED_DEFENSIVE = 0.40  # vers SHIELD/PARITY : 40%/cycle (~10h pour atteindre cible)
+TRANSITION_SPEED_OFFENSIVE  = 0.20  # vers BULL/BALANCED  : 20%/cycle (~20h — évite faux rebonds)
+ENGINE_DEFENSIVENESS = {"BULL": 0, "BALANCED": 1, "PARITY": 2, "SHIELD": 3}
+
 # ── Circuit Breaker ──────────────────────────────────────────────────────────
 CB_THRESHOLD  = -0.25   # -25% DD → réduction exposition
 CB_MIN_FACTOR = 0.30    # exposition minimale (30% = 70% cash)
@@ -237,6 +254,55 @@ def _write_budget(budget: dict):
     budget_path = os.path.join(os.path.dirname(STATE_FILE), "budget.json")
     with open(budget_path, "w") as f:
         json.dump({"ts": datetime.now().isoformat(), "budget": budget}, f, indent=2)
+
+
+def _apply_weight_caps(weights: dict) -> dict:
+    """
+    Applique les caps min/max avec algorithme itératif jusqu'à convergence.
+    Nécessaire car clipper un bot redistribue son poids sur les autres,
+    qui peuvent alors dépasser leur propre cap — d'où les itérations.
+    Converge en 3-5 itérations pour 4 bots.
+    """
+    w = {b: weights.get(b, 0.0) for b in VALID_BOTS}
+    for _ in range(15):
+        total = sum(w.values()) or 1.0
+        w = {b: v / total for b, v in w.items()}
+        changed = False
+        for b in VALID_BOTS:
+            cap = WEIGHT_CAPS.get(b, {})
+            lo, hi = cap.get("min", 0.0), cap.get("max", 1.0)
+            new_w = max(lo, min(hi, w[b]))
+            if abs(new_w - w[b]) > 1e-6:
+                changed = True
+            w[b] = new_w
+        if not changed:
+            break
+    total = sum(w.values()) or 1.0
+    return {b: v / total for b, v in w.items()}
+
+
+def _smooth_weights(target: dict, prev: dict, current_engine: str, prev_engine: str) -> dict:
+    """
+    Interpolation progressive des poids vers la cible selon la direction du switch.
+    Asymétrie : rapide vers la défense (crise), lent vers l'offensive (évite faux rebonds).
+
+    Exemple BALANCED→SHIELD (speed=0.40) :
+      cycle+1 : poids intermédiaire à 40% de l'écart comblé
+      cycle+4 : ~85% de la cible atteinte
+    """
+    def_curr = ENGINE_DEFENSIVENESS.get(current_engine, 1)
+    def_prev = ENGINE_DEFENSIVENESS.get(prev_engine, 1)
+    going_defensive = def_curr > def_prev
+    speed = TRANSITION_SPEED_DEFENSIVE if going_defensive else TRANSITION_SPEED_OFFENSIVE
+
+    smoothed = {}
+    for b in VALID_BOTS:
+        t = target.get(b, 1.0 / len(VALID_BOTS))
+        p = prev.get(b, 1.0 / len(VALID_BOTS))
+        smoothed[b] = p + speed * (t - p)
+
+    total = sum(smoothed.values()) or 1.0
+    return {b: v / total for b, v in smoothed.items()}
 
 
 def load_bot_state(bot_id: str) -> dict:
@@ -917,6 +983,17 @@ def run_bot_z_cycle(macro: dict, ohlcv: dict = None) -> dict:
     total_b = sum(blended.values())
     if total_b > 0:
         blended = {b: v / total_b for b, v in blended.items()}
+
+    # 6a. Weight caps — évite sur-concentration (ex: Bot C à 64% en SHIELD)
+    blended = _apply_weight_caps(blended)
+
+    # 6b. Transition smooth — interpolation progressive vers la cible
+    #     Asymétrie : rapide en crise (SHIELD ×0.40/cycle), lent sur rebond (BULL ×0.20/cycle)
+    prev_blended = state.get("last_blended_weights", {b: 1.0 / len(VALID_BOTS) for b in VALID_BOTS})
+    prev_engine_smooth = state.get("prev_engine_smooth", current_engine)
+    blended = _smooth_weights(blended, prev_blended, current_engine, prev_engine_smooth)
+    state["last_blended_weights"] = blended
+    state["prev_engine_smooth"] = current_engine
 
     budget = {b: round(new_z_capital * cb_factor_final * blended.get(b, 0.0), 2) for b in VALID_BOTS}
     _write_budget(budget)
