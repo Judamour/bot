@@ -308,7 +308,10 @@ def run_rs_leaders_cycle(state: dict, daily_cache: dict, macro_context: dict = N
     # ── 3. Sortir les positions qui sont hors top EXIT_RANK ──────────────────
     for symbol in list(state["positions"].keys()):
         rank = ranked_symbols.index(symbol) + 1 if symbol in ranked_symbols else 999
-        passes, _ = _passes_filters(indicators_map.get(symbol, {}))
+        ind = indicators_map.get(symbol, {})
+        if not ind:  # BUG-28 : données temporairement indisponibles → skip exit sur ce symbole
+            continue
+        passes, _ = _passes_filters(ind)
         if rank > EXIT_RANK or not passes:
             pos = state["positions"][symbol]
             df = daily_cache.get(symbol)

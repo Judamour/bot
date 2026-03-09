@@ -447,11 +447,11 @@ def compute_bot_volatility(state: dict, window: int = 20) -> float:
     if len(trades) < 3:
         return TARGET_VOL  # vol cible par défaut
 
-    capital = state.get("capital", 1000.0)
-    if capital <= 0:
+    capital = state.get("initial_capital", state.get("capital", 1000.0))
+    if capital < 10.0:  # BUG-07 : seuil à 10€ (pas 0) pour éviter norm_returns aberrants si capital résiduel
         return TARGET_VOL
 
-    # Returns normalisés par capital
+    # Returns normalisés par capital initial (pas capital courant qui peut être scalé par z_dispatch)
     norm_returns = [t.get("pnl", 0) / capital for t in trades]
     avg = sum(norm_returns) / len(norm_returns)
     variance = sum((r - avg) ** 2 for r in norm_returns) / len(norm_returns)
@@ -976,7 +976,10 @@ def run_bot_z_cycle(macro: dict, ohlcv: dict = None) -> dict:
     # Corrélation inter-bots : si trop corrélés → réduit l'exposition de 20%
     avg_corr = compute_bot_correlation(all_states)
     corr_factor = 0.80 if avg_corr > CORR_REDUCE_THRESHOLD else 1.0
-    cb_factor_final = max(CB_MIN_FACTOR, cb_factor_vol * corr_factor)
+    # BUG-05 : cb_factor_final plafonné à 1.0 pour éviter que le budget total dépasse z_capital.
+    # vol_factor peut monter jusqu'à 1.5 après J+14 → budget = z_capital × 1.5 × weights = 150% du capital.
+    # Cela crée une inflation silencieuse : les sub-bots reçoivent plus que z_capital disponible.
+    cb_factor_final = min(1.0, max(CB_MIN_FACTOR, cb_factor_vol * corr_factor))
 
     # 5. Allocation Meta v2 (engine sélectionné + CB final)
     allocation = compute_shadow_allocation(regime, all_states, macro, cb_factor_final, current_engine)

@@ -249,8 +249,8 @@ def run_trend_cycle(state: dict, daily_cache: dict, macro_context: dict = None) 
                         f"ADX: {adx:.1f} {'✓' if adx_ok else '✗'}"
                     )
 
-    total = state["capital"] + sum(
-        float(daily_cache[s]["close"].iloc[-1]) * p["size"]
+    total = state["capital"] + sum(  # BUG-22 : guard empty DataFrame pour éviter IndexError sur résumé final
+        (float(daily_cache[s]["close"].iloc[-1]) if not daily_cache[s].empty else p.get("entry", 0)) * p["size"]
         for s, p in state["positions"].items() if s in daily_cache
     )
     perf = (total - state["initial_capital"]) / state["initial_capital"] * 100

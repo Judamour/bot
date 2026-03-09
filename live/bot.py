@@ -126,6 +126,7 @@ def process_symbol(
         df = generate_signals(df)
         last = df.iloc[-1]
         current_price = float(last["close"])
+        low_price     = float(last["low"])   # utilisé pour stop loss intraday (même fix que Bot C)
         signal = int(last["signal"])
         atr = float(last["atr"])
         adx = float(last["adx"])
@@ -194,7 +195,7 @@ def process_symbol(
         reason = None
         exit_price = current_price
 
-        if current_price <= position["stop"]:
+        if low_price <= position["stop"]:  # BUG-24 Bot A : utiliser low pour capter les stops intraday
             reason = "stop_loss"
             exit_price = position["stop"]
         elif signal == -1:

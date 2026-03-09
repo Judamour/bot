@@ -17,8 +17,9 @@ def compute_rsi(series: pd.Series, length: int = 14) -> pd.Series:
     loss = -delta.clip(upper=0)
     avg_gain = gain.ewm(alpha=1 / length, adjust=False).mean()
     avg_loss = loss.ewm(alpha=1 / length, adjust=False).mean()
-    rs = avg_gain / avg_loss
-    return 100 - (100 / (1 + rs))
+    rs = avg_gain / avg_loss.replace(0, float("nan"))  # BUG-16 : éviter NaN quand avg_gain=0 ET avg_loss=0
+    rsi = 100 - (100 / (1 + rs))
+    return rsi.fillna(50.0)  # prix constant → RSI neutre 50 (ni surachat ni survente)
 
 
 def compute_atr(high: pd.Series, low: pd.Series, close: pd.Series, length: int = 14) -> pd.Series:
@@ -113,7 +114,10 @@ def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     df["volume_ma"] = vol.rolling(window=20, min_periods=5).mean()
     df["volume_ratio"] = (vol / df["volume_ma"]).ffill().fillna(1.0)
 
-    return df.dropna()
+    df = df.dropna()
+    if df.empty:
+        raise ValueError("Données OHLCV insuffisantes après calcul des indicateurs (trop peu de barres)")
+    return df
 
 
 def generate_signals(df: pd.DataFrame) -> pd.DataFrame:

@@ -196,7 +196,7 @@ def run_breakout_cycle(state: dict, daily_cache: dict, macro_context: dict = Non
 
             if breakout and adx_ok:
                 entry_price = current_price * (1 + config.SLIPPAGE)
-                stop_loss = entry_price - STOP_ATR_MULT * atr
+                stop_loss = max(entry_price * 0.01, entry_price - STOP_ATR_MULT * atr)  # BUG-21 : stop jamais négatif
                 size = _turtle_unit_size(state["capital"], atr, entry_price, effective_risk_pct)
 
                 if size <= 0:

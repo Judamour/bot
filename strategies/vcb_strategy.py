@@ -160,8 +160,9 @@ def run_vcb_cycle(state: dict, ohlcv_4h: dict, macro_context: dict = None) -> di
         if position:
             exit_reason = None
             exit_price = current_price
+            low_price = float(last["low"])  # BUG-24 : utiliser low pour capter les stops intraday (même fix que Bot C)
 
-            if current_price <= position["stop"]:
+            if low_price <= position["stop"]:
                 exit_reason = "trailing_stop"
                 exit_price = position["stop"]
 

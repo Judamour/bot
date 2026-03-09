@@ -253,6 +253,7 @@ def run():
     state_j = load_mr()
 
     _prev_budget = {}  # Track previous budget for change detection
+    z_summary = None   # BUG-01 : initialisé ici pour éviter NameError si Bot Z crashe au 1er cycle
 
     log(f"Bot A capital: {state_a['capital']:.2f}€ | Positions: {list(state_a['positions'].keys())}")
     log(f"Bot B capital: {state_b['capital']:.2f}€ | Positions: {list(state_b['positions'].keys())}")
