@@ -438,8 +438,8 @@ def api_portfolio():
     # Smooth transition state
     last_blended  = z_state.get("last_blended_weights", {})
     prev_smooth   = z_state.get("prev_engine_smooth", current_engine)
-    # last_alloc_weights = target before smoothing (for transition delta display)
-    last_alloc    = z_state.get("last_alloc_weights", {})
+    # target_capped_weights = cible après caps mais avant smooth (vraie cible atteignable)
+    last_alloc    = z_state.get("target_capped_weights", z_state.get("last_alloc_weights", {}))
 
     z_capital = z_state.get("z_capital", z_state.get("total_simulated_eur", 10000.0))
     initial   = z_state.get("initial_capital", 10000.0)

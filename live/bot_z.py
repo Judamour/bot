@@ -986,6 +986,8 @@ def run_bot_z_cycle(macro: dict, ohlcv: dict = None) -> dict:
 
     # 6a. Weight caps — évite sur-concentration (ex: Bot C à 64% en SHIELD)
     blended = _apply_weight_caps(blended)
+    # Sauvegarder la cible APRÈS caps (avant smooth) → dashboard transition exacte
+    state["target_capped_weights"] = dict(blended)
 
     # 6b. Transition smooth — interpolation progressive vers la cible
     #     Asymétrie : rapide en crise (SHIELD ×0.40/cycle), lent sur rebond (BULL ×0.20/cycle)

@@ -1258,8 +1258,11 @@ function renderAllocTable(d) {
     return;
   }
 
+  // Recalculer les % depuis le total réel dispatché (pas INITIAL_CAP statique)
+  const totalBudget = bots.reduce((sum, [, info]) => sum + (parseFloat(info.z_budget_eur) || 0), 0);
+
   tbody.innerHTML = bots.map(([bid, info]) => {
-    const pct = info.z_budget_pct || 0;
+    const pct = totalBudget > 0 ? (info.z_budget_eur / totalBudget * 100) : 0;
     const color = BOT_COLORS[bid] || '#888';
     const posArr = info.positions || [];
     const posHtml = posArr.length
@@ -1288,7 +1291,7 @@ function renderAllocTable(d) {
       <td>
         <div style="display:flex;align-items:center;gap:8px">
           <span>${fmt(pct,1)}%</span>
-          <div class="budget-bar-wrap"><div class="budget-bar-fill" style="width:${Math.min(100,pct*2.5)}%;background:${color}"></div></div>
+          <div class="budget-bar-wrap"><div class="budget-bar-fill" style="width:${Math.min(100,pct)}%;background:${color}"></div></div>
         </div>
       </td>
       <td style="color:var(--muted)">${fmt(info.z_weight_final,3)}</td>
