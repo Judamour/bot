@@ -682,13 +682,23 @@ def background_thread():
                     prices[symbol] = ticker["last"]
                 except Exception:
                     pass
-            # xStocks via Kraken (NVDAx/EUR...)
-            for symbol in config.XSTOCKS:
-                try:
-                    ticker = kraken.fetch_ticker(symbol)
-                    prices[symbol] = ticker["last"]
-                except Exception:
-                    pass
+            # xStocks via yfinance (Kraken ne reconnaît pas le format NVDAx/EUR)
+            # NVDAx/EUR → "NVDA" sur yfinance, USD converti via EUR=X
+            try:
+                import yfinance as _yf
+                eur_usd = _yf.Ticker("EURUSD=X").history(period="1d", interval="5m")
+                eur_rate = float(eur_usd["Close"].iloc[-1]) if not eur_usd.empty else 1.0
+                for symbol in config.XSTOCKS:
+                    try:
+                        ticker_sym = symbol.replace("x/EUR", "").replace("/EUR", "")
+                        hist = _yf.Ticker(ticker_sym).history(period="2d", interval="5m")
+                        if not hist.empty:
+                            price_usd = float(hist["Close"].iloc[-1])
+                            prices[symbol] = round(price_usd / eur_rate, 4)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
 
             if prices:
                 _live_prices.update(prices)
