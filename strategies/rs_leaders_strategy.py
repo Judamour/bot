@@ -207,6 +207,7 @@ def run_rs_leaders_cycle(state: dict, daily_cache: dict, macro_context: dict = N
     vix = macro.get("vix", 0.0)
     qqq_ok = macro.get("qqq_regime_ok", True)
     btc_bear = macro.get("btc_context", {}).get("btc_trend", "bull") == "bear"
+    engine = macro.get("bot_z_engine", "BALANCED")  # filtre régime Bot Z
 
     # ── 0. Hard stop + trailing stop — vérifiés à CHAQUE cycle ──────────────
     for symbol in list(state["positions"].keys()):
@@ -294,6 +295,9 @@ def run_rs_leaders_cycle(state: dict, daily_cache: dict, macro_context: dict = N
     )
 
     # ── 2. Filtre macro — suspend le rebalancement si risque élevé ───────────
+    if engine in ("SHIELD", "PRO"):
+        log(f"Engine={engine} — rebalancement suspendu (régime défensif Bot Z)", "WARN")
+        return state
     if vix > 30:
         log(f"VIX={vix:.1f} > 30 — rebalancement suspendu", "WARN")
         return state
@@ -351,7 +355,10 @@ def run_rs_leaders_cycle(state: dict, daily_cache: dict, macro_context: dict = N
         ind = indicators_map.get(symbol, {})
         entry_price = float(df["close"].iloc[-1]) * (1 + config.SLIPPAGE)
         annual_vol = ind.get("annual_vol", 0.5)
+        # PARITY : réduire l'exposition de 30% via vol cible plus conservatrice
+        vol_target = TARGET_VOL * (0.70 if engine == "PARITY" else 1.0)
         size = _vol_target_size(state["capital"], annual_vol, entry_price)
+        size *= (vol_target / TARGET_VOL)
 
         if size <= 0:
             log(f"{symbol} — Size=0", "WARN")

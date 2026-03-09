@@ -123,7 +123,9 @@ def _add_indicators(df):
 
 def run_vcb_cycle(state: dict, ohlcv_4h: dict, macro_context: dict = None) -> dict:
     """Run one cycle of the Volatility Compression Breakout strategy."""
-    vix = macro_context.get("vix", 0.0) if macro_context else 0.0
+    macro_context = macro_context or {}
+    vix = macro_context.get("vix", 0.0)
+    engine = macro_context.get("bot_z_engine", "BALANCED")  # filtre régime Bot Z
 
     for symbol in VCB_SYMBOLS:
         df = ohlcv_4h.get(symbol)
@@ -193,13 +195,20 @@ def run_vcb_cycle(state: dict, ohlcv_4h: dict, macro_context: dict = None) -> di
             if len(state["positions"]) >= MAX_POSITIONS:
                 continue
 
+            # Filtre engine Bot Z : bloquer nouveaux BUY en mode défensif
+            if engine in ("SHIELD", "PRO"):
+                log(f"{symbol} — BUY bloqué (engine={engine})")
+                continue
+
             trend_ok = current_price > sma200 and current_price > sma50
             compression_ok = atr_compressed and bb_pct < 0.20  # BB width dans les 20% les plus bas
             breakout_ok = current_price > breakout_high if breakout_high > 0 else False
 
             if trend_ok and compression_ok and breakout_ok:
                 entry_price = current_price * (1 + config.SLIPPAGE)
-                dollar_size = state["capital"] * POSITION_PCT
+                # PARITY : réduire l'exposition de 30%
+                size_factor = 0.70 if engine == "PARITY" else 1.0
+                dollar_size = state["capital"] * POSITION_PCT * size_factor
                 size = dollar_size / (entry_price * (1 + config.EXCHANGE_FEE))
                 stop_loss = round(entry_price - ATR_STOP_ENTRY * atr, 4)
                 fee = entry_price * size * config.EXCHANGE_FEE

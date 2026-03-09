@@ -124,6 +124,9 @@ def run_mr_cycle(state: dict, daily_cache: dict, macro_context: dict = None) -> 
     Cycle Bot J — Mean Reversion.
     daily_cache : {symbol: DataFrame OHLCV daily}
     """
+    macro_context = macro_context or {}
+    engine = macro_context.get("bot_z_engine", "BALANCED")  # filtre régime Bot Z
+
     # ── 0. Gestion stops et sorties sur positions ouvertes ────────────────────
     for symbol in list(state["positions"].keys()):
         pos = state["positions"][symbol]
@@ -185,6 +188,10 @@ def run_mr_cycle(state: dict, daily_cache: dict, macro_context: dict = None) -> 
             )
 
     # ── 1. Chercher des signaux d'entrée ──────────────────────────────────────
+    if engine in ("SHIELD", "PRO"):
+        _log(f"Engine={engine} — nouveaux BUY bloqués (régime défensif Bot Z)", "WARN")
+        return state
+
     for symbol in config.SYMBOLS:
         if symbol in state["positions"]:
             continue  # déjà en position
@@ -215,10 +222,11 @@ def run_mr_cycle(state: dict, daily_cache: dict, macro_context: dict = None) -> 
             if risk <= 0:
                 continue
 
-            # Sizing : 0.5% capital risqué, max 10% capital
+            # Sizing : 0.5% capital risqué, max 10% capital | PARITY : ×0.70
+            size_factor = 0.70 if engine == "PARITY" else 1.0
             size = min(
-                state["capital"] * RISK_PCT / risk,
-                state["capital"] * MAX_POS_PCT / entry_price,
+                state["capital"] * RISK_PCT * size_factor / risk,
+                state["capital"] * MAX_POS_PCT * size_factor / entry_price,
             )
             size = max(size, 0)
             if size <= 0:

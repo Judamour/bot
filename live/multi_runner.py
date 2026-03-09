@@ -348,6 +348,9 @@ def run():
             except Exception as ez:
                 log(f"Bot Z erreur (non bloquant): {ez}", "WARN")
 
+            # Injecter l'engine Bot Z dans macro pour H/I/J (filtre régime sans dispatch capital)
+            macro["bot_z_engine"] = z_summary.get("current_engine", "BALANCED") if z_summary else "BALANCED"
+
             # ── 5. Bot A: Supertrend + filters ────────────────────────────────
             log(f"\n{Fore.CYAN}--- Bot A: Supertrend+MR ---{Style.RESET_ALL}")
 
