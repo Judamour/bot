@@ -1419,14 +1419,22 @@ async function loadStrategies() {
   try {
     const r = await fetch('/api/portfolio');
     const d = await r.json();
-    renderStrategyCards(d.strategies || {});
+    renderStrategyCards(d.strategies || {}, d.z_capital_eur);
     renderObservationBots(d.observation_bots || {}, d.current_engine);
   } catch(e) { console.error(e); }
 }
 
-function renderStrategyCards(strategies) {
+function renderStrategyCards(strategies, zCapital) {
   const grid = document.getElementById('strategy-cards-grid');
   const bots = ['a','b','c','g'];
+
+  // Recalcul % depuis total budget réel dispatché
+  const totalBudget = bots.reduce((s, b) => s + (parseFloat((strategies[b]||{}).z_budget_eur)||0), 0);
+
+  // Titre dynamique
+  const subtitle = document.querySelector('#tab-strategies .section-row + div');
+  if (subtitle) subtitle.textContent = 'Budget dispatché depuis ' + fmtEur(zCapital || totalBudget);
+
   grid.innerHTML = bots.map(bid => {
     const s = strategies[bid] || {};
     const color = BOT_COLORS[bid] || '#888';
@@ -1434,6 +1442,7 @@ function renderStrategyCards(strategies) {
     const type = BOT_TYPES[bid] || '';
     const perf = s.pnl_pct || 0;
     const chartId = 'strat-chart-' + bid;
+    const pct = totalBudget > 0 ? (s.z_budget_eur / totalBudget * 100) : 0;
 
     return `<div class="strategy-card">
       <div class="strategy-card-header">
@@ -1450,8 +1459,8 @@ function renderStrategyCards(strategies) {
           <div class="strategy-budget-val">${fmtEur(s.z_budget_eur)}</div>
         </div>
         <div style="text-align:right">
-          <div class="strategy-budget-label">Allocation</div>
-          <div style="font-size:13px;font-weight:700;color:${color}">${fmt(s.z_budget_pct,1)}%</div>
+          <div class="strategy-budget-label">Allocation réelle</div>
+          <div style="font-size:13px;font-weight:700;color:${color}">${fmt(pct,1)}%</div>
         </div>
       </div>
 
