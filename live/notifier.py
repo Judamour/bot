@@ -114,7 +114,9 @@ def clear_api_alert(api: str):
     )
 
 
-def notify_z_dispatch(budget: dict, z_capital: float, engine: str):
+def notify_z_dispatch(budget: dict, z_capital: float, engine: str,
+                      prev_weights: dict = None, target_weights: dict = None,
+                      weight_caps_hit: list = None):
     """Notifie le dispatch de budget Bot Z vers les sub-bots."""
     total_dispatched = sum(budget.values())
     lines = [f"💰 <b>Bot Z — Budget dispatché</b>",
@@ -123,8 +125,62 @@ def notify_z_dispatch(budget: dict, z_capital: float, engine: str):
     for bot_id, amount in sorted(budget.items()):
         pct = amount / z_capital * 100 if z_capital > 0 else 0
         bar = "█" * int(pct / 10) + "░" * (10 - int(pct / 10))
-        lines.append(f"Bot {bot_id.upper()}: <b>{amount:.0f}€</b> ({pct:.0f}%) {bar}")
+        cap_marker = " [CAP]" if weight_caps_hit and bot_id in weight_caps_hit else ""
+        lines.append(f"Bot {bot_id.upper()}: <b>{amount:.0f}€</b> ({pct:.0f}%) {bar}{cap_marker}")
+
+    # Transition info si les poids bougent encore
+    if prev_weights and target_weights:
+        transitioning = []
+        for b in sorted(prev_weights.keys()):
+            prev = prev_weights.get(b, 0) * 100
+            tgt  = target_weights.get(b, 0) * 100
+            diff = tgt - prev
+            if abs(diff) >= 1.5:  # Seuil : 1.5% de mouvement restant
+                arrow = "↗" if diff > 0 else "↘"
+                transitioning.append(f"{b.upper()}: {prev:.0f}%→{tgt:.0f}% {arrow}")
+        if transitioning:
+            lines.append(f"\n🔄 <i>Transition en cours: {' | '.join(transitioning)}</i>")
+
     lines.append(f"\nTotal: <b>{total_dispatched:.0f}€</b> / {z_capital:.0f}€")
+    notify("\n".join(lines))
+
+
+def notify_cycle_summary(engine: str, vix: float, regime: str, z_capital: float,
+                         perf_pct: float, budget: dict,
+                         obs_bots: dict = None):
+    """
+    Résumé compact envoyé à chaque cycle Bot Z.
+    obs_bots : {h: {trades, positions, blocked}, i: {...}, j: {...}}
+    """
+    perf_sign = "+" if perf_pct >= 0 else ""
+    engine_icons = {"BULL": "🟢", "BALANCED": "🔵", "PARITY": "🟡", "SHIELD": "🔴"}
+    icon = engine_icons.get(engine, "⚪")
+
+    lines = [
+        f"{icon} <b>Bot Z — Cycle</b> [{engine}]",
+        f"VIX: <b>{vix:.1f}</b> | Régime: {regime} | Capital: <b>{z_capital:.0f}€</b> ({perf_sign}{perf_pct:.2f}%)",
+    ]
+
+    # Budget dispatch compact
+    if budget:
+        dispatch_parts = [f"{b.upper()}:{v:.0f}€" for b, v in sorted(budget.items())]
+        lines.append("Dispatch: " + " | ".join(dispatch_parts))
+
+    # Observation bots H/I/J
+    if obs_bots:
+        obs_lines = []
+        for bid, info in sorted(obs_bots.items()):
+            blocked = info.get("blocked", False)
+            trades = info.get("total_trades", 0)
+            positions = info.get("open_trades", 0)
+            if blocked:
+                obs_lines.append(f"  {bid.upper()}: ⛔ bloqué ({engine})")
+            else:
+                obs_lines.append(f"  {bid.upper()}: {positions} pos | {trades} trades")
+        if obs_lines:
+            lines.append("\n👁 <i>Observation (H/I/J):</i>")
+            lines.extend(obs_lines)
+
     notify("\n".join(lines))
 
 

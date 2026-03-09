@@ -536,11 +536,12 @@
             <th>Poids régime</th>
             <th>Qualité (P&L)</th>
             <th>Vol</th>
+            <th>Transition</th>
             <th>Positions</th>
           </tr>
         </thead>
         <tbody id="alloc-tbody">
-          <tr><td colspan="7" style="color:var(--muted); text-align:center; padding:20px">Chargement...</td></tr>
+          <tr><td colspan="8" style="color:var(--muted); text-align:center; padding:20px">Chargement...</td></tr>
         </tbody>
       </table>
     </div>
@@ -586,6 +587,24 @@
     <div class="strategy-card" style="opacity:0.4"></div>
     <div class="strategy-card" style="opacity:0.4"></div>
     <div class="strategy-card" style="opacity:0.4"></div>
+  </div>
+
+  <!-- Observation bots H/I/J -->
+  <div class="section-row" style="margin-top:24px">
+    <div class="section-title">Observation — Candidats Bot Z</div>
+    <div class="section-line"></div>
+    <div class="lab-badge" style="background:rgba(0,200,255,0.08);color:var(--accent);border-color:rgba(0,200,255,0.25)">1 000€ autonome</div>
+  </div>
+
+  <div style="background:rgba(0,200,255,0.03); border:1px solid rgba(0,200,255,0.15); border-radius:var(--radius); padding:12px 16px; margin-bottom:16px; font-size:12px; color:var(--muted); line-height:1.7;">
+    Les bots H (VCB Breakout), I (RS Leaders) et J (Mean Reversion) collectent des données de performance avec 1 000€ chacun.
+    Ils sont <strong style="color:var(--text)">pilotés par le régime Bot Z</strong> (BUY bloqué en SHIELD/PRO)
+    mais <strong style="color:var(--text)">indépendants du dispatch capital</strong>.
+    Intégration à Bot Z décidée à la revue <strong style="color:var(--accent)">2026-04-30</strong> selon MCPS.
+  </div>
+
+  <div class="grid-3" id="obs-cards-grid">
+    <!-- filled by JS -->
   </div>
 
 </div><!-- /tab-strategies -->
@@ -1142,11 +1161,13 @@ function renderPortfolio(d) {
 
 function renderAllocTable(d) {
   const strategies = d.strategies || {};
+  const lastBlended = d.last_blended_weights || {};   // poids actuels (après smooth)
+  const targetWeights = d.target_weights || {};        // cible (avant smooth)
 
   const tbody = document.getElementById('alloc-tbody');
   const bots = Object.entries(strategies);
   if (!bots.length) {
-    tbody.innerHTML = '<tr><td colspan="7" style="color:var(--muted);text-align:center;padding:20px">En attente du premier cycle Bot Z...</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="8" style="color:var(--muted);text-align:center;padding:20px">En attente du premier cycle Bot Z...</td></tr>';
     return;
   }
 
@@ -1158,6 +1179,22 @@ function renderAllocTable(d) {
       ? posArr.slice(0,4).map(p => `<span class="pos-chip">${p.symbol || p}</span>`).join('')
       : '<span style="color:var(--muted)">—</span>';
     const botVol = info.bot_vol != null ? fmt(info.bot_vol * 100, 1) + '%' : '—';
+
+    // Transition column: current blended weight → target weight
+    const currW = (lastBlended[bid] || 0) * 100;
+    const tgtW  = (targetWeights[bid] || 0) * 100;
+    const delta = tgtW - currW;
+    let transHtml = '<span style="color:var(--muted)">—</span>';
+    if (currW > 0 || tgtW > 0) {
+      if (Math.abs(delta) >= 1.5) {
+        const arrow = delta > 0 ? '↗' : '↘';
+        const arrowColor = delta > 0 ? 'var(--green)' : '#ff7b72';
+        transHtml = `<span style="color:var(--muted);font-size:11px">${fmt(currW,0)}%</span> <span style="color:${arrowColor}">${arrow}</span> <span style="font-weight:600">${fmt(tgtW,0)}%</span>`;
+      } else {
+        transHtml = `<span style="font-size:11px;color:var(--muted)">${fmt(currW,0)}% ✓</span>`;
+      }
+    }
+
     return `<tr>
       <td><div class="bot-name-cell"><div class="bot-dot" style="background:${color}"></div>${BOT_NAMES[bid] || bid}</div></td>
       <td style="font-weight:700;color:var(--accent)">${fmtEur(info.z_budget_eur)}</td>
@@ -1170,6 +1207,7 @@ function renderAllocTable(d) {
       <td style="color:var(--muted)">${fmt(info.z_weight_final,3)}</td>
       <td><span style="color:var(--text)">${fmt(info.pnl_pct,2)}% (${fmtEur(info.pnl_eur)})</span></td>
       <td style="color:var(--purple)">${botVol}</td>
+      <td style="white-space:nowrap">${transHtml}</td>
       <td><div class="pos-chips">${posHtml}</div></td>
     </tr>`;
   }).join('');
@@ -1292,6 +1330,7 @@ async function loadStrategies() {
     const r = await fetch('/api/portfolio');
     const d = await r.json();
     renderStrategyCards(d.strategies || {});
+    renderObservationBots(d.observation_bots || {}, d.current_engine);
   } catch(e) { console.error(e); }
 }
 
@@ -1388,6 +1427,68 @@ function renderStrategyCards(strategies) {
       }
     });
   });
+}
+
+// ── Observation bots H/I/J ───────────────────────────────────────────────────
+
+function renderObservationBots(obsBots, engine) {
+  const grid = document.getElementById('obs-cards-grid');
+  if (!grid) return;
+  const botIds = ['h', 'i', 'j'];
+  const obsDesc = {
+    h: 'VCB Breakout — compression ATR+BB → explosion',
+    i: 'RS Leaders — score momentum multi-période top 3',
+    j: 'Mean Reversion — RSI(2) + Bollinger + SMA200'
+  };
+  const BLOCKED_ENGINES = ['SHIELD', 'PRO'];
+  const eng = normalizeEngine(engine || 'BALANCED');
+  const globalBlocked = BLOCKED_ENGINES.includes(eng);
+
+  grid.innerHTML = botIds.map(bid => {
+    const b = (obsBots || {})[bid] || {};
+    const color = BOT_COLORS[bid] || '#888';
+    const name = BOT_NAMES[bid] || bid.toUpperCase();
+    const perf = b.pnl_pct || 0;
+    const blocked = b.blocked || globalBlocked;
+    const statusColor = blocked ? '#ff7b72' : 'var(--green)';
+    const statusLabel = blocked ? `⛔ Bloqué (${eng})` : '✅ Actif';
+
+    return `<div class="strategy-card" style="border-color:${color}22">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+        <div class="strategy-card-header">
+          <div class="strategy-icon" style="background:${color}22;color:${color}">${bid.toUpperCase()}</div>
+          <div>
+            <div class="strategy-name">${name}</div>
+            <div class="strategy-type" style="font-size:10px">${obsDesc[bid] || ''}</div>
+          </div>
+        </div>
+        <div style="font-size:10px;font-weight:700;padding:3px 8px;border-radius:99px;background:${statusColor}22;color:${statusColor};border:1px solid ${statusColor}44;white-space:nowrap">${statusLabel}</div>
+      </div>
+      <div class="strategy-kpis">
+        <div>
+          <div class="strategy-kpi-val ${perfClass(perf)}">${fmtPct(perf)}</div>
+          <div class="strategy-kpi-lbl">Performance</div>
+        </div>
+        <div>
+          <div class="strategy-kpi-val">${fmtEur(b.total_value || 0)}</div>
+          <div class="strategy-kpi-lbl">Valeur</div>
+        </div>
+        <div>
+          <div class="strategy-kpi-val">${b.open_trades || 0}</div>
+          <div class="strategy-kpi-lbl">Positions</div>
+        </div>
+        <div>
+          <div class="strategy-kpi-val">${fmt(b.win_rate, 1)}%</div>
+          <div class="strategy-kpi-lbl">Win Rate</div>
+        </div>
+      </div>
+      <div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;font-size:11px;color:var(--muted)">
+        <span>${b.total_trades || 0} trades fermés</span>
+        <span style="color:var(--text)">${fmtEur(b.pnl_eur || 0)}</span>
+      </div>
+      ${(b.positions || []).length ? `<div class="pos-chips" style="margin-top:8px">${(b.positions||[]).slice(0,4).map(p=>`<span class="pos-chip">${p.symbol||p}</span>`).join('')}</div>` : ''}
+    </div>`;
+  }).join('');
 }
 
 // ── Load Lab LLM ─────────────────────────────────────────────────────────────

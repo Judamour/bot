@@ -31,9 +31,10 @@ _BOT_PATHS = {
     "g": os.path.join(BASE_DIR, "logs", "trend",      "state.json"),
     "h": os.path.join(BASE_DIR, "logs", "vcb",        "state.json"),
     "i": os.path.join(BASE_DIR, "logs", "rs_leaders", "state.json"),
+    "j": os.path.join(BASE_DIR, "logs", "mean_reversion", "state.json"),
 }
-_BOT_NAMES  = {"a": "Supertrend+MR", "b": "Momentum", "c": "Breakout", "d": "DeepSeek R1", "e": "Claude Sonnet", "f": "Claude Haiku", "g": "Trend Multi-Asset", "h": "VCB Breakout", "i": "RS Leaders"}
-_BOT_COLORS = {"a": "#58a6ff", "b": "#3fb950", "c": "#ffa657", "d": "#c792ea", "e": "#ff7b72", "f": "#f7c948", "g": "#39d353", "h": "#e06c75", "i": "#79c0ff"}
+_BOT_NAMES  = {"a": "Supertrend+MR", "b": "Momentum", "c": "Breakout", "d": "DeepSeek R1", "e": "Claude Sonnet", "f": "Claude Haiku", "g": "Trend Multi-Asset", "h": "VCB Breakout", "i": "RS Leaders", "j": "Mean Reversion"}
+_BOT_COLORS = {"a": "#58a6ff", "b": "#3fb950", "c": "#ffa657", "d": "#c792ea", "e": "#ff7b72", "f": "#f7c948", "g": "#39d353", "h": "#e06c75", "i": "#79c0ff", "j": "#b3d9ff"}
 _BOT_Z_FILE = os.path.join(BASE_DIR, "logs", "bot_z", "state.json")
 MULTI_LOG   = os.path.join(BASE_DIR, "logs", "multi_runner.log")
 MULTI_INITIAL_CAPITAL = 1000.0
@@ -410,29 +411,63 @@ def api_portfolio():
             "initial_capital": metrics["initial_capital"],
         }
 
+    # Bots d'observation H/I/J (capital autonome 1000€, évaluation intégration Bot Z)
+    _OBS_BLOCKED_ENGINES = {"SHIELD", "PRO"}
+    current_engine = z_state.get("current_engine", "BALANCED")
+    observation_bots = {}
+    for bot_id in ["h", "i", "j"]:
+        obs_state = load_bot_state(bot_id)
+        obs_metrics = compute_metrics(obs_state, _live_prices)
+        observation_bots[bot_id] = {
+            "id":           bot_id,
+            "name":         _BOT_NAMES.get(bot_id, bot_id.upper()),
+            "color":        _BOT_COLORS.get(bot_id, "#888"),
+            "capital":      obs_metrics["capital"],
+            "total_value":  obs_metrics["total_value"],
+            "pnl_pct":      obs_metrics["pnl_pct"],
+            "pnl_eur":      obs_metrics["pnl_eur"],
+            "win_rate":     obs_metrics["win_rate"],
+            "open_trades":  obs_metrics["open_trades"],
+            "total_trades": obs_metrics["total_trades"],
+            "positions":    obs_metrics["positions"],
+            "equity_curve": compute_equity_curve(obs_state),
+            "blocked":      current_engine in _OBS_BLOCKED_ENGINES,
+            "engine_status": "BLOQUÉ" if current_engine in _OBS_BLOCKED_ENGINES else "ACTIF",
+        }
+
+    # Smooth transition state
+    last_blended  = z_state.get("last_blended_weights", {})
+    prev_smooth   = z_state.get("prev_engine_smooth", current_engine)
+    # last_alloc_weights = target before smoothing (for transition delta display)
+    last_alloc    = z_state.get("last_alloc_weights", {})
+
     z_capital = z_state.get("z_capital", z_state.get("total_simulated_eur", 10000.0))
     initial   = z_state.get("initial_capital", 10000.0)
     perf_pct  = z_state.get("perf_pct", (z_capital - initial) / initial * 100 if initial else 0)
 
     return jsonify({
-        "z_capital_eur":   round(z_capital, 2),
-        "initial_capital": round(initial, 2),
-        "perf_pct":        round(perf_pct, 2),
-        "pnl_eur":         round(z_capital - initial, 2),
-        "port_dd":         z_state.get("port_dd", 0),
-        "cb_factor":       z_state.get("cb_factor", 1.0),
-        "cb_active":       z_state.get("cb_factor", 1.0) < 1.0,
-        "current_engine":  z_state.get("current_engine", "OMEGA"),
-        "pending_engine":  z_state.get("pending_engine", "OMEGA"),
-        "days_pending":    z_state.get("days_pending", 0),
-        "regime":          z_state.get("last_regime", "RANGE"),
-        "vix":             z_state.get("last_regime_info", {}).get("vix", 0),
-        "warnings":        z_state.get("last_warnings", []),
-        "budget":          budget,
-        "strategies":      strategies,
-        "days_running":    z_state.get("days_running", 0),
-        "paper_start":     z_state.get("paper_start_date", ""),
-        "paper_review":    z_state.get("paper_review_date", ""),
+        "z_capital_eur":       round(z_capital, 2),
+        "initial_capital":     round(initial, 2),
+        "perf_pct":            round(perf_pct, 2),
+        "pnl_eur":             round(z_capital - initial, 2),
+        "port_dd":             z_state.get("port_dd", 0),
+        "cb_factor":           z_state.get("cb_factor", 1.0),
+        "cb_active":           z_state.get("cb_factor", 1.0) < 1.0,
+        "current_engine":      current_engine,
+        "pending_engine":      z_state.get("pending_engine", current_engine),
+        "days_pending":        z_state.get("days_pending", 0),
+        "regime":              z_state.get("last_regime", "RANGE"),
+        "vix":                 z_state.get("last_regime_info", {}).get("vix", 0),
+        "warnings":            z_state.get("last_warnings", []),
+        "budget":              budget,
+        "strategies":          strategies,
+        "observation_bots":    observation_bots,
+        "last_blended_weights": last_blended,
+        "target_weights":      last_alloc,
+        "prev_engine_smooth":  prev_smooth,
+        "days_running":        z_state.get("days_running", 0),
+        "paper_start":         z_state.get("paper_start_date", ""),
+        "paper_review":        z_state.get("paper_review_date", ""),
     })
 
 
