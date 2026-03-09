@@ -71,8 +71,7 @@ def ask_claude(
     if funding_rate != 0.0:
         pct = funding_rate * 100
         if funding_rate > 0.001:
-            funding_label = "DANGER squeeze" if funding_rate > 0.001 else "longs surexposés ⚠"
-            # 0.001 = 0.1%, 0.0003 = 0.03%
+            # BUG-30 : dead code supprimé (première affectation était immédiatement écrasée)
             funding_label = "DANGER squeeze ⚠" if funding_rate > 0.001 else "longs surexposés" if funding_rate > 0.0003 else "neutre"
         elif funding_rate < -0.0001:
             funding_label = "shorts surexposés (signal haussier contrarian)"
@@ -119,7 +118,7 @@ def ask_claude(
 
     prompt = f"""Tu es un trader algorithmique. Signal BUY technique sur {symbol} ({category}).
 
-HARD FILTERS ✓ (3/3 validés automatiquement) :
+HARD FILTERS ✓ (7/7 validés automatiquement) :
 • Supertrend flip ▲ (retournement haussier) ✓
 • RSI {rsi:.1f} < 75 (pas de surachat extrême) ✓
 • Prix {price:.4f}€ > EMA200 {ema200:.4f}€ ({dist_ema200:+.1f}%) ✓

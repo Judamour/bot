@@ -37,8 +37,7 @@ MAX_DRAWDOWN = -0.15    # Coupe-circuit si capital chute de -15% depuis le dépa
 SECTORS = {
     "NVDAx/EUR": "tech",       "AAPLx/EUR": "tech",
     "MSFTx/EUR": "tech",       "METAx/EUR": "tech",
-    "GOOGx/EUR": "tech",       "AMZNx/EUR": "ecommerce",
-    "TSLAx/EUR": "auto",
+    "GOOGx/EUR": "tech",       # AMZNx et TSLAx retirés de XSTOCKS (BUG-36 : dead code supprimé)
     "PLTRx/EUR": "ai_data",
     "AMDx/EUR":  "semis",      "AVGOx/EUR": "semis",
     "GLDx/EUR":  "gold",       "NFLXx/EUR": "media",

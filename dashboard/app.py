@@ -134,12 +134,13 @@ def compute_metrics(state: dict, live_prices: dict) -> dict:
     # Avg trade
     avg_trade = round(sum(t.get("pnl", 0) for t in trades) / len(trades), 2) if trades else 0.0
 
-    # Sharpe ratio (annualisé, approximatif sur les PnL des trades)
-    pnls = [t.get("pnl", 0) for t in trades]
-    if len(pnls) > 1:
-        avg_pnl = sum(pnls) / len(pnls)
-        std_pnl = (sum((p - avg_pnl) ** 2 for p in pnls) / (len(pnls) - 1)) ** 0.5
-        sharpe = round(avg_pnl / std_pnl * (252 ** 0.5), 2) if std_pnl > 0 else 0.0
+    # Sharpe ratio (annualisé, normalisé par capital initial — BUG-35 : PnL % pas PnL €)
+    init_cap = state.get("initial_capital", 1000.0)
+    pnl_pcts = [t.get("pnl", 0) / max(init_cap, 1) for t in trades]
+    if len(pnl_pcts) > 1:
+        avg_r = sum(pnl_pcts) / len(pnl_pcts)
+        std_r = (sum((r - avg_r) ** 2 for r in pnl_pcts) / (len(pnl_pcts) - 1)) ** 0.5
+        sharpe = round(avg_r / std_r * (252 ** 0.5), 2) if std_r > 0 else 0.0
     else:
         sharpe = 0.0
 
@@ -206,11 +207,16 @@ def api_health():
     last_analysis = None
     if os.path.exists(LOG_FILE):
         try:
-            with open(LOG_FILE) as f:
-                for line in reversed(f.readlines()):
-                    if "Analyse en cours" in line:
-                        last_analysis = line.strip()[:19]
-                        break
+            with open(LOG_FILE, "rb") as f:  # BUG-33 : lecture tail sans charger tout en RAM
+                        f.seek(0, 2)
+                        size = f.tell()
+                        chunk = min(size, 8192)
+                        f.seek(-chunk, 2)
+                        tail = f.read(chunk).decode("utf-8", errors="replace")
+                        for line in reversed(tail.splitlines()):
+                            if "Analyse en cours" in line:
+                                last_analysis = line.strip()[:19]
+                                break
         except Exception:
             pass
     # Prochain cycle (heures UTC fixes : 03 07 11 15 19 23)
@@ -498,13 +504,10 @@ def api_bot_z_history():
                         pass
         except Exception:
             pass
-    # Déduplique par date (garde dernier point par jour)
-    by_day = {}
-    for h in history:
-        day = h["ts"][:10]
-        by_day[day] = h
-    daily = sorted(by_day.values(), key=lambda x: x["ts"])
-    return jsonify({"history": daily, "count": len(daily)})
+    # BUG-34 : garde tous les points (6 cycles/jour) — pas de déduplication qui écrase
+    # Le dashboard JS gère l'affichage intraday. On retourne max 200 points pour perf.
+    history_sorted = sorted(history, key=lambda x: x["ts"])
+    return jsonify({"history": history_sorted[-200:], "count": len(history_sorted)})
 
 
 @app.route("/api/trades")

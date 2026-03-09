@@ -180,7 +180,7 @@ def run_momentum_cycle(state: dict, daily_cache: dict, macro_context: dict = Non
     scores = {}
     for symbol in config.SYMBOLS:
         score = compute_momentum_score(symbol, daily_cache)
-        if score == score:  # not NaN
+        if score is not None and score == score:  # BUG-19 : not NaN (score==score est False pour NaN)
             scores[symbol] = score
 
     # ── 3. Rank — keep only positive absolute momentum ──

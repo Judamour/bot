@@ -252,8 +252,9 @@ def run():
     state_i = load_rsl()
     state_j = load_mr()
 
-    _prev_budget = {}  # Track previous budget for change detection
-    z_summary = None   # BUG-01 : initialisé ici pour éviter NameError si Bot Z crashe au 1er cycle
+    _prev_budget   = {}   # Track previous budget for change detection
+    z_summary      = None # BUG-01 : initialisé ici pour éviter NameError si Bot Z crashe au 1er cycle
+    z_budget_alloc = {}   # BUG-03 : initialisé ici pour éviter spam Telegram après crash Bot Z
 
     log(f"Bot A capital: {state_a['capital']:.2f}€ | Positions: {list(state_a['positions'].keys())}")
     log(f"Bot B capital: {state_b['capital']:.2f}€ | Positions: {list(state_b['positions'].keys())}")
@@ -385,6 +386,7 @@ def run():
                     macro_news=macro_news,
                     qqq_regime_ok=qqq_ok,
                     qqq_description=qqq_desc,
+                    ohlcv_daily=ohlcv_daily,  # BUG-11 : évite fetch réseau redondant dans _confirm_daily_trend
                 )
                 time.sleep(1)
 

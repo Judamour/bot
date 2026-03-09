@@ -124,7 +124,8 @@ def notify_z_dispatch(budget: dict, z_capital: float, engine: str,
              ""]
     for bot_id, amount in sorted(budget.items()):
         pct = amount / z_capital * 100 if z_capital > 0 else 0
-        bar = "█" * int(pct / 10) + "░" * (10 - int(pct / 10))
+        filled = min(10, max(0, int(pct / 10)))  # BUG-31 : clamp entre 0 et 10 (évite barre cassée si pct>100%)
+        bar = "█" * filled + "░" * (10 - filled)
         cap_marker = " [CAP]" if weight_caps_hit and bot_id in weight_caps_hit else ""
         lines.append(f"Bot {bot_id.upper()}: <b>{amount:.0f}€</b> ({pct:.0f}%) {bar}{cap_marker}")
 

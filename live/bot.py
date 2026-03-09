@@ -118,6 +118,7 @@ def process_symbol(
     macro_news: list = None,
     qqq_regime_ok: bool = True,
     qqq_description: str = "N/A",
+    ohlcv_daily: dict = None,  # BUG-11 : cache daily passé depuis multi_runner pour éviter fetch redondant
 ) -> dict:
     """Analyse un symbole et exécute les ordres si nécessaire."""
     try:
@@ -237,9 +238,8 @@ def process_symbol(
                 "BUY" if pnl > 0 else "SELL",
             )
             # ── Notification Telegram ──
-            if reason == "take_profit":
-                notify(f"✅ <b>{symbol}</b> TP +{pnl:.2f}€ ({pnl_r:+.1f}R)")
-            elif reason == "stop_loss":
+            # BUG-13 : "take_profit" jamais généré (pas de TP hard dans cette stratégie) — cas absorbé par else
+            if reason == "stop_loss":
                 notify(f"🔴 <b>{symbol}</b> SL {pnl:.2f}€ ({pnl_r:+.1f}R)")
             else:
                 notify(f"⏹ <b>{symbol}</b> EXIT [{reason}] {pnl:+.2f}€ ({pnl_r:+.1f}R)")
@@ -285,7 +285,7 @@ def process_symbol(
                 return state
 
         # Confirmation multi-timeframe (1d) — informatif pour Claude, non bloquant
-        ok_1d, reason_1d = _confirm_daily_trend(symbol)
+        ok_1d, reason_1d = _confirm_daily_trend(symbol, ohlcv_daily=ohlcv_daily)
         log(f"{symbol} — MTF 1d: {'✓' if ok_1d else '⚠'} {reason_1d}", "INFO")
         log_signal("MTF_FILTER", symbol, {"ok_1d": ok_1d, "reason": reason_1d, "price": current_price})
         # Claude décide — pas de blocage hard sur le MTF
@@ -653,7 +653,7 @@ def _update_momentum_filter(state: dict) -> dict:
         result[symbol] = ok
         if not ok:
             excluded.append(f"{symbol} ({ret*100:.1f}%)")
-        time.sleep(1)
+        # BUG-12 : sleep(1) supprimé — tourne 1x/semaine, pas de rate limiting nécessaire
 
     if excluded:
         msg = f"Momentum filter — Exclus (ret 90j < 0): {', '.join(excluded)}"
@@ -667,13 +667,16 @@ def _update_momentum_filter(state: dict) -> dict:
     return result
 
 
-def _confirm_daily_trend(symbol: str) -> tuple:
+def _confirm_daily_trend(symbol: str, ohlcv_daily: dict = None) -> tuple:
     """
     Confirmation multi-timeframe : vérifie que la tendance 1d valide le signal 4h.
     Retourne (ok: bool, raison: str). Permissif si données indisponibles.
+    BUG-11 : utilise le cache ohlcv_daily de multi_runner si disponible (évite fetch réseau redondant).
     """
     try:
-        df = fetch_ohlcv(symbol, "1d", days=250)
+        df = (ohlcv_daily or {}).get(symbol) if ohlcv_daily else None
+        if df is None:
+            df = fetch_ohlcv(symbol, "1d", days=250)
         df = add_indicators(df)
         last = df.iloc[-1]
         st_up = int(last["supertrend_dir"]) == 1

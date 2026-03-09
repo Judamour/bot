@@ -235,6 +235,8 @@ def run_vcb_cycle(state: dict, ohlcv_4h: dict, macro_context: dict = None) -> di
                     f"BB_pct: {bb_pct:.1%} | VIX: {vix:.1f}",
                     "BUY",
                 )
+                from live.notifier import notify  # BUG-25 : notification Telegram manquante sur BUY Bot H
+                notify(f"📈 <b>Bot H (VCB)</b> BUY {symbol} | {entry_price:.4f}€ | SL: {stop_loss:.4f}€")
             else:
                 # Log si trend OK mais compression pas encore là (utile pour surveiller)
                 if trend_ok and not compression_ok:

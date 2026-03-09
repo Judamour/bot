@@ -554,18 +554,21 @@ def compute_btc_realized_vol(ohlcv: dict) -> float:
     return max(0.0, min(5.0, annual_vol))
 
 
-def compute_allocation_drift(target_weights: dict, all_states: dict) -> float:
+def compute_allocation_drift(target_weights: dict, all_states: dict, mtm_prices: dict = None) -> float:
     """
     Mesure l'écart entre allocation cible (Bot Z) et allocation réelle (sub-bots).
     drift = sum(|target_weight[b] - actual_weight[b]|) pour b in VALID_BOTS
     Valide que backtest ≈ paper live. Drift > 0.20 = warning.
+    BUG-08 : utilise les prix MTM (marché) si disponibles, pas uniquement le prix d'entrée.
     """
+    mtm_prices = mtm_prices or {}
     actual_values = {}
     total_actual = 0.0
     for bot_id, state in all_states.items():
         val = state.get("capital", 1000.0)
-        for pos in state.get("positions", {}).values():
-            val += pos.get("entry", 0) * pos.get("size", 0)
+        for sym, pos in state.get("positions", {}).items():
+            price = mtm_prices.get(sym, pos.get("entry", 0))
+            val += price * pos.get("size", 0)
         actual_values[bot_id] = val
         total_actual += val
 
@@ -1015,7 +1018,7 @@ def run_bot_z_cycle(macro: dict, ohlcv: dict = None) -> dict:
 
     # 7. Analyse exposition croisée + drift d'allocation
     cross = analyze_cross_exposure(all_states, allocation)
-    alloc_drift = compute_allocation_drift(alloc_weights, all_states)
+    alloc_drift = compute_allocation_drift(alloc_weights, all_states, mtm_prices=mtm_prices)
 
     # 8. Warnings
     warnings_list = []
