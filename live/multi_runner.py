@@ -465,6 +465,41 @@ def run():
             # ── 15. Contest summary ───────────────────────────────────────────
             print_contest_status(state_a, state_b, state_c, state_d, state_e, state_f, state_g, state_h, state_i, state_j, ohlcv_daily)
 
+            # ── Cycle summary Telegram (résumé compact chaque cycle) ──────────
+            if z_summary:
+                try:
+                    from live.notifier import notify_cycle_summary
+                    _blocked_engines = ("SHIELD", "PRO")
+                    _z_engine = z_summary.get("current_engine", "BALANCED")
+                    obs_bots_info = {
+                        "h": {
+                            "total_trades": len(state_h.get("trades", [])),
+                            "open_trades":  len(state_h.get("positions", {})),
+                            "blocked":      _z_engine in _blocked_engines,
+                        },
+                        "i": {
+                            "total_trades": len(state_i.get("trades", [])),
+                            "open_trades":  len(state_i.get("positions", {})),
+                            "blocked":      _z_engine in _blocked_engines,
+                        },
+                        "j": {
+                            "total_trades": len(state_j.get("trades", [])),
+                            "open_trades":  len(state_j.get("positions", {})),
+                            "blocked":      _z_engine in _blocked_engines,
+                        },
+                    }
+                    notify_cycle_summary(
+                        engine    = _z_engine,
+                        vix       = z_summary.get("last_regime_info", {}).get("vix", vix or 0),
+                        regime    = z_summary.get("regime", "?"),
+                        z_capital = z_summary.get("z_capital_eur", 10000),
+                        perf_pct  = z_summary.get("perf_pct", 0),
+                        budget    = z_summary.get("budget", {}),
+                        obs_bots  = obs_bots_info,
+                    )
+                except Exception as _e:
+                    log(f"[notify_cycle_summary] erreur: {_e}", "WARN")
+
             # ── 16. Drawdown checks ───────────────────────────────────────────
             for name, state in [("A", state_a), ("B", state_b), ("C", state_c), ("D", state_d), ("E", state_e), ("F", state_f), ("G", state_g), ("H", state_h), ("I", state_i), ("J", state_j)]:
                 total = _portfolio_value(state, ohlcv_daily)
