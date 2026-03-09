@@ -963,8 +963,13 @@ def run_bot_z_cycle(macro: dict, ohlcv: dict = None) -> dict:
     z_capital_history = z_capital_history[-25:]  # garde 25 valeurs (20 retours + marge)
     portfolio_vol = compute_portfolio_vol(z_capital_history)
     vol_factor = max(0.3, min(1.5, TARGET_PORTFOLIO_VOL / max(portfolio_vol, 0.01)))
-    # Ramp-up protection : pas de levier les 20 premiers cycles (portfolio_vol peu fiable)
-    if len(z_capital_history) < 20:
+    # Ramp-up protection : pas de levier les 14 premiers jours calendaires.
+    # portfolio_vol calculé sur un historique avec peu de variance → vol_factor monte
+    # artificiellement à 1.5 → budget > z_capital → amplification des erreurs.
+    # Condition sur jours calendaires réels (pas len(history) qui peut contenir
+    # des valeurs initiales identiques qui faussent la variance estimée).
+    _days_since_start = (datetime.now() - datetime.fromisoformat(PAPER_START_DATE)).days
+    if _days_since_start < 14:
         vol_factor = min(vol_factor, 1.0)
     cb_factor_vol = round(cb_factor * vol_factor, 3)
 
