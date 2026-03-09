@@ -1,26 +1,29 @@
 # Documentation des Bots — Appels API, Paramètres, Timing
 
 > **SOURCE DE VÉRITÉ : stratégies individuelles (A → I)**
-> Architecture Bot Z → voir `docs/PROJET Z .md` | Backtests → voir `docs/BACKTEST_RESULTS.md`
+> Backtests Run 18 (10 ans 2016-2026) → voir `docs/BACKTEST_RUN18_FINAL.md`
+> Revue live → voir `docs/REVUE_2026-04-30.md`
+
+**Dernière mise à jour : 2026-03-08** (Run 18, dispatch actif, Meta v2+, engines renommés)
+
+---
 
 ## Vue d'ensemble
 
 Runner : `live/multi_runner.py` — un seul processus, données macro partagées.
 
-**Cycles d'exécution** : 03h00, 07h00, 11h00, 15h00, 19h00, 23h00 UTC
-(soit toutes les 4h, 6 fois par jour)
+**Cycles d'exécution** : 03h00, 07h00, 11h00, 15h00, 19h00, 23h00 UTC (toutes les 4h, 6 fois/jour)
+Paris CET : 04h, 08h, 12h, 16h, 20h, 00h
 
-**Bots actifs en paper trading (2026-03-06)** :
-- **Bot Z** — Pilote central, 10 000€, exécuté en PREMIER à chaque cycle
-- **Bot A / B / C / G** — Supervisés par Bot Z, capital propre 1 000€ chacun (budget dispatch non encore branché)
+**Bots actifs en paper trading (2026-03-08)** :
+- **Bot Z** — Pilote central EXÉCUTIF, 10 000€, exécuté en PREMIER à chaque cycle. Dispatch capital actif.
+- **Bot A / B / C / G** — Supervisés par Bot Z, capital dispatché depuis 2026-03-08
 - **Bot D / E / F** — Lab LLM expérimental, hors Bot Z, désactivés en prod (coût tokens)
 - **Bot H / I** — Expérimentaux, non actifs en prod
 
 ---
 
-## Données partagées (1 seul fetch pour les 9 bots)
-
-Avant chaque cycle, `data/market_snapshot.py` récupère tout :
+## Données partagées (1 seul fetch pour tous les bots)
 
 | Donnée | Source | Fréquence | Note |
 |--------|--------|-----------|------|
@@ -42,6 +45,7 @@ Avant chaque cycle, `data/market_snapshot.py` récupère tout :
 
 **Fichier** : `live/bot.py`
 **State** : `logs/supertrend/state.json`
+**Backtest Run 18 (10 ans)** : CAGR +49.3% | Sharpe 2.43 | MaxDD -68.3% | Final 55 008€
 
 ### Stratégie
 Signal principal : Supertrend flip haussier sur 4h
@@ -86,7 +90,7 @@ Signal secondaire : Mean Reversion RSI(2) < 10
 ### Appel API Claude (filtre BUY)
 - **Modèle** : `claude-haiku-4-5-20251001`
 - **max_tokens** : 160
-- **Quand** : seulement si les 3 filtres durs sont passés (rare)
+- **Quand** : seulement si les 3 filtres durs sont passés
 - **Fréquence estimée** : 0-3 appels/jour
 - **Coût estimé** : ~0.01-0.02€/jour
 - **Prompt contient** :
@@ -103,12 +107,16 @@ Signal secondaire : Mean Reversion RSI(2) < 10
 - **Quand** : 8h00 ET (14h CET / 15h CEST) chaque jour ouvré
 - **Envoyé via** : Telegram + dashboard onglet Claude AI
 
+### Note design
+Le filtre Claude sur Bot A est **intentionnel** : le signal est généré par indicateurs purs, Claude ajoute l'analyse macro/news. Rôle différent des bots D/E/F où le LLM est la stratégie. Pas de Claude sur B, C et G (stratégies quant pures — lisibilité contest).
+
 ---
 
 ## Bot B — Momentum Rotation (Dual Momentum Antonacci)
 
 **Fichier** : `strategies/momentum_strategy.py`
 **State** : `logs/momentum/state.json`
+**Backtest Run 18 (10 ans)** : CAGR +36.8% | Sharpe 0.77 | MaxDD -67.8% | Final 23 097€
 
 ### Stratégie
 Rotation hebdomadaire vers les 4 actifs à plus fort momentum absolu.
@@ -129,11 +137,15 @@ Basé sur Gary Antonacci (2012) — "Dual Momentum Investing".
 - QQQ < SMA200 → rebalancement suspendu
 - Stop individuel -12% vérifié **à chaque cycle** (pas seulement rebalancement)
 
+### Filtre heures de marché (ajouté 2026-03-08)
+- xStocks : BUY bloqué si marché US fermé (hors 9h30-16h00 ET, hors weekends)
+- Positions existantes : clôtures autorisées à tout moment
+
 ### Stop loss
 - **-12% depuis l'entrée** par position
 
 ### Appel API
-**Aucun.** Stratégie 100% quantitative, pas d'appel LLM.
+**Aucun.** Stratégie 100% quantitative.
 
 ---
 
@@ -141,6 +153,12 @@ Basé sur Gary Antonacci (2012) — "Dual Momentum Investing".
 
 **Fichier** : `strategies/breakout_strategy.py`
 **State** : `logs/breakout/state.json`
+**Backtest Run 18 (10 ans, stop loss CORRIGÉ)** : CAGR +0.6% | Sharpe 0.21 | MaxDD -7.8% | Final 1 057€
+
+### Bug critique corrigé (2026-03-08)
+Stop loss vérifié sur `row["low"]` au lieu de `row["close"]` (les stops intraday étaient ignorés).
+Impact : CAGR passe de +17.2% (buggué) à +0.6% (réel) sur 10 ans. Edge non prouvé.
+Corrigé dans **backtest** (`backtest/multi_backtest.py`) ET **live** (`strategies/breakout_strategy.py`).
 
 ### Stratégie
 Breakout sur canal de Donchian 55 jours, basé sur les règles Turtle (Richard Dennis, 1983).
@@ -153,7 +171,8 @@ Univers restreint : **BTC/EUR, ETH/EUR, SOL/EUR** uniquement (meilleurs trends D
 | Canal sortie | Donchian low 20 jours |
 | ATR période | 20 (Dennis "N") |
 | Filtre ADX | > 20 |
-| Stop loss | 2×ATR (Turtle N-stop) |
+| Stop loss | 2×ATR (Turtle N-stop), vérifié sur LOW |
+| Exit Donchian | prix low < low 20j, vérifié sur LOW |
 | Risk par trade | 1% du capital |
 | Max position | 33% du capital |
 | Data requis | 65+ jours |
@@ -164,11 +183,11 @@ Univers restreint : **BTC/EUR, ETH/EUR, SOL/EUR** uniquement (meilleurs trends D
 - VIX ≥ 40 → risk_pct = 0.5% (moitié)
 
 ### Stop loss
-- **2×ATR trailing** (Turtle N-stop), mis à jour à chaque cycle
-- Sortie Donchian si prix < low 20j
+- **2×ATR trailing** (Turtle N-stop), mis à jour à chaque cycle, déclenché sur LOW intraday
+- Sortie Donchian si LOW < low 20j
 
 ### Appel API
-**Aucun.** Stratégie 100% quantitative, pas d'appel LLM.
+**Aucun.** Stratégie 100% quantitative.
 
 ---
 
@@ -176,6 +195,7 @@ Univers restreint : **BTC/EUR, ETH/EUR, SOL/EUR** uniquement (meilleurs trends D
 
 **Fichier** : `strategies/llm_strategy.py`
 **State** : `logs/llm/state.json`
+**Statut** : Désactivé en prod (coût tokens, hors Bot Z)
 
 ### Stratégie
 Le LLM est la stratégie. DeepSeek R1 reçoit le contexte technique + macro et décide BUY/SELL/HOLD.
@@ -192,19 +212,17 @@ Le LLM est la stratégie. DeepSeek R1 reçoit le contexte technique + macro et d
 
 ### Appel API DeepSeek
 - **URL** : `https://api.deepseek.com` (compatible OpenAI SDK)
-- **Quand** : si Supertrend UP + ADX > 18, **ou** position déjà ouverte
 - **Économie estimée** : ~80% des appels évités via pre-filter
-- **Fréquence estimée** : 0-5 appels par cycle (max 30/jour)
 - **Prix** : $0.28/1M tokens input + $0.42/1M tokens output
 - **Prompt contient** (identique E & F) :
   - Supertrend direction, RSI(14), ADX(14), ATR(14), EMA50/200
-  - 20 dernières bougies 4h OHLC
+  - 20 dernières bougies 4h OHLC (contexte tendance 3,5 jours)
   - BTC trend + prix, VIX, Fear & Greed, QQQ régime
-  - Portfolio : capital libre, slots, win rate 20 trades, position en cours + stop
+  - Portfolio : capital libre, slots, win rate 20 trades, position en cours + stop courant
 - **Réponse attendue** : JSON `{"action":"BUY|SELL|HOLD","confidence":0-100,"reason":"..."}`
 
 ### Filtre heures de marché
-- xStocks : BUY bloqué si marché US fermé (hors 9h30-16h00 ET, hors weekends)
+- xStocks : BUY bloqué si marché US fermé (9h30-16h00 ET, lundi-vendredi)
 - Crypto : pas de restriction horaire
 
 ---
@@ -213,6 +231,7 @@ Le LLM est la stratégie. DeepSeek R1 reçoit le contexte technique + macro et d
 
 **Fichier** : `strategies/claude_llm_strategy.py`
 **State** : `logs/claude_llm/state.json`
+**Statut** : Désactivé en prod (coût tokens, hors Bot Z)
 
 ### Stratégie
 Identique à Bot D mais utilise Claude Sonnet 4.6 (Anthropic).
@@ -229,7 +248,6 @@ Identique à Bot D mais utilise Claude Sonnet 4.6 (Anthropic).
 
 ### Appel API Claude (Anthropic)
 - **SDK** : `anthropic` Python
-- **Quand** : si Supertrend UP + ADX > 18, **ou** position ouverte
 - **Prix** : $3.00/1M tokens input + $15.00/1M tokens output
 - **Prompt** : identique Bot D (même template `_build_prompt`)
 - **Délai** : `time.sleep(1)` entre chaque symbole (évite rate limiting)
@@ -240,6 +258,7 @@ Identique à Bot D mais utilise Claude Sonnet 4.6 (Anthropic).
 
 **Fichier** : `strategies/haiku_llm_strategy.py`
 **State** : `logs/haiku_llm/state.json`
+**Statut** : Désactivé en prod (coût tokens, hors Bot Z)
 
 ### Stratégie
 Identique à Bot D/E mais avec Claude Haiku 4.5 (modèle le plus petit/rapide).
@@ -267,6 +286,7 @@ Identique à Bot D/E mais avec Claude Haiku 4.5 (modèle le plus petit/rapide).
 **Fichier** : `strategies/trend_following_strategy.py`
 **State** : `logs/trend/state.json`
 **Origine** : recommandation ChatGPT — architecture CTA funds (AQR, Man Group, SG CTA Index)
+**Backtest Run 18 (10 ans)** : CAGR +23.4% | Sharpe 0.65 | MaxDD -22.6% | Final 8 179€
 
 ### Pourquoi ce bot plutôt qu'améliorer Bot C
 
@@ -297,6 +317,10 @@ Les positions les plus grosses vont aux actifs les moins volatils (risk parity p
 | Timeframe | Daily (ohlcv_daily, déjà fetchés pour B et C) |
 | Data requis | 230 jours minimum |
 
+### Filtre heures de marché (ajouté 2026-03-08)
+- xStocks : BUY bloqué si marché US fermé (hors 9h30-16h00 ET, hors weekends)
+- Positions existantes : clôtures autorisées à tout moment
+
 ### Sizing — Volatility Targeting (détail)
 ```
 daily_vol = std(daily_returns, 20 jours)
@@ -305,15 +329,10 @@ size_pct   = min(TARGET_VOL / annual_vol, MAX_POSITION_PCT)
 size_units = (capital × size_pct) / entry_price
 ```
 Exemple : BTC annual_vol=60% → size_pct=15%/60%=25% mais cappé à 10%
-Exemple : NVDAx annual_vol=30% → size_pct=15%/30%=50% mais cappé à 10%
-Exemple : GLDx annual_vol=12% → size_pct=15%/12%=125% cappé à 10% (or = actif calme → taille max)
+Exemple : GLDx annual_vol=12% → size_pct=15%/12%=125% cappé à 10% (actif calme → taille max)
 
 ### Appel API
-**Aucun.** Stratégie 100% quantitative, pas d'appel LLM.
-
-### Performance historique de référence
-CTA trend following indices : 10-18% CAGR sur longue période.
-Sous-performe en marchés range/choppy (2022-2023), sur-performe lors de grandes tendances (2020-2021, 2024).
+**Aucun.** Stratégie 100% quantitative.
 
 ---
 
@@ -321,7 +340,21 @@ Sous-performe en marchés range/choppy (2022-2023), sur-performe lors de grandes
 
 **Fichier** : `strategies/vcb_strategy.py`
 **State** : `logs/vcb/state.json`
-**Origine** : recommandation ChatGPT — stratégie utilisée par certains desks quant (Minervini, O'Neil CANSLIM)
+**Log** : `logs/vcb.log`
+**Statut** : Expérimental — paper trading actif, récolte de données, hors Bot Z dispatch
+
+### Pilotage par engine Bot Z (ajouté 2026-03-09)
+Bot H reçoit `macro["bot_z_engine"]` à chaque cycle et adapte son comportement :
+| Engine | Comportement |
+|--------|-------------|
+| SHIELD / PRO | Nouveaux BUY bloqués — exits toujours autorisés |
+| PARITY | Taille de position ×0.70 |
+| BULL / BALANCED | Comportement normal |
+
+### Fix données insuffisantes (2026-03-09)
+**Bug** : `fetch_ohlcv_cache(..., days=45)` → 270 barres 4h, mais VCB requiert
+`SMA_LONG(200) + BB_PERCENTILE_LOOKBACK(100) + 10 = 310 barres minimum` → jamais de signal.
+**Fix** : `days=45 → 55` dans `multi_runner.py` → 330 barres disponibles > 310 requis.
 
 ### Concept
 Les plus grosses tendances démarrent après une phase de **compression de volatilité** :
@@ -329,54 +362,29 @@ Les plus grosses tendances démarrent après une phase de **compression de volat
 2. Les vendeurs disparaissent, les institutions accumulent
 3. Un catalyseur arrive → explosion du prix
 
-Détecter la compression avant qu'elle n'explose = edge statistique réel.
-
-### Pourquoi différent de Bot C (Donchian Breakout)
-- Bot C : attend un nouveau high 55j, sans regarder l'état de la volatilité avant le breakout
-- Bot H : exige **compression préalable** (ATR décroissant + BB width < 20e percentile) avant d'entrer sur un breakout 20j — filtre 90% des faux breakouts
+### Différence vs Bot C
+- Bot C : attend un nouveau high 55j, sans regarder l'état de la volatilité
+- Bot H : exige **compression préalable** (ATR décroissant + BB width < 20e percentile) → filtre ~90% des faux breakouts
 
 ### Paramètres
 | Paramètre | Valeur |
 |-----------|--------|
-| Timeframe | 4h (ohlcv_4h, déjà fetchés) |
+| Timeframe | 4h |
 | SMA long | 200 périodes |
-| SMA court | 50 périodes |
 | BB période | 20 périodes |
 | BB width percentile | < 20% sur 100 barres glissantes |
 | ATR compression | ATR(14) décroissant ≥ 5 barres consécutives |
-| Breakout entrée | High 20 barres (shift 1 — no lookahead) |
-| Stop entrée | 1.5×ATR (serré — l'énergie ne doit pas reculer) |
+| Breakout entrée | High 20 barres (shift 1) |
+| Stop entrée | 1.5×ATR |
 | Trailing stop | 3×ATR |
-| Position size | 20% du capital par position |
+| Position size | 20% du capital |
 | Max positions | 5 |
-| Data requis | ~310 barres 4h ≈ 52 jours (couverts par le fetch 45j) |
-
-### Bollinger Band width percentile (détail)
-```
-bb_mid   = SMA20(close)
-bb_width = (BB_upper - BB_lower) / bb_mid
-bb_pct   = (bb_width - rolling_min(100)) / (rolling_max(100) - rolling_min(100))
-```
-`bb_pct < 0.20` = la bande est dans ses 20% les plus serrés des 100 dernières barres
-
-### ATR compression (détail)
-```
-atr_diff     = ATR.diff()          # négatif = ATR qui baisse
-declining    = (atr_diff < 0)      # True quand ATR baisse
-compress_cnt = declining.rolling(5).sum()
-compressed   = compress_cnt >= 5   # ATR a baissé 5 barres de suite
-```
 
 ### Univers cible
-BTC/EUR, ETH/EUR, SOL/EUR, NVDAx/EUR, AMDx/EUR, METAx/EUR, PLTRx/EUR
-(actifs à forte volatilité où les compressions explosent le plus violemment)
+BTC/EUR, ETH/EUR, SOL/EUR, NVDAx, AMDx, METAx, PLTRx
 
 ### Appel API
 **Aucun.** Stratégie 100% quantitative.
-
-### Performance historique de référence
-VCB sur portefeuille multi-actifs : 15-25% annualisé dans les backtests, mais **très irrégulier**.
-Sous-performe en marchés plats (peu de compressions), sur-performe lors de grandes phases de tendance interrompues de consolidations.
 
 ---
 
@@ -384,40 +392,31 @@ Sous-performe en marchés plats (peu de compressions), sur-performe lors de gran
 
 **Fichier** : `strategies/rs_leaders_strategy.py`
 **State** : `logs/rs_leaders/state.json`
-**Origine** : recommandation ChatGPT — basé sur MSCI World Quality + Momentum (12-16% CAGR historique)
+**Log** : `logs/rs_leaders.log`
+**Statut** : Expérimental — paper trading actif, récolte de données, hors Bot Z dispatch
+
+### Pilotage par engine Bot Z (ajouté 2026-03-09)
+| Engine | Comportement |
+|--------|-------------|
+| SHIELD / PRO | Rebalancement suspendu (remplace le filtre VIX>30) |
+| PARITY | Vol cible ×0.70 (sizing réduit) |
+| BULL / BALANCED | Comportement normal |
 
 ### Concept
-Sélection des **leaders en force relative** sur l'univers complet des 20 symboles :
-- Calcul d'un score composite de momentum multi-période pour chaque actif
-- Filtres de qualité stricts : structure SMA triple, ADX, volatilité, extension
-- Tenir les 3 leaders, sortir si l'actif tombe hors top 5 (buffer anti-churn)
-- Sizing via volatility targeting : les actifs plus calmes reçoivent plus de capital
-
-### Différences vs Bot B (Momentum Rotation)
-| Critère | Bot B | Bot I |
-|---------|-------|-------|
-| Score | 1m/3m/6m equal weight | 1m/3m/6m + distance SMA200 (weighted) |
-| Filtre structure | Aucun | SMA50 > SMA200 (golden cross) |
-| Filtre volatilité | Aucun | vol < 90% annualisée |
-| Filtre extension | Aucun | prix pas > 15% au-dessus SMA50 |
-| Filtre qualité | Aucun | ADX > 18 |
-| Stop loss | -12% fixe | 2.5×ATR trailing + hard stop -10% |
-| Exit SMA | Aucun | SMA50 break |
-| Sizing | total/4 égal | Volatility targeting (TARGET_VOL=15%) |
-| Seuil de sortie | Top 4 strict | Top 5 (buffer 2 rangs) |
+Sélection des **leaders en force relative** : score composite momentum multi-période + filtres qualité stricts.
+Tenir les 3 leaders, sortir si rang > 5 (buffer anti-churn).
 
 ### Score RS composite
 ```
 rs_score = 0.35 × (perf 1m) + 0.35 × (perf 3m) + 0.20 × (perf 6m) + 0.10 × (distance SMA200)
 ```
-Périodes : 1m=22j, 3m=66j, 6m=130j.
 
 ### Paramètres
 | Paramètre | Valeur |
 |-----------|--------|
-| Timeframe | Daily (ohlcv_daily, 220 jours) |
+| Timeframe | Daily (220 jours) |
 | Top N positions | 3 |
-| Exit rank | > 5 (sortie si non dans top 5) |
+| Exit rank | > 5 |
 | Rebalancement min | 5 jours |
 | ADX seuil | > 18 |
 | Vol annualisée max | < 90% |
@@ -427,150 +426,203 @@ Périodes : 1m=22j, 3m=66j, 6m=130j.
 | Exit SMA | SMA50 break |
 | Target vol | 15% |
 | Max position | 30% du capital |
-| Pause macro | VIX > 30 ou QQQ bearish |
-
-### Volatility targeting (sizing)
-```
-size_pct = min(TARGET_VOL / annual_vol, MAX_POS_PCT)
-           = min(0.15 / annual_vol, 0.30)
-size_units = (capital × size_pct) / entry_price
-```
-Ex : actif avec vol 30% → size 50% du capital cap à 30% → 30%. Actif vol 50% → 30% du capital.
-
-### Univers
-Tous les 20 symboles (7 crypto + 13 xStocks). Le score et les filtres sélectionnent naturellement les meilleurs.
+| Pause macro | VIX > 30 ou QQQ bearish ou engine SHIELD/PRO |
 
 ### Appel API
 **Aucun.** Stratégie 100% quantitative.
 
-### Performance de référence
-MSCI World Quality + Momentum index : 12-16% CAGR sur 10 ans. La version filtrée (ADX, extension) vise à réduire les drawdowns des années 2022-type.
+---
+
+## Bot J — Mean Reversion (RSI2 + Bollinger Bands)
+
+**Fichier** : `strategies/mean_reversion_strategy.py`
+**State** : `logs/mean_reversion/state.json`
+**Log** : `logs/mean_reversion/bot_j.log`
+**Statut** : Expérimental — paper trading actif, récolte de données, hors Bot Z dispatch
+
+### Concept
+Stratégie **anti-tendance**, complémentaire aux bots trend (A/C/G).
+Profil : faible corrélation attendue avec A/B/C/G, gagne en marché choppy/range.
+
+### Conditions d'entrée (daily)
+- RSI(2) < 5 — survente extrême
+- Close < Bollinger Lower (20j, 2σ) — extension vers le bas
+- Close > SMA200 — ne pas acheter contre une tendance baissière majeure
+
+### Sortie
+- RSI(2) > 60 (retour à la normale)
+- OU Close > SMA20 (milieu Bollinger)
+- Stop : 1.5×ATR(14) sous l'entrée
+
+### Paramètres
+| Paramètre | Valeur |
+|-----------|--------|
+| Timeframe | Daily (210 barres min) |
+| RSI période | 2 |
+| RSI entrée | < 5 |
+| RSI sortie | > 60 |
+| Bollinger | 20j, 2σ |
+| SMA filtre | 200 |
+| Risk par trade | 0.5% du capital |
+| Max position | 10% du capital |
+| Stop | 1.5×ATR14 |
+
+### Backtest de référence (2020-2026)
+CAGR +1.6% | Sharpe 1.47 | MaxDD -1.7% | 161 trades | Win rate 70.8%
+
+### Pilotage par engine Bot Z (ajouté 2026-03-09)
+| Engine | Comportement |
+|--------|-------------|
+| SHIELD / PRO | Nouveaux BUY bloqués — exits toujours autorisés |
+| PARITY | Taille ×0.70 (RISK_PCT et MAX_POS_PCT) |
+| BULL / BALANCED | Comportement normal |
+
+### Appel API
+**Aucun.** Stratégie 100% quantitative.
 
 ---
 
-## Résumé des appels API par cycle
-
-| Bot | API | Nb appels/cycle (estimé) | Coût/cycle |
-|-----|-----|--------------------------|------------|
-| A | Anthropic Haiku | 0-3 (si signal passe filtres durs) | ~$0.001 |
-| B | Aucun | 0 | $0 |
-| C | Aucun | 0 | $0 |
-| D | DeepSeek Reasoner | 0-10 (si pre-filter passe) | ~$0.002 |
-| E | Anthropic Sonnet | 0-10 (si pre-filter passe) | ~$0.05 |
-| F | Anthropic Haiku | 0-10 (si pre-filter passe) | ~$0.008 |
-| G | Aucun | 0 | $0 |
-| H | Aucun | 0 | $0 |
-| I | Aucun | 0 | $0 |
-| A pré-marché | Anthropic Haiku | 1/jour ouvré | ~$0.005/jour |
-
-**Total journalier estimé** : $0.05-0.15/jour selon activité du marché
-
----
-
-## Alertes crédit API (système persistant)
-
-Si une API retourne une erreur de crédit/quota :
-1. Telegram immédiat : "Crédits X épuisés"
-2. `logs/api_alerts.json` mis à jour
-3. Rappel Telegram à **chaque cycle** jusqu'au rechargement
-4. Bannière rouge en haut du **dashboard**
-5. Dès que l'API répond à nouveau : alerte "Crédits rechargés" + bannière disparaît
-
-Mots-clés détectés : `credit`, `billing`, `insufficient`, `balance`, `quota`, `402`, `payment`, `funds`, `overdue`
-
----
-
-## Symboles tradés
-
-**Crypto (5)** : BTC/EUR, ETH/EUR, SOL/EUR, BNB/EUR, TON/EUR
-*(LINK/EUR et AVAX/EUR retirés — PF < 1 sur 1 et 3 ans)*
-
-**xStocks paper Kraken (11)** : NVDAx, AAPLx, MSFTx, METAx, GOOGx, PLTRx, AMDx, AVGOx, GLDx, NFLXx, CRWDx
-*(TSLAx retiré — WR=20%, Musk volatility ; AMZNx retiré — PF=0.07)*
-
-**Total** : 16 symboles
-
-**Bot C uniquement** : BTC/EUR, ETH/EUR, SOL/EUR (meilleurs trends Donchian)
-**Bot H uniquement** : BTC/EUR, ETH/EUR, SOL/EUR, NVDAx, AMDx, METAx, PLTRx (actifs à forte volatilité)
-**Bots A, B, D, E, F, G, I** : tous les 16 symboles
-
----
-
----
-
-## Bot Z — Portfolio Engine (Paper Trading Production)
+## Bot Z — Pilote Central EXÉCUTIF (Meta v2+)
 
 **Fichier** : `live/bot_z.py`
 **State** : `logs/bot_z/state.json`
-**Log** : `logs/bot_z/shadow.jsonl`
-**Dashboard** : endpoint `/api/bot_z`
+**Budget** : `logs/bot_z/budget.json`
+**Historique** : `logs/bot_z/shadow.jsonl`
+**Dashboard** : endpoint `/api/portfolio`
 
-**Phase actuelle : PAPER TRADING** — démarré le 2026-03-06, revue le 2026-04-30
-**Capital** : 10 000€ (4 bots validés : A, B, C, G)
-**Architecture active** : **Bot Z Meta v2** (4 engines : ENHANCED/OMEGA/OMEGA_V2/PRO)
+**Phase actuelle : PAPER TRADING ACTIF** — démarré 2026-03-06, dispatch capital actif depuis 2026-03-08
+**Capital** : 10 000€ | **Revue** : 2026-04-30
+**Bots supervisés** : A, B, C, G (bots validés)
 
-> **STATUT RÉEL — IMPORTANT**
-> Bot Z est un **allocateur analytique**, pas encore un **allocateur exécutif**.
-> - Il calcule l'allocation optimale et écrit `logs/bot_z/budget.json` à chaque cycle.
-> - **A/B/C/G tradent encore avec leur capital propre (1 000€)** et ignorent le budget.json.
-> - Le budget dispatch (A/B/C/G lisent le budget) est prévu après la revue 2026-04-30.
-> - Les résultats de z_capital sont donc une **simulation analytique**, pas le P&L réel des bots.
+### Rôle et statut
 
-Pour les résultats de backtest (CAGR +43.2%, Sharpe 1.70, MaxDD -9.6%) → voir `docs/BACKTEST_RESULTS.md` Run 10.
+Depuis 2026-03-08, Bot Z est **pleinement exécutif** :
+- Il calcule l'allocation optimale à chaque cycle
+- Il dispatche un budget réel en euros vers chaque stratégie (`_apply_z_budget()` dans `multi_runner.py`)
+- A/B/C/G scalent leur capital proportionnellement au budget reçu
+- Notification Telegram si budget change > 15% (`notify_z_dispatch()`)
 
----
-
-### Architecture Bot Z Enhanced
-
+### Execution order (multi_runner.py)
 ```
-Bots A, B, C, G (state files + signaux live)
-    ↓
-Regime Engine (VIX + QQQ SMA200 + BTC trend)
-    ↓
-Momentum Overlay (BTC EMA200 + QQQ SMA200)
-    ↓
-Allocation Régime Pur (calibration BEAR v2)
-    ↓
-Circuit Breaker (DD < -25% → expo 30%)
-    ↓
-logs/bot_z/ + dashboard
+1. Macro fetch (VIX, QQQ, BTC, Fear&Greed...)
+2. OHLCV prefetch (4h + daily)
+3. Bot Z FIRST (step 4) → lit états A/B/C/G → calcule allocation → écrit budget.json
+4. _apply_z_budget() → scale capital de chaque sub-bot → sauvegarde states
+5. Bot A (step 5), Bot B (step 6), Bot C (step 7), Bot G (step 11)
 ```
 
 ---
 
-### Détection du régime + Momentum Overlay
+### 4 Engines Meta v2 — Noms PROD (renommés 2026-03-08)
 
-**Régime de base :**
+| Engine | Ancien nom | Régime cible | Backtest Sharpe | MaxDD | CAGR |
+|--------|------------|-------------|-----------------|-------|------|
+| **BULL** | ENHANCED | Bull propre | 1.61 | -18.9% | +59.8% |
+| **BALANCED** | OMEGA | Neutre/quality (BASE universelle) | 1.96 | -8.7% | +55.5% |
+| **PARITY** | OMEGA_V2 | Stress modéré, risk parity | 2.03 | -7.6% | +52.1% |
+| **SHIELD** | PRO | Bear/crise | 1.90 | -9.1% | +29.9% |
 
-| Régime | Conditions |
-|--------|-----------|
-| HIGH_VOL | VIX > 35 (prioritaire) |
-| BEAR | QQQ < SMA200 ou VIX > 30 |
-| BULL | QQQ > SMA200 + BTC bull + VIX < 25 |
-| RANGE | Tout le reste |
+**BALANCED-as-base** : tous les engines utilisent BALANCED comme socle.
+Empêche la sur-concentration en régime BULL (Run 15 : MaxDD -9.5% vs -14.4% avant).
 
-**Momentum Overlay (couche supplémentaire) :**
-- BTC trend bear **ET** QQQ < SMA200 → force **BEAR** (indépendamment du VIX)
-- Un seul indicateur bearish → force **HIGH_VOL** si régime était BULL/RANGE
-- Réagit avant le VIX (plus proactif, capte les retournements tôt)
+**BULL** = 60% BALANCED + 40% momentum tilt
+**PARITY** = 60% BALANCED + 40% pure risk parity
+**SHIELD** = 40% BALANCED + 60% vol-quality + risk parity
 
 ---
 
-### Calibration BEAR v2 — Poids par régime
+### Hard Rules (non-négociables, priorité absolue)
 
-Validée sur backtest 2020-2026 (2022 bear : -9.0% avec Enhanced vs -16.8% equal-weight)
+| Condition | Action |
+|-----------|--------|
+| (BTC bearish ET QQQ bearish ET VIX > 26) | Force SHIELD |
+| VIX > 32 | Force SHIELD |
+| Portfolio DD < -12% | Force SHIELD |
+| BTC bearish OU QQQ bearish | BULL bloqué |
 
-| Bot | BULL | RANGE | BEAR | HIGH_VOL |
-|-----|------|-------|------|----------|
-| A — Supertrend | 0.8 | 1.0 | **0.3** | 0.5 |
-| B — Momentum | 1.0 | 0.8 | **0.0** | 0.3 |
-| C — Breakout | 0.5 | 0.7 | **1.5** | 1.0 |
-| G — Trend Multi-Asset | 1.2 | 0.8 | **1.2** | 0.8 |
+---
 
-**Logique BEAR :** C (-2.5% en 2022) et G (-3.4%) sont les seuls défensifs prouvés.
-A (-49.3%) et B (-43.5%) sont désactivés/réduits au minimum.
+### Scoring Meta v2+ (si pas de hard rule)
 
-Les poids bruts sont normalisés → somme = 1.0, puis modulés par le Circuit Breaker.
+```python
+# 1. Regime fit × confidence × persistence
+regime_strength = min(1.0, days_in_regime / REGIME_PERSIST_DAYS)   # monte 0→1 sur 7j
+rf = regime_fit × regime_confidence × regime_strength
+
+# 2. Score composite
+score = 0.50 × rf + 0.30 × quality_norm + 0.20 × inv_risk
+
+# 3. Switch cost penalty
+if engine_candidat != current_engine:
+    score -= SWITCH_PENALTY  # = 0.05
+
+# 4. Sélection engine + hysteresis (Run 18 PROD)
+# BULL=7j / BALANCED=5j / PARITY=4j / SHIELD=3j
+```
+
+---
+
+### Constantes clés Meta v2+
+
+| Constante | Valeur | Description |
+|-----------|--------|-------------|
+| SWITCH_PENALTY | 0.05 | Pénalité de switch (évite les micro-switchs) |
+| TARGET_PORTFOLIO_VOL | 0.20 | 20% annualisé cible |
+| BTC_HIGH_VOL_THRESHOLD | 0.80 | Override HIGH_VOL si BTC vol > 80% |
+| CORR_REDUCE_THRESHOLD | 0.70 | Réduction expo si corrélation > 70% |
+| REGIME_PERSIST_DAYS | 7 | Jours pour atteindre regime_strength = 1.0 |
+| INITIAL_CAP | 10 000 | Capital initial toujours synchronisé |
+
+---
+
+### Allocation par engine — Poids par régime
+
+**BALANCED_WEIGHTS** (BASE universelle, neutre + quality scoring) :
+| Régime | A | B | C | G |
+|--------|---|---|---|---|
+| BULL | 0.9 | 1.1 | 0.7 | 1.0 |
+| RANGE | 1.0 | 0.9 | 0.8 | 0.9 |
+| BEAR | 0.4 | 0.1 | 1.3 | 1.1 |
+| HIGH_VOL | 0.6 | 0.4 | 1.2 | 1.0 |
+
+**SHIELD_WEIGHTS** (défensif C+G, B écarté) :
+| Régime | A | B | C | G |
+|--------|---|---|---|---|
+| Tous | 0.1-0.3 | 0.0 | 1.8-2.0 | 1.0 |
+
+**BULL_WEIGHTS** : REGIME_WEIGHTS classiques (A favorisé en bull propre)
+**PARITY_WEIGHTS** : 50% BALANCED + 50% inverse-vol (risk parity pure)
+
+---
+
+### Allocation finale — Risk Parity CTA style
+
+```python
+# 60% engine/régime + 40% inverse-vol (ajouté 2026-03-08)
+inv_vol_w = {b: (1/vol_b) / sum(1/vol for vol in vols) for b in VALID_BOTS}
+blended = 0.60 × alloc_weights + 0.40 × inv_vol_w
+
+# Application vol targeting global
+vol_factor = clip(TARGET_PORTFOLIO_VOL / portfolio_vol_20d, 0.3, 1.5)
+# Si variance ≈ 0 (début paper) → vol_factor = 1.0
+
+# Cap corrélation
+if avg_corr > CORR_REDUCE_THRESHOLD:
+    exposition ×= 0.80
+
+# Cap par bot
+budget_eur = min(budget_eur, capital_total × 0.40)  # 40% max par bot
+```
+
+---
+
+### Levier conditionnel BULL (version PROD Run 17)
+
+En régime BULL + cb_factor ≥ 0.90 + vol_annuelle < 20% :
+```python
+lev_factor = min(1.30, TARGET_PORTFOLIO_VOL / port_vol_annual)
+```
+Mécanisme vol targeting (style CTA) — ne s'active que dans les bonnes conditions.
 
 ---
 
@@ -583,165 +635,182 @@ Si port_dd < -25% → cb_factor réduit à 0.30 (70% cash)
 Si port_dd > -10% → cb_factor récupère +0.5%/cycle
 
 exposition_effective = capital_total × cb_factor
-budget_bot = exposition_effective × weight_bot
 ```
 
 ---
 
-### Allocation finale par bot
+### Tracking z_capital (corrigé 2026-03-08)
 
+**Bug corrigé** : boucle de feedback qui causait une inflation +284% en 2 jours.
 ```
-weight_brut  = regime_weight[bot] × quality_score[bot]
-quality_score = Sharpe rolling 20 derniers trades (normalisé 0.3-1.5)
-
-weight_norm  = weight_brut / sum(weight_bruts)
-budget_eur   = exposition_effective × weight_norm
-budget_eur   = min(budget_eur, capital_total × 0.40)  # cap 40% par bot
+Cause : last_bot_values stockait les valeurs PRE-dispatch
+→ cycle suivant lisait valeurs POST-dispatch (×2.5) → retour apparent +150%
+→ z_capital ×2.5 → budget dispatché ×2.5 → boucle infinie
 ```
 
-**Exemple en BULL à 10 000€ (cb_factor = 1.0) :**
+**Fix appliqué** :
+```python
+# Référence POST-dispatch (fix 1)
+state["last_bot_values"] = {b: round(budget.get(b, bot_values.get(b, 0)), 2) for b in VALID_BOTS}
+state["last_bot_raw_values"] = bot_values  # debug seulement
 
-| Bot | Poids brut | Poids norm | Budget |
-|-----|-----------|------------|--------|
-| A | 0.8 | 22.9% | 2 290€ |
-| B | 1.0 | 28.6% | 2 860€ |
-| C | 0.5 | 14.3% | 1 430€ |
-| G | 1.2 | 34.2% | 3 420€ |
+# Sanity cap (fix 2) : si |weighted_return| > 15% sur un cycle 4h
+# → recalibrage via sum_curr/sum_prev (ratio brut des capitaux totaux)
 
-**Exemple en BEAR à 10 000€ (cb_factor = 1.0) :**
+# initial_capital toujours synchronisé (fix 3)
+state["initial_capital"] = INITIAL_CAP
+```
 
-| Bot | Poids brut | Poids norm | Budget |
-|-----|-----------|------------|--------|
-| A | 0.3 | 10.0% | 1 000€ |
-| B | 0.0 | 0.0% | 0€ |
-| C | 1.5 | 50.0% | 5 000€ |
-| G | 1.2 | 40.0% | 4 000€ |
+Formule de tracking correcte :
+```python
+cycle_returns = {b: bot_values[b]/prev_bot_values[b] - 1 for b in VALID_BOTS}
+weighted_return = sum(prev_weights[b] * cycle_returns[b] for b in VALID_BOTS)
+new_z_capital = max(0.0, z_capital * (1 + weighted_return))
+```
 
 ---
 
-### Contraintes portefeuille
+### Dispatch capital vers A/B/C/G (actif depuis 2026-03-08)
 
-| Limite | Valeur |
-|--------|--------|
-| Max par bot | 40% du capital |
-| Max par actif | 30% du capital |
-| Max bots simultanés sur même actif | 2 |
-| Cash forcé si VIX > 35 | 30% minimum |
+**`_apply_z_budget(state, z_budget_eur)` dans `multi_runner.py`** :
+- Après chaque cycle Bot Z, scale le capital de chaque sub-bot proportionnellement
+- `scale = z_budget / prev_budget` → `state["capital"] *= scale` (préserve ratio PnL)
+- Sauvegarde immédiate de chaque state après dispatch (protection crash)
+- Log `[Z→] Budget dispatché — A:xxxx€ B:xxxx€ C:xxxx€ G:xxxx€`
 
----
-
-### Résultats backtest (référence)
-
-| Métrique | Bot Z Enhanced | Equal-Weight |
-|----------|---------------|-------------|
-| CAGR (2020-2026) | **+59.8%** | +46.4% |
-| Sharpe | **1.61** | 1.20 |
-| MaxDD | **-18.9%** | -31.1% |
-| 2022 (bear) | **-9.0%** | -16.8% |
-| Walk-Forward OOS | **+41.5%** | +33.8% |
-
-*Voir `docs/BACKTEST_RESULTS.md` pour le détail complet des 6 runs.*
+**Notification Telegram** (`notify_z_dispatch()` dans `live/notifier.py`) :
+- Envoyée si budget change > 15% entre deux cycles
+- Format : engine | capital total | budget par bot avec barre de progression ASCII
 
 ---
 
-### Bot Z Meta v2 — Production (architecture actuelle)
-
-**Déployé en paper trading le 2026-03-06. Capital : 10 000€. Revue : 2026-04-30.**
-
-Bot Z est le **pilote central** de l'application. Il tourne en premier à chaque cycle, calcule l'allocation optimale, puis dispatche un budget en euros vers chaque stratégie.
-
-#### Execution order (multi_runner.py)
-```
-1. Macro fetch (VIX, QQQ, BTC, Fear&Greed...)
-2. OHLCV prefetch (4h + daily)
-3. Bot Z FIRST → lit états A/B/C/G → calcule allocation → écrit budget.json
-4. Bot A tourne avec son capital propre (budget.json lu à terme)
-5. Bot B, C, G pareil
-...
-```
-
-#### 4 engines — sélection Meta v2
-
-| Engine | Régime cible | Backtest Sharpe | Backtest MaxDD | Backtest CAGR |
-|--------|-------------|-----------------|----------------|---------------|
-| **ENHANCED** | Bull propre | 1.61 | -18.9% | +59.8% |
-| **OMEGA** | Neutre/quality | 1.96 | -8.7% | +55.5% |
-| **OMEGA_V2** | Stress modéré (risk parity) | 2.03 | -7.6% | +52.1% |
-| **PRO** | Bear/crise | 1.90 | -9.1% | +29.9% |
-
-**Hard rules (non-négociables)** :
-- PRO forcé si (BTC+QQQ bearish **ET** VIX>26) OU VIX>32 OU DD<-12%
-- ENHANCED bloqué si BTC ou QQQ bearish
-
-**Scoring data-driven** (si pas de hard rule) :
-```
-score = 0.50 × regime_fit + 0.30 × rolling_quality + 0.20 × inverse_vol
-```
-
-**Hysteresis** (jours confirmation avant switch) :
-- ENHANCED : 7j | OMEGA : 5j | OMEGA_V2 : 4j | PRO : 3j
-
-#### Poids par engine/régime
-
-**ENHANCED = REGIME_WEIGHTS** (cf. tableau ci-dessus)
-
-**OMEGA_WEIGHTS** (neutre + quality scoring) :
-| Régime | A | B | C | G |
-|--------|---|---|---|---|
-| BULL | 0.9 | 1.1 | 0.7 | 1.0 |
-| RANGE | 1.0 | 0.9 | 0.8 | 0.9 |
-| BEAR | 0.4 | 0.1 | 1.3 | 1.1 |
-| HIGH_VOL | 0.6 | 0.4 | 1.2 | 1.0 |
-
-**PRO_WEIGHTS** (défensif C+G, B écarté) :
-| Régime | A | B | C | G |
-|--------|---|---|---|---|
-| BULL | 0.2 | 0.0 | 1.8 | 1.0 |
-| RANGE | 0.3 | 0.0 | 1.8 | 1.0 |
-| BEAR | 0.1 | 0.0 | 2.0 | 1.0 |
-| HIGH_VOL | 0.2 | 0.0 | 1.8 | 1.0 |
-
-**OMEGA_V2** = 50% OMEGA_WEIGHTS + 50% inverse-vol (risk parity pure)
-
-#### Tracking du capital z_capital (Mark-to-Market réel)
+### Mark-to-Market réel
 
 ```python
-# Chaque cycle — prix live via OHLCV daily si disponible :
+# Prix live via OHLCV daily si disponible :
+run_bot_z_cycle(macro, ohlcv=ohlcv_daily)
+
 for sym, pos in positions.items():
     if ohlcv and sym in ohlcv:
         live_price = ohlcv[sym]["close"].iloc[-1]   # MTM réel
     else:
-        live_price = pos["entry"]                    # fallback
-
-bot_values[b] = capital + sum(live_price * size)
-cycle_returns = {b: bot_values[b]/prev_bot_values[b] - 1 for b in VALID_BOTS}
-weighted_return = sum(prev_weights[b] * cycle_returns[b] for b in VALID_BOTS)
-new_z_capital = max(0.0, z_capital * (1 + weighted_return))
-# → écrit logs/bot_z/budget.json {a: €, b: €, c: €, g: €}
+        live_price = pos["entry"]                    # fallback prix d'entrée
 ```
 
-**Engine reasons loggés** dans shadow.jsonl à chaque cycle :
-`hard_rule_pro, block_enhanced, btc_bearish, qqq_bearish, vix, port_dd_pct,
-regime, raw_engine, rolling_scores, bot_vols, engine_switched, prev_engine`
+---
 
-**Quality ramp-up** (évite sur-pondération en début de paper) :
-- < 5 trades → score neutre 1.0
-- 5-20 trades → blend progressif : `confidence = (n-5)/15.0`
-- >= 20 trades → score plein `clamp(1.0 + sharpe×0.3, 0.3, 1.5)`
+### Quality Score & Ramp-up
 
-#### Fichiers clés Bot Z
-
-```
-live/bot_z.py            ← Pilote principal (Meta v2, select_engine_live, _write_budget)
-logs/bot_z/state.json    ← z_capital, current_engine, pending_engine, last_alloc_weights
-logs/bot_z/budget.json   ← Budget dispatché par sub-bot (mis à jour chaque cycle)
-logs/bot_z/shadow.jsonl  ← Historique complet (1 entrée/cycle, base equity chart)
+```python
+# Évite la sur-pondération instable en début de paper
+if n_trades < 5:
+    quality_score = 1.0  # neutre
+elif n_trades < 20:
+    confidence = (n_trades - 5) / 15.0
+    quality_score = 1.0 + confidence × (raw_score - 1.0)  # blend progressif
+else:
+    quality_score = clamp(1.0 + sharpe_rolling × 0.3, 0.3, 1.5)  # score plein
 ```
 
-#### Distribution engines (backtest 2020-2026)
+---
 
-ENHANCED 17% / OMEGA 30% / OMEGA_V2 28% / PRO 25%
-CAGR Meta v2 : **+43.2%** | Sharpe **1.70** | MaxDD **-9.6%** | 2022 : **+1.0%**
+### BTC Realized Volatility Override
+
+```python
+btc_returns_4h = BTC.close.pct_change().tail(20)
+btc_vol_annual = btc_returns_4h.std() × sqrt(6 × 365)
+
+if btc_vol_annual > BTC_HIGH_VOL_THRESHOLD and regime in ["BULL", "RANGE"]:
+    regime = "HIGH_VOL"  # override
+```
+
+---
+
+### Corrélation inter-bots dynamique
+
+```python
+# Pearson pairwise sur 20 trades
+returns_matrix = {b: retours_20_trades[b] for b in VALID_BOTS}
+avg_corr = mean([corr(a, b) for a, b in combinations])
+
+if avg_corr > CORR_REDUCE_THRESHOLD:
+    exposition ×= 0.80  # réduction 20% si bots trop corrélés
+```
+
+---
+
+### Allocation Drift Tracking
+
+```python
+drift = sum(abs(target_weight[b] - actual_weight[b]) for b in VALID_BOTS)
+if drift > 0.20:
+    log.warning(f"[Z] Allocation drift {drift:.1%} — vérifier _apply_z_budget")
+```
+
+---
+
+### Engine Reasons loggés dans shadow.jsonl
+
+À chaque cycle, les raisons de sélection sont loggées :
+`hard_rule_shield, block_bull, btc_bearish, qqq_bearish, vix, port_dd_pct,
+regime, raw_engine, rolling_scores, bot_vols, engine_switched, prev_engine,
+vol_factor, avg_corr, btc_vol_annual, drift`
+
+---
+
+### MCPS — Contribution Marginale au Sharpe (`backtest/analyze_botz.py`)
+
+Disponible dès 10 cycles de shadow.jsonl :
+```python
+MCPS = Sharpe_bot - ρ_bot_portfolio × Sharpe_portfolio
+# Verdict : UTILE (MCPS > 0) ou À RETIRER (MCPS < 0)
+```
+
+Commande : `python backtest/analyze_botz.py --csv`
+Exports : `equity_timeline.csv`, `engine_switches.csv`, `budget_history.csv`, `meta_v2plus_metrics.csv`
+
+---
+
+### Backtest Run 18 — Résultats finaux (10 ans 2016-2026)
+
+| Stratégie | CAGR | Sharpe | MaxDD | Final (depuis 10k€) |
+|-----------|------|--------|-------|---------------------|
+| **Bot Z Meta v2 PROD** | **+38.2%** | **1.92** | **-10.1%** | **84 985€** |
+| Bot A — Supertrend+MR | +49.3% | 2.43 | -68.3% | 55 008€ |
+| Bot B — Momentum | +36.8% | 0.77 | -67.8% | 23 097€ |
+| Bot C — Breakout (réel) | +0.6% | 0.21 | -7.8% | 1 057€ |
+| Bot G — Trend | +23.4% | 0.65 | -22.6% | 8 179€ |
+| S&P 500 | +12.9% | 0.77 | -33.9% | — |
+| NASDAQ-100 | +19.9% | 0.93 | -35.1% | — |
+| BTC buy & hold | +65.4% | 0.90 | -82.7% | — |
+
+**Bot Z surperforme tous les benchmarks sur Sharpe (1.92) et MaxDD (-10.1%).**
+La diversification entre A (alpha élevé) et G (stabilisateur) est la clé.
+
+---
+
+### Reclassement bots post-audit 2026-03-08
+
+| Bot | Rôle | Statut |
+|-----|------|--------|
+| A | Moteur principal alpha | Validé — +49.3% CAGR 10 ans |
+| G | Stabilisateur réel | Validé — +23.4%, jamais > -7%/an |
+| B | Booster bull crypto | Validé — cyclique, 0€ en SHIELD |
+| C | Breakout corrigé | Edge non prouvé (+0.6% réel) — actif défensif en SHIELD |
+| Bot J (futur) | Candidat ajout Bot Z | MCPS prévu > 0, corr A ≈ 0.1-0.3 |
+
+---
+
+### État paper trading (2026-03-08 fin de session)
+
+```
+z_capital      : 10 000€ stable (7 cycles : [10k, 10k, 10k, 10k, 10k, 10k, 10k])
+Engine         : SHIELD (VIX 29.51, BTC bear, strength=1.0)
+Budget dispatch: A=1 402€ | B=1 000€ | C=4 600€ | G=2 998€
+Services VPS   : bot + dashboard actifs, 0 erreur
+Shadow log     : 45 entrées accumulées
+Drift warning  : 35% — normal en début de paper (quality scores vides)
+```
 
 ---
 
@@ -750,68 +819,80 @@ CAGR Meta v2 : **+43.2%** | Sharpe **1.70** | MaxDD **-9.6%** | 2022 : **+1.0%**
 | Phase | Statut | Description |
 |-------|--------|-------------|
 | Shadow Mode | ✅ Terminé | Observation sans exécution |
-| **Paper Trading Meta v2** | 🟢 En cours | 10 000€, démarré 2026-03-06 |
-| MTM réel | ✅ Implémenté | Prix live via OHLCV daily (vs prix d'entrée) |
-| Engine reasons logging | ✅ Implémenté | hard_rule_pro, scores, vols dans shadow.jsonl |
-| Quality ramp-up | ✅ Implémenté | Blend 5→20 trades avant score plein |
-| Budget dispatch (write) | ✅ Implémenté | _write_budget() → logs/bot_z/budget.json |
-| Risk Budgeting par trade | 🔲 Prévu | `risk_per_trade_eur` dans budget.json (après revue) |
-| Budget dispatch (read) | 🔲 Prévu | A/B/C/G lisent budget.json pour sizing |
-| Revue résultats | 📅 2026-04-30 | analyze_botz.py sur 55 jours de data live |
+| Paper Trading Meta v2 | ✅ En cours | 10 000€, démarré 2026-03-06 |
+| MTM réel | ✅ Implémenté | Prix live via OHLCV daily |
+| Engine reasons logging | ✅ Implémenté | ~15 champs dans shadow.jsonl |
+| Quality ramp-up | ✅ Implémenté | Blend 5→20 trades |
+| Budget dispatch (write) | ✅ Implémenté | _write_budget() → budget.json |
+| Budget dispatch (apply) | ✅ Implémenté | _apply_z_budget() actif depuis 2026-03-08 |
+| Risk Parity allocation | ✅ Implémenté | 60% engine + 40% inverse-vol |
+| Levier conditionnel BULL | ✅ Implémenté | Vol targeting CTA (Run 17) |
+| Corrélation dynamique | ✅ Implémenté | Pearson pairwise 20 trades |
+| BTC vol override | ✅ Implémenté | > 80% → force HIGH_VOL |
+| Drift tracking | ✅ Implémenté | Warning si > 20% |
+| Notify Z dispatch | ✅ Implémenté | Telegram si changement > 15% |
+| MCPS analyze | ✅ Implémenté | analyze_botz.py, dès 10 cycles |
+| Mobile dashboard | ✅ Implémenté | Bottom nav, 6 KPIs, colonne Vol |
+| Weight caps allocation | ✅ Implémenté 2026-03-09 | A:5-50% B:0-30% C:0-25% G:15-55% |
+| Smooth engine transition | ✅ Implémenté 2026-03-09 | Défense 40%/cycle, rebond 20%/cycle |
+| H/I/J engine-awareness | ✅ Implémenté 2026-03-09 | bot_z_engine injecté dans macro |
+| Risk per trade | 🔲 Prévu | `size = 0.4%×z_capital / \|entry−stop\|` |
+| Ajout Bot J ou H ou I | 🔲 Prévu | Si MCPS > 0 et corr < 0.3 (revue 04/30) |
+| Revue résultats | 📅 2026-04-30 | analyze_botz.py sur 55 jours live |
 | Live Trading | 🔲 Futur | Après validation ~6 mois paper |
 
 ---
 
-## Backtests 6 ans (2020-2026)
+## Résumé des appels API par cycle
 
-**Script** : `backtest/multi_backtest.py`
-**Résultats** : `docs/BACKTEST_RESULTS.md`
-**Graphique** : `backtest/results/multi_equity.png`
-**CSV** : `backtest/results/multi_summary.csv`, `bot_z_comparison.csv`
+| Bot | API | Nb appels/cycle (estimé) | Coût/cycle |
+|-----|-----|--------------------------|------------|
+| A | Anthropic Haiku | 0-3 (si signal passe filtres durs) | ~$0.001 |
+| B | Aucun | 0 | $0 |
+| C | Aucun | 0 | $0 |
+| D | DeepSeek Reasoner | 0-10 (désactivé en prod) | ~$0.002 |
+| E | Anthropic Sonnet | 0-10 (désactivé en prod) | ~$0.05 |
+| F | Anthropic Haiku | 0-10 (désactivé en prod) | ~$0.008 |
+| G | Aucun | 0 | $0 |
+| H | Aucun | 0 | $0 |
+| I | Aucun | 0 | $0 |
+| A pré-marché | Anthropic Haiku | 1/jour ouvré | ~$0.005/jour |
 
-### Lancer le backtest
+**Total journalier estimé (prod)** : $0.01-0.03/jour (D/E/F désactivés)
 
-```bash
-python backtest/multi_backtest.py
-```
+---
 
-Durée : ~45s (fetch 16 symboles × 6 ans + 7 bots + 8 structures Bot Z + MC 5000)
+## Alertes crédit API (système persistant)
 
-### 8 structures Bot Z simulées
+**Fichier** : `live/notifier.py` — `set_api_alert` / `clear_api_alert` / `resend_pending_alerts`
+**State** : `logs/api_alerts.json`
 
-| Structure | CAGR | Sharpe | MaxDD | Clé résultats |
-|-----------|------|--------|-------|---------------|
-| Equal-Weight | +46.4% | 1.20 | -31.1% | Baseline |
-| Régime pur | +54.6% | 1.40 | -27.5% | Calibration v2 |
-| Hybride 70/30 | +44.2% | 1.30 | -25.3% | Base fixe + overlay |
-| **Omega** | **+55.5%** | **1.96** | **-8.7%** | ER+Risk+Corr dynamique |
-| **Enhanced** (prod) | **+59.8%** | **1.61** | **-18.9%** | MO + CB single |
-| Pro | +29.9% | 1.90 | -9.1% | VT + multi-CB |
-| Adaptive | +29.4% | 1.60 | -11.7% | Meta-switch E/B/P |
-| **Omega** | +55.5% | **1.96** | **-8.7%** | ER+Risk+Corr+softmax |
-| Omega v2 | +26.1% | **2.03** | **-7.6%** | Omega + Risk Parity + Meta-Learning |
-| **Meta** | +38.6% | 1.54 | -15.1% | Méta-sélecteur ENHANCED/OMEGA/OMEGA_V2/PRO |
+Si une API retourne une erreur de crédit/quota :
+1. Telegram immédiat : "Crédits X épuisés"
+2. `logs/api_alerts.json` mis à jour
+3. Rappel Telegram à **chaque cycle** jusqu'au rechargement
+4. Bannière rouge en haut du **dashboard** (`/api/alerts`)
+5. Dès que l'API répond à nouveau : alerte "Crédits rechargés" + bannière disparaît
 
-### Validations statistiques incluses
+Mots-clés détectés : `credit`, `billing`, `insufficient`, `balance`, `quota`, `402`, `payment`, `funds`, `overdue`
 
-- **Walk-Forward** : IS 2020-2022 / OOS 2023-2026 → Bot Z OOS +41.5% (**EDGE RÉEL**)
-- **Monte Carlo** : 5000 simulations ordre trades aléatoire → 100% positif tous bots
-- **Sharpe corrigé** : calculé sur retours actifs uniquement (|r| > 1e-8)
+Hooks dans : `live/claude_filter.py`, `strategies/llm_strategy.py`, `claude_llm_strategy.py`, `haiku_llm_strategy.py`
 
-### Métriques calculées
+---
 
-- **CAGR** : rendement annualisé composé
-- **Sharpe** : return / volatilité × √252 sur retours actifs (> 1.5 = excellent)
-- **Max DD** : pire drawdown depuis le pic
-- **Profit Factor** : gains bruts / pertes brutes (> 1.5 = stratégie rentable)
-- **Performance par année** : 2020→2026 (inclut bull 2021, bear 2022, rebond 2023)
+## Symboles tradés
 
-### Note méthodologique
+**Crypto (5)** : BTC/EUR, ETH/EUR, SOL/EUR, BNB/EUR, TON/EUR
+*(LINK/EUR et AVAX/EUR retirés — PF < 1 sur 1 et 3 ans)*
 
-- Crypto : Binance depuis 2020 (6 ans) | xStocks : yfinance depuis 2022 (4 ans)
-- Frais et slippage appliqués : 0.26% + 0.10% par trade
-- Simulation Bot Z : retours quotidiens composés (correct) — pas de ratios cumulés
-- Pas de filtre Claude sur Bot A en backtest (assume toujours CONFIRME)
+**xStocks paper Kraken (11)** : NVDAx, AAPLx, MSFTx, METAx, GOOGx, PLTRx, AMDx, AVGOx, GLDx, NFLXx, CRWDx
+*(TSLAx retiré — WR=20% ; AMZNx retiré — PF=0.07)*
+
+**Total** : 16 symboles
+
+**Bot C uniquement** : BTC/EUR, ETH/EUR, SOL/EUR
+**Bot H uniquement** : BTC/EUR, ETH/EUR, SOL/EUR, NVDAx, AMDx, METAx, PLTRx
+**Bots A, B, D, E, F, G, I** : tous les 16 symboles
 
 ---
 
@@ -819,13 +900,60 @@ Durée : ~45s (fetch 16 symboles × 6 ans + 7 bots + 8 structures Bot Z + MC 500
 
 | Règle | Valeur |
 |-------|--------|
-| Max drawdown portfolio | -15% → alerte Telegram |
+| Max drawdown portfolio | -12% → SHIELD forcé |
+| Max drawdown alerte | -15% → alerte Telegram |
 | Frais taker Kraken | 0.26% |
 | Slippage estimé | 0.10% |
 | Stop loss Bot A | 3×ATR trailing (trend) / 1×ATR (MR) |
 | Stop loss Bot B | -12% fixe par position |
-| Stop loss Bot C | 2×ATR Turtle N-stop |
+| Stop loss Bot C | 2×ATR Turtle N-stop (vérifié sur LOW) |
 | Stop loss Bot D/E/F | 2×ATR trailing |
 | Stop loss Bot G | 3×ATR trailing + SMA200 break |
 | Stop loss Bot H | 1.5×ATR entrée + 3×ATR trailing |
 | Stop loss Bot I | 2.5×ATR trailing + hard -10% + SMA50 break |
+
+---
+
+## Dashboard (2026-03-08 — Mobile-first)
+
+**URL** : https://vps-957c8713.vps.ovh.net/ (admin / htpasswd)
+**Fichier** : `dashboard/templates/index.html`
+
+### Navigation
+- **Desktop** : top nav — Portfolio Z | Stratégies | Lab LLM | Logs
+- **Mobile** (< 768px) : bottom nav fixe avec icônes — Portfolio/Bots/Lab/Logs
+
+### Vue Portfolio Z (principale)
+- Engine Hero : nom engine 48px coloré + countdown prochain cycle + heure Paris live
+- 6 KPIs : z_capital | CAGR | Sharpe | MaxDD | Engine | **Dispatch Z** (budget total A+B+C+G)
+- Doughnut allocation + allocation table avec colonne **Vol** (volatilité par bot)
+- Courbe equity colorée par engine + timeline engines
+- Logs colorisés : `[Z→]` en accent, `MCPS`/`risk parity` en violet
+
+### Countdown + heure Paris
+- Cycles UTC : [3, 7, 11, 15, 19, 23] → Paris CET : [4, 8, 12, 16, 20, 0]
+- Calcul via `getUTCHours()` (corrigé — l'ancienne version utilisait `getTimezoneOffset()`)
+
+---
+
+## Commandes revue 2026-04-30
+
+```bash
+# Récupérer les données live VPS
+scp ubuntu@51.210.13.248:/home/botuser/bot-trading/logs/bot_z/shadow.jsonl backtest/results/
+
+# Rapport complet avec MCPS
+python backtest/analyze_botz.py --csv
+
+# Backtest 10 ans
+python backtest/run10y.py
+```
+
+Questions clés à évaluer :
+- Fréquence switchs engine (< 0.3/j = sain)
+- % temps SHIELD (< 30%)
+- MaxDD live (< 12%)
+- Drift (< 15% stable)
+- vol_factor (0.85-1.15 = vol targeting actif)
+- MCPS par bot (UTILE ou À RETIRER)
+- Drift descendu sous 15% (quality scores remplis en 2-3 semaines)

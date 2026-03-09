@@ -1,4 +1,4 @@
-Bot Z Meta v2+ — Documentation complète (mise à jour 2026-03-06)
+Bot Z Meta v2+ — Documentation complète (mise à jour 2026-03-08)
 =================================================================
 
 SOURCE DE VÉRITÉ : architecture live Bot Z Meta v2
@@ -38,13 +38,18 @@ Bots valides pour Bot Z :
   C — Breakout Turtle       (logs/breakout/state.json)
   G — Trend Multi-Asset     (logs/trend/state.json)
 
-Résultats backtest (2020-2026, 6 ans, multi_backtest.py Run 10) :
-  Meta v2 : CAGR +43.2% | Sharpe 1.70 | MaxDD -9.6% | 2022 +1.0%
-  Distribution engines : ENHANCED 17% / OMEGA 30% / OMEGA_V2 28% / PRO 25%
+Résultats backtest — Run 18 (10 ans 2016-2026, run10y.py) :
+  Meta v2 PROD : CAGR +38.2% | Sharpe 1.92 | MaxDD -10.1% | Années négatives : 2018 (-0.6%), 2022 (-0.5%)
+  Distribution engines (backtest 10 ans) : BULL 17% / BALANCED 30% / PARITY 28% / SHIELD 25%
 
 Améliorations Meta v2+ (implémentées 2026-03-06) :
   Switch cost penalty, regime confidence×persistence, volatility targeting,
   BTC realized vol override, corrélation inter-bots, allocation drift tracking.
+
+Améliorations 2026-03-09 :
+  Weight caps allocation (évite sur-concentration Bot C),
+  Smooth engine transition (interpolation asymétrique défense/rebond),
+  Engine-awareness bots H/I/J (bot_z_engine injecté dans macro_context).
 
 ---
 
@@ -121,10 +126,10 @@ Récupération : DD > -10% → +0.005/cycle
 CB tiers adaptés par engine (appliqués après la sélection d'engine) :
 
   Engine     Tier 1              Tier 2              Tier 3
-  ENHANCED   DD<-25% → ×0.30    —                   —
-  OMEGA      DD<-25% → ×0.30    —                   —
-  OMEGA_V2   DD<-20% → ×0.50    DD<-30% → ×0.30     —
-  PRO        DD<-10% → ×0.80    DD<-20% → ×0.50     DD<-30% → ×0.30
+  BULL       DD<-25% → ×0.30    —                   —
+  BALANCED   DD<-25% → ×0.30    —                   —
+  PARITY     DD<-20% → ×0.50    DD<-30% → ×0.30     —
+  SHIELD     DD<-10% → ×0.80    DD<-20% → ×0.50     DD<-30% → ×0.30
 
 Si VIX > 35, le cb_factor est plafonné à 0.70 (30% cash minimum forcé).
 exposition effective = z_capital × cb_factor
@@ -136,12 +141,12 @@ exposition effective = z_capital × cb_factor
 
 Hard rules (priorité absolue)
 
-  PRO forcé si :
+  SHIELD forcé si :
     (BTC bearish ET QQQ bearish ET VIX > 26)
     OU VIX > 32
     OU DD < -12%
 
-  ENHANCED bloqué si :
+  BULL bloqué si :
     BTC bearish OU QQQ bearish
 
 Scoring data-driven (si aucune hard rule)
@@ -160,15 +165,15 @@ Scoring data-driven (si aucune hard rule)
     regime_strength   : min(1.0, days_in_current_regime / REGIME_PERSIST_DAYS)
                         → 1j=0.14, 3j=0.43, 7j=1.0
     rf = regime_fit × regime_confidence × regime_strength
-    En début de régime ou en transition → rf réduit → OMEGA favorisé (neutre)
+    En début de régime ou en transition → rf réduit → BALANCED favorisé (neutre)
 
   regime_fit — table fixe calibrée sur backtest 2020-2026 :
 
     Engine     BULL   RANGE  HIGH_VOL  BEAR
-    ENHANCED   1.0    0.6    0.3       0.1
-    OMEGA      0.8    0.8    0.7       0.5
-    OMEGA_V2   0.5    0.7    0.9       0.8
-    PRO        0.3    0.5    0.8       1.0
+    BULL       1.0    0.6    0.3       0.1
+    BALANCED   0.8    0.8    0.7       0.5
+    PARITY     0.5    0.7    0.9       0.8
+    SHIELD     0.3    0.5    0.8       1.0
 
   quality_norm — Sharpe proxy sur les 20 derniers trades (avec ramp-up) :
     < 5 trades  → score neutre 1.0 (évite l'instabilité en début de paper)
@@ -178,9 +183,9 @@ Scoring data-driven (si aucune hard rule)
     quality_norm = avg(scores) / max(scores)
 
   inv_risk_norm — profil différent par engine :
-    PRO     : favorisé quand vol haute → min(1.0, avg_vol / TARGET_VOL)
-    OMEGA_V2: favorisé en stress modéré → 0.3 + ((VIX-20)/20) × 0.7
-    ENHANCED/OMEGA : favorisés quand vol basse → 1.0 - avg_vol / max_vol
+    SHIELD  : favorisé quand vol haute → min(1.0, avg_vol / TARGET_VOL)
+    PARITY  : favorisé en stress modéré → 0.3 + ((VIX-20)/20) × 0.7
+    BULL/BALANCED : favorisés quand vol basse → 1.0 - avg_vol / max_vol
 
   Engine reasons loggés dans shadow.jsonl :
     hard_rule_pro, block_enhanced, btc_bearish, qqq_bearish, vix,
@@ -190,10 +195,10 @@ Scoring data-driven (si aucune hard rule)
 Hysteresis (confirmations requises avant switch)
 
   Engine cible   Jours de confirmation
-  ENHANCED       7 jours
-  OMEGA          5 jours
-  OMEGA_V2       4 jours
-  PRO            3 jours (protection rapide)
+  BULL           7 jours
+  BALANCED       5 jours
+  PARITY         4 jours
+  SHIELD         3 jours (protection rapide)
 
 Pendant la confirmation : current_engine inchangé, pending_engine et
 days_pending trackés en state.
@@ -205,35 +210,35 @@ days_pending trackés en state.
 
 Tables de poids par engine × régime :
 
-ENHANCED → REGIME_WEIGHTS :
+BULL → REGIME_WEIGHTS :
   Régime     A     B     C     G
   BULL       0.8   1.0   0.5   1.2
   RANGE      1.0   0.8   0.7   0.8
   BEAR       0.3   0.0   1.5   1.2
   HIGH_VOL   0.5   0.3   1.0   0.8
 
-OMEGA → OMEGA_WEIGHTS :
+BALANCED → BALANCED_WEIGHTS :
   Régime     A     B     C     G
   BULL       0.9   1.1   0.7   1.0
   RANGE      1.0   0.9   0.8   0.9
   BEAR       0.4   0.1   1.3   1.1
   HIGH_VOL   0.6   0.4   1.2   1.0
 
-PRO → PRO_WEIGHTS (B toujours = 0, défensif pur) :
+SHIELD → SHIELD_WEIGHTS (B toujours = 0, défensif pur) :
   Régime     A     B     C     G
   BULL       0.2   0.0   1.8   1.0
   RANGE      0.3   0.0   1.8   1.0
   BEAR       0.1   0.0   2.0   1.0
   HIGH_VOL   0.2   0.0   1.8   1.0
 
-OMEGA_V2 → blend 50/50 OMEGA + inverse-vol (risk parity) :
+PARITY → blend 50/50 BALANCED + inverse-vol (risk parity) :
   inv_vol[b] = 1 / compute_bot_volatility(b)   # vol annualisée approx
   rp_weight[b] = inv_vol[b] / sum(inv_vol)
   final_weight[b] = 0.5 × omega_norm[b] + 0.5 × rp_weight[b]
 
-Modulation qualité (sauf PRO) :
+Modulation qualité (sauf SHIELD) :
   raw_weight[b] = regime_weight[b] × rolling_score[b]
-  PRO : poids fixes, rolling score ignoré
+  SHIELD : poids fixes, rolling score ignoré
 
 Normalisation + caps :
   norm_weight[b] = raw_weight[b] / sum(raw_weights)
@@ -267,6 +272,23 @@ Priorité anti-surexposition actif (G > C > A > B) :
   Si un même actif est détenu par plus de 2 bots simultanément,
   le bot de moindre priorité voit son budget × 0.3.
 
+Weight caps (ajouté 2026-03-09) :
+  Après le blend risk-parity, les poids sont bornés par un algorithme itératif (15 iter max) :
+    A : min=5%  max=50%
+    B : min=0%  max=30%
+    C : min=0%  max=25%  ← Bot C était à 64% en SHIELD (CAGR réel +0.6%) — insoutenable
+    G : min=15% max=55%  ← vrai stabilisateur (+23.4%), peut dominer en SHIELD
+  Effet SHIELD avec caps : A≈19% B=0% C≈25% G≈56% (vs avant : A=3% C=65% G=32%)
+
+Smooth engine transition (ajouté 2026-03-09) :
+  Au lieu d'un switch instantané des poids, interpolation progressive :
+    speed = 0.40/cycle si direction défensive (BALANCED→SHIELD ou →PARITY)
+    speed = 0.20/cycle si direction offensive (SHIELD→BULL ou →BALANCED)
+  Asymétrie intentionnelle :
+    - Réagir vite en crise (~10h pour atteindre SHIELD) : protège le capital
+    - Revenir lentement au risk-on (~20h) : évite les faux rebonds
+  Stocké dans state["last_blended_weights"] et state["prev_engine_smooth"].
+
 ---
 
 Étape 6 — Budget dispatch
@@ -284,10 +306,7 @@ Priorité anti-surexposition actif (G > C > A > B) :
     }
   }
 
-Statut : budget calculé et loggé. A/B/C/G ne lisent pas encore ce
-fichier pour leur sizing — ils utilisent leur capital propre (1 000€).
-C'est la prochaine étape architecturale (à faire après quelques semaines
-de données paper).
+Statut : ACTIF depuis 2026-03-08. `_apply_z_budget()` dans `multi_runner.py` scale le capital de chaque sub-bot après chaque cycle Bot Z. Notification Telegram (`notify_z_dispatch()`) envoyée si changement > 15%.
 
 ---
 
@@ -353,10 +372,7 @@ Usage :
 Lacunes connues et roadmap
 ---------------------------
 
-1. Budget dispatch non consommé (A/B/C/G lisent pas budget.json)
-   → Prochaine étape : brancher après quelques semaines de data paper
-   → 3 niveaux : (1) nouvelles entrées seulement, (2) reduce_only si
-     exposition > budget, (3) sortie forcée graduelle si budget=0 prolongé
+1. Budget dispatch ACTIF depuis 2026-03-08 — A/B/C/G reçoivent leur part réelle du capital via `_apply_z_budget()` dans multi_runner.py.
 
 2. Rolling scores instables en début de paper (< 5 trades)
    → Quality score neutre 1.0 pour tous — sélection engine repose
