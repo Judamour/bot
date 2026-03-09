@@ -963,6 +963,9 @@ def run_bot_z_cycle(macro: dict, ohlcv: dict = None) -> dict:
     z_capital_history = z_capital_history[-25:]  # garde 25 valeurs (20 retours + marge)
     portfolio_vol = compute_portfolio_vol(z_capital_history)
     vol_factor = max(0.3, min(1.5, TARGET_PORTFOLIO_VOL / max(portfolio_vol, 0.01)))
+    # Ramp-up protection : pas de levier les 20 premiers cycles (portfolio_vol peu fiable)
+    if len(z_capital_history) < 20:
+        vol_factor = min(vol_factor, 1.0)
     cb_factor_vol = round(cb_factor * vol_factor, 3)
 
     # Corrélation inter-bots : si trop corrélés → réduit l'exposition de 20%
@@ -1097,7 +1100,7 @@ def run_bot_z_cycle(macro: dict, ohlcv: dict = None) -> dict:
     # Sinon : pre-dispatch=4000€ → post-dispatch=10000€ → faux retour +150% au cycle suivant.
     state["last_bot_values"]     = {b: round(budget.get(b, bot_values.get(b, 0)), 2) for b in VALID_BOTS}
     state["last_bot_raw_values"] = bot_values  # valeurs réelles pour debug/MTM
-    state["last_alloc_weights"]  = alloc_weights
+    state["last_alloc_weights"]  = blended  # poids réels du budget (blended = 60% engine + 40% inv-vol + caps + smooth)
     state["current_engine"]      = current_engine
     state["pending_engine"]      = pending_engine
     state["days_pending"]        = days_pending

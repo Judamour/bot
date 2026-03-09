@@ -87,10 +87,12 @@ def _apply_z_budget(state: dict, z_budget_eur: float) -> dict:
     prev = state.get("z_budget_eur", state.get("initial_capital", INITIAL_CAPITAL_PER_BOT))
     if prev <= 0:
         prev = INITIAL_CAPITAL_PER_BOT
-    if abs(z_budget_eur - prev) / prev > 0.02:  # changement > 2% → rescale
-        scale = z_budget_eur / prev
-        state["capital"] = round(state["capital"] * scale, 2)
-        state["initial_capital"] = round(z_budget_eur, 2)
+    # Toujours appliquer le scale (même < 2%) pour rester cohérent avec
+    # last_bot_values stocké dans bot_z state. Un écart non appliqué crée
+    # un phantom P&L au cycle suivant (bot_values ≠ prev_bot_values sans trade).
+    scale = z_budget_eur / prev
+    state["capital"] = round(state["capital"] * scale, 2)
+    state["initial_capital"] = round(z_budget_eur, 2)
     state["z_budget_eur"] = round(z_budget_eur, 2)
     return state
 
