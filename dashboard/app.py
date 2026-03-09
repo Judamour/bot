@@ -507,6 +507,72 @@ def api_bot_z_history():
     return jsonify({"history": daily, "count": len(daily)})
 
 
+@app.route("/api/trades")
+def api_trades():
+    """Positions actives + trades fermés récents — tous bots confondus."""
+    ALL_BOTS = ["a", "b", "c", "g", "h", "i", "j"]
+    open_positions = []
+    closed_trades  = []
+
+    for bot_id in ALL_BOTS:
+        state = load_bot_state(bot_id)
+        bot_name = _BOT_NAMES.get(bot_id, bot_id.upper())
+        bot_color = _BOT_COLORS.get(bot_id, "#888")
+
+        # Positions ouvertes
+        for symbol, pos in state.get("positions", {}).items():
+            entry = pos.get("entry", 0)
+            size  = pos.get("size", 0)
+            current = _live_prices.get(symbol, entry)
+            pnl_eur = (current - entry) * size
+            pnl_pct = ((current - entry) / entry * 100) if entry else 0
+            open_positions.append({
+                "bot":       bot_id.upper(),
+                "bot_name":  bot_name,
+                "bot_color": bot_color,
+                "symbol":    symbol,
+                "entry":     round(entry, 4),
+                "current":   round(current, 4),
+                "size":      round(size, 6),
+                "value":     round(current * size, 2),
+                "cost":      round(pos.get("cost", entry * size), 2),
+                "pnl_eur":   round(pnl_eur, 2),
+                "pnl_pct":   round(pnl_pct, 2),
+                "stop":      round(pos.get("stop", 0), 4),
+                "date":      str(pos.get("date", ""))[:16],
+            })
+
+        # Trades fermés (30 derniers par bot, on merge ensuite)
+        for t in state.get("trades", [])[-30:]:
+            closed_trades.append({
+                "bot":        bot_id.upper(),
+                "bot_name":   bot_name,
+                "bot_color":  bot_color,
+                "symbol":     t.get("symbol", "?"),
+                "entry_date": str(t.get("entry_date", ""))[:16],
+                "exit_date":  str(t.get("exit_date", ""))[:16],
+                "entry_price": round(t.get("entry_price", 0), 4),
+                "exit_price":  round(t.get("exit_price", 0), 4),
+                "pnl":         round(t.get("pnl", 0), 2),
+                "result":      t.get("result", "unknown"),
+                "reason":      t.get("reason", ""),
+            })
+
+    # Trier : positions ouvertes par P&L desc, trades fermés par date desc
+    open_positions.sort(key=lambda x: x["pnl_eur"], reverse=True)
+    closed_trades.sort(key=lambda x: x["exit_date"], reverse=True)
+
+    total_pnl_open = sum(p["pnl_eur"] for p in open_positions)
+
+    return jsonify({
+        "open_positions": open_positions,
+        "closed_trades":  closed_trades[:50],   # 50 derniers tous bots
+        "open_count":     len(open_positions),
+        "closed_count":   len(closed_trades),
+        "total_pnl_open": round(total_pnl_open, 2),
+    })
+
+
 @app.route("/api/alerts")
 def api_alerts():
     """Retourne les alertes API actives (crédits épuisés)."""

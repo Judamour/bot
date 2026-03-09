@@ -396,6 +396,7 @@
 <nav class="nav">
   <button class="nav-btn active" onclick="switchTab('portfolio')">Portfolio Z</button>
   <button class="nav-btn" onclick="switchTab('strategies')">Strategies <span class="nav-badge" id="nb-strat">4</span></button>
+  <button class="nav-btn" onclick="switchTab('trades')">Trades <span class="nav-badge" id="nb-trades">—</span></button>
   <button class="nav-btn" onclick="switchTab('lab')">Lab LLM <span class="nav-badge">D/E/F</span></button>
   <button class="nav-btn" onclick="switchTab('logs')">Logs</button>
   <button class="nav-btn" onclick="switchTab('docs')">Documentation</button>
@@ -411,17 +412,17 @@
     <span class="bnav-icon">🤖</span>
     <span class="bnav-lbl">Bots</span>
   </button>
-  <button class="bnav-btn" onclick="switchTab('lab')" id="bnav-lab">
-    <span class="bnav-icon">🧪</span>
-    <span class="bnav-lbl">Lab</span>
-  </button>
-  <button class="bnav-btn" onclick="switchTab('docs')" id="bnav-docs">
-    <span class="bnav-icon">📖</span>
-    <span class="bnav-lbl">Docs</span>
+  <button class="bnav-btn" onclick="switchTab('trades')" id="bnav-trades">
+    <span class="bnav-icon">💹</span>
+    <span class="bnav-lbl">Trades</span>
   </button>
   <button class="bnav-btn" onclick="switchTab('logs')" id="bnav-logs">
     <span class="bnav-icon">📋</span>
     <span class="bnav-lbl">Logs</span>
+  </button>
+  <button class="bnav-btn" onclick="switchTab('docs')" id="bnav-docs">
+    <span class="bnav-icon">📖</span>
+    <span class="bnav-lbl">Docs</span>
   </button>
 </nav>
 
@@ -608,6 +609,91 @@
   </div>
 
 </div><!-- /tab-strategies -->
+
+
+<!-- ═══════════════════════════════════════════════════════════════
+     TAB: TRADES
+═══════════════════════════════════════════════════════════════ -->
+<div id="tab-trades" class="tab-content">
+
+  <!-- KPIs summary -->
+  <div class="kpi-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:20px;margin-top:0">
+    <div class="kpi-card">
+      <div class="kpi-label">Positions ouvertes</div>
+      <div class="kpi-val" id="tr-open-count">—</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">P&L flottant total</div>
+      <div class="kpi-val" id="tr-pnl-open">—</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Trades fermés (affiché)</div>
+      <div class="kpi-val" id="tr-closed-count">—</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">P&L fermés (affiché)</div>
+      <div class="kpi-val" id="tr-pnl-closed">—</div>
+    </div>
+  </div>
+
+  <!-- Positions actives -->
+  <div class="section-row" style="margin-top:0;margin-bottom:12px">
+    <div class="section-title">Positions actives</div>
+    <div class="section-line"></div>
+    <button onclick="loadTrades()" style="background:var(--surface2);border:1px solid var(--border);color:var(--muted);padding:4px 12px;border-radius:6px;cursor:pointer;font-size:11px;font-family:inherit;min-height:44px">Rafraîchir</button>
+  </div>
+
+  <div class="alloc-table-wrap" style="margin-bottom:24px">
+    <table class="alloc-table" id="open-pos-table">
+      <thead>
+        <tr>
+          <th>Bot</th>
+          <th>Symbole</th>
+          <th>Entrée</th>
+          <th>Prix actuel</th>
+          <th>Taille</th>
+          <th>Valeur</th>
+          <th>P&L €</th>
+          <th>P&L %</th>
+          <th>Stop</th>
+          <th>Depuis</th>
+        </tr>
+      </thead>
+      <tbody id="open-pos-tbody">
+        <tr><td colspan="10" style="color:var(--muted);text-align:center;padding:20px">Chargement...</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Trades fermés récents -->
+  <div class="section-row" style="margin-bottom:12px">
+    <div class="section-title">Trades fermés récents</div>
+    <div class="section-line"></div>
+    <div style="font-size:10px;color:var(--muted)">50 derniers tous bots</div>
+  </div>
+
+  <div class="alloc-table-wrap">
+    <table class="alloc-table" id="closed-trades-table">
+      <thead>
+        <tr>
+          <th>Bot</th>
+          <th>Symbole</th>
+          <th>Entrée</th>
+          <th>Sortie</th>
+          <th>Date entrée</th>
+          <th>Date sortie</th>
+          <th>P&L €</th>
+          <th>Résultat</th>
+          <th>Raison</th>
+        </tr>
+      </thead>
+      <tbody id="closed-trades-tbody">
+        <tr><td colspan="9" style="color:var(--muted);text-align:center;padding:20px">Chargement...</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+</div><!-- /tab-trades -->
 
 
 <!-- ═══════════════════════════════════════════════════════════════
@@ -1007,7 +1093,7 @@ function switchTab(tab) {
   document.getElementById('tab-' + tab).classList.add('active');
 
   // Top nav
-  const tabs = ['portfolio','strategies','lab','logs','docs'];
+  const tabs = ['portfolio','strategies','trades','lab','logs','docs'];
   const idx = tabs.indexOf(tab);
   const navBtns = document.querySelectorAll('.nav-btn');
   if (idx >= 0 && navBtns[idx]) navBtns[idx].classList.add('active');
@@ -1017,9 +1103,10 @@ function switchTab(tab) {
   if (bnavBtn) bnavBtn.classList.add('active');
 
   // Lazy load
-  if (tab === 'logs') loadLogs();
+  if (tab === 'logs')       loadLogs();
   if (tab === 'strategies' && !_stratLoaded) { _stratLoaded = true; loadStrategies(); }
   if (tab === 'lab'        && !_labLoaded)   { _labLoaded   = true; loadLab(); }
+  if (tab === 'trades')     loadTrades();
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -1491,6 +1578,99 @@ function renderObservationBots(obsBots, engine) {
   }).join('');
 }
 
+// ── Trades tab ───────────────────────────────────────────────────────────────
+
+async function loadTrades() {
+  try {
+    const r = await fetch('/api/trades');
+    const d = await r.json();
+    renderTrades(d);
+    // Badge dans le nav
+    const badge = document.getElementById('nb-trades');
+    if (badge) badge.textContent = d.open_count || 0;
+  } catch(e) { console.error('loadTrades:', e); }
+}
+
+function renderTrades(d) {
+  const openPos  = d.open_positions  || [];
+  const closed   = d.closed_trades   || [];
+
+  // KPIs
+  const pnlOpen = d.total_pnl_open || 0;
+  const pnlClosed = closed.reduce((acc, t) => acc + (t.pnl || 0), 0);
+
+  const ocEl = document.getElementById('tr-open-count');
+  if (ocEl) ocEl.textContent = d.open_count || 0;
+
+  const opEl = document.getElementById('tr-pnl-open');
+  if (opEl) {
+    opEl.textContent = (pnlOpen >= 0 ? '+' : '') + fmtEur(pnlOpen);
+    opEl.className = 'kpi-val ' + perfClass(pnlOpen);
+  }
+
+  const ccEl = document.getElementById('tr-closed-count');
+  if (ccEl) ccEl.textContent = closed.length;
+
+  const cpEl = document.getElementById('tr-pnl-closed');
+  if (cpEl) {
+    cpEl.textContent = (pnlClosed >= 0 ? '+' : '') + fmtEur(pnlClosed);
+    cpEl.className = 'kpi-val ' + perfClass(pnlClosed);
+  }
+
+  // Open positions table
+  const oBody = document.getElementById('open-pos-tbody');
+  if (oBody) {
+    if (!openPos.length) {
+      oBody.innerHTML = '<tr><td colspan="10" style="color:var(--muted);text-align:center;padding:24px">Aucune position ouverte</td></tr>';
+    } else {
+      oBody.innerHTML = openPos.map(p => {
+        const pnlColor = p.pnl_eur >= 0 ? 'var(--green)' : 'var(--red)';
+        const botColor = p.bot_color || '#888';
+        const stopPct  = p.entry > 0 ? ((p.stop - p.entry) / p.entry * 100) : 0;
+        return `<tr>
+          <td><div class="bot-name-cell"><div class="bot-dot" style="background:${botColor}"></div>${p.bot}</div></td>
+          <td style="font-weight:700">${p.symbol}</td>
+          <td style="color:var(--muted)">${fmtEur(p.entry)}</td>
+          <td style="font-weight:600">${fmtEur(p.current)}</td>
+          <td style="color:var(--muted);font-size:11px">${p.size}</td>
+          <td>${fmtEur(p.value)}</td>
+          <td style="font-weight:700;color:${pnlColor}">${p.pnl_eur >= 0 ? '+' : ''}${fmtEur(p.pnl_eur)}</td>
+          <td style="font-weight:700;color:${pnlColor}">${p.pnl_pct >= 0 ? '+' : ''}${fmt(p.pnl_pct,2)}%</td>
+          <td style="color:var(--red);font-size:11px">${fmtEur(p.stop)} <span style="color:var(--muted)">(${fmt(stopPct,1)}%)</span></td>
+          <td style="color:var(--muted);font-size:11px">${p.date || '—'}</td>
+        </tr>`;
+      }).join('');
+    }
+  }
+
+  // Closed trades table
+  const cBody = document.getElementById('closed-trades-tbody');
+  if (cBody) {
+    if (!closed.length) {
+      cBody.innerHTML = '<tr><td colspan="9" style="color:var(--muted);text-align:center;padding:24px">Aucun trade fermé</td></tr>';
+    } else {
+      cBody.innerHTML = closed.map(t => {
+        const win = t.result === 'win';
+        const pnlColor = win ? 'var(--green)' : 'var(--red)';
+        const resLabel = win ? '✓ Win' : '✗ Loss';
+        const resColor = win ? 'var(--green)' : 'var(--red)';
+        const botColor = t.bot_color || '#888';
+        return `<tr>
+          <td><div class="bot-name-cell"><div class="bot-dot" style="background:${botColor}"></div>${t.bot}</div></td>
+          <td style="font-weight:700">${t.symbol}</td>
+          <td style="color:var(--muted)">${fmtEur(t.entry_price)}</td>
+          <td style="color:var(--muted)">${fmtEur(t.exit_price)}</td>
+          <td style="font-size:11px;color:var(--muted)">${t.entry_date || '—'}</td>
+          <td style="font-size:11px;color:var(--muted)">${t.exit_date || '—'}</td>
+          <td style="font-weight:700;color:${pnlColor}">${t.pnl >= 0 ? '+' : ''}${fmtEur(t.pnl)}</td>
+          <td style="color:${resColor};font-weight:700">${resLabel}</td>
+          <td style="font-size:11px;color:var(--muted)">${t.reason || '—'}</td>
+        </tr>`;
+      }).join('');
+    }
+  }
+}
+
 // ── Load Lab LLM ─────────────────────────────────────────────────────────────
 
 async function loadLab() {
@@ -1660,12 +1840,20 @@ setInterval(updateClock, 1000);
 setInterval(() => {
   loadPortfolio();
   loadHistory();
+  // Refresh badge trades même si tab non visible
+  fetch('/api/trades').then(r => r.json()).then(d => {
+    const badge = document.getElementById('nb-trades');
+    if (badge) badge.textContent = d.open_count || 0;
+  }).catch(() => {});
 }, 60000);
 
 // Refresh strategies every 2 min si tab visible
 setInterval(() => {
   if (_stratLoaded && document.getElementById('tab-strategies').classList.contains('active')) {
     loadStrategies();
+  }
+  if (document.getElementById('tab-trades').classList.contains('active')) {
+    loadTrades();
   }
 }, 120000);
 </script>
