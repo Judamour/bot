@@ -291,9 +291,11 @@ def run():
                 f"QQQ: {'✓' if qqq_ok else '✗'}"
             )
 
-            # ── 2. Pre-fetch OHLCV 4h for Bot A (45 days) ────────────────────
-            log(f"Pre-fetching 4h OHLCV ({len(config.SYMBOLS)} symbols, 45 days)...")
-            ohlcv_4h = fetch_ohlcv_cache(config.SYMBOLS, timeframe="4h", days=45)
+            # ── 2. Pre-fetch OHLCV 4h for Bot A + Bot H VCB (55 days) ──────────
+            # Bot H (VCB) requires SMA200 + BB_PERCENTILE_LOOKBACK(100) + 10 = 310 bars
+            # 55 days × 6 bars/day = 330 bars > 310 minimum
+            log(f"Pre-fetching 4h OHLCV ({len(config.SYMBOLS)} symbols, 55 days)...")
+            ohlcv_4h = fetch_ohlcv_cache(config.SYMBOLS, timeframe="4h", days=55)
             log(f"4h cache: {len(ohlcv_4h)}/{len(config.SYMBOLS)} symbols ready")
 
             # ── 3. Pre-fetch daily OHLCV for Bots B & C (220 days) ───────────
