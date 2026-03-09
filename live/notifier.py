@@ -27,8 +27,9 @@ def notify(msg: str):
             json={"chat_id": chat_id, "text": msg, "parse_mode": "HTML"},
             timeout=5,
         )
-    except Exception:
-        pass
+    except Exception as e:
+        import logging
+        logging.warning(f"[notifier] Telegram indisponible : {e}")
 
 
 def notify_file(filepath: str, caption: str = ""):

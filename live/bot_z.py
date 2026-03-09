@@ -216,8 +216,16 @@ def select_engine_live(vix: float, btc_bearish: bool, qqq_bearish: bool,
 
 def load_state() -> dict:
     if os.path.exists(STATE_FILE):
-        with open(STATE_FILE) as f:
-            return json.load(f)
+        try:
+            with open(STATE_FILE) as f:
+                s = json.load(f)
+            # Validation minimale : champs critiques présents et cohérents
+            if not isinstance(s.get("z_capital"), (int, float)) or s["z_capital"] <= 0:
+                raise ValueError(f"z_capital invalide: {s.get('z_capital')}")
+            return s
+        except Exception as e:
+            import logging
+            logging.warning(f"[BOT Z] State corrompu ({e}) — reset sur valeurs par défaut")
     return {
         "initial_capital": INITIAL_CAP,
         "z_capital": INITIAL_CAP,
@@ -238,8 +246,10 @@ def load_state() -> dict:
 
 def save_state(state: dict):
     os.makedirs(os.path.dirname(STATE_FILE), exist_ok=True)
-    with open(STATE_FILE, "w") as f:
+    tmp = STATE_FILE + ".tmp"
+    with open(tmp, "w") as f:
         json.dump(state, f, indent=2, default=str)
+    os.replace(tmp, STATE_FILE)  # Atomique — évite JSON corrompu si crash pendant sauvegarde
 
 
 def _log_shadow(entry: dict):

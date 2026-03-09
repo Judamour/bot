@@ -55,7 +55,7 @@ def load_bot_state(bot_id: str) -> dict:
             "trades": [], "initial_capital": MULTI_INITIAL_CAPITAL}
 
 app = Flask(__name__)
-app.config["SECRET_KEY"] = "bot-trading-dashboard"
+app.config["SECRET_KEY"] = os.getenv("FLASK_SECRET_KEY", "bot-trading-dashboard-change-me-in-env")
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
 
 

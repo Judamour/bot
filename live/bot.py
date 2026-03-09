@@ -3,7 +3,7 @@ import time
 import json
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta  # timedelta requis par _next_cycle_utc()
 from colorama import Fore, Style, init
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -75,8 +75,11 @@ def load_state() -> dict:
 
 
 def save_state(state: dict):
-    with open(STATE_FILE, "w") as f:
+    # Écriture atomique : write temp + rename (évite JSON corrompu si crash pendant sauvegarde)
+    tmp = STATE_FILE + ".tmp"
+    with open(tmp, "w") as f:
         json.dump(state, f, indent=2, default=str)
+    os.replace(tmp, STATE_FILE)
 
 
 # ── Logging ──────────────────────────────────────────────────────────────────
@@ -203,7 +206,15 @@ def process_symbol(
             reason = "signal_exit"
 
         if reason:
-            exit_price_eff = exit_price * (1 - config.SLIPPAGE)
+            if not config.PAPER_TRADING:
+                from live.order_executor import execute_sell as _exec_sell
+                _order = _exec_sell(symbol, position["size"], exit_price, reason=reason)
+                if not _order.success:
+                    log(f"⛔ SELL {symbol} échoué en live: {_order.error} — position maintenue", "WARN")
+                    return state
+                exit_price_eff = _order.filled_price * (1 - config.EXCHANGE_FEE)
+            else:
+                exit_price_eff = exit_price * (1 - config.SLIPPAGE)
             fee_exit = exit_price_eff * position["size"] * config.EXCHANGE_FEE
             proceeds = exit_price_eff * position["size"] - fee_exit
             state["capital"] += proceeds
@@ -384,6 +395,17 @@ def process_symbol(
         if total_cost > state["capital"]:
             log(f"{symbol} — Capital insuffisant ({state['capital']:.2f}€)", "WARN")
             return state
+
+        if not config.PAPER_TRADING:
+            from live.order_executor import execute_buy as _exec_buy
+            _order = _exec_buy(symbol, pos["size"], current_price)
+            if not _order.success:
+                log(f"⛔ BUY {symbol} échoué en live: {_order.error}", "WARN")
+                return state
+            effective_buy = _order.filled_price
+            pos["size"] = _order.filled_size
+            fee_entry = effective_buy * pos["size"] * config.EXCHANGE_FEE
+            total_cost = pos["size"] * effective_buy + fee_entry
 
         state["capital"] -= total_cost
         position_data = {

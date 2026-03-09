@@ -113,8 +113,10 @@ def load_state_a() -> dict:
 
 def save_state_a(state: dict):
     os.makedirs("logs/supertrend", exist_ok=True)
-    with open(STATE_A_FILE, "w") as f:
+    tmp = STATE_A_FILE + ".tmp"
+    with open(tmp, "w") as f:
         json.dump(state, f, indent=2, default=str)
+    os.replace(tmp, STATE_A_FILE)
 
 
 # ── Logging ──────────────────────────────────────────────────────────────────
@@ -251,6 +253,19 @@ def run():
     state_h = load_vcb()
     state_i = load_rsl()
     state_j = load_mr()
+
+    # ── Startup checks (mode LIVE uniquement) ────────────────────────────────
+    if not config.PAPER_TRADING:
+        from live.order_executor import startup_check, reconcile_positions
+        log("⚠️  Mode LIVE — vérifications au démarrage...", "WARN")
+        if not startup_check():
+            log("⛔ Startup check ÉCHOUÉ — connexion Kraken impossible. Arrêt du bot.", "WARN")
+            return
+        log("✓ Startup check OK — connexion Kraken vérifiée", "OK")
+        # Reconcile positions pour chaque bot actif
+        for _bot_id, _state in [("a", state_a), ("b", state_b), ("c", state_c),
+                                  ("g", state_g), ("h", state_h), ("i", state_i), ("j", state_j)]:
+            reconcile_positions(_state, _bot_id)
 
     _prev_budget   = {}   # Track previous budget for change detection
     z_summary      = None # BUG-01 : initialisé ici pour éviter NameError si Bot Z crashe au 1er cycle
@@ -506,17 +521,23 @@ def run():
                     log(f"[notify_cycle_summary] erreur: {_e}", "WARN")
 
             # ── 16. Drawdown checks ───────────────────────────────────────────
+            max_dd_hit = False
             for name, state in [("A", state_a), ("B", state_b), ("C", state_c), ("D", state_d), ("E", state_e), ("F", state_f), ("G", state_g), ("H", state_h), ("I", state_i), ("J", state_j)]:
                 total = _portfolio_value(state, ohlcv_daily)
                 init = state.get("initial_capital", INITIAL_CAPITAL_PER_BOT)
                 dd = (total - init) / init
                 if dd <= config.MAX_DRAWDOWN:
-                    log(f"⛔ Bot {name}: MAX DRAWDOWN {dd*100:.1f}% atteint", "WARN")
+                    log(f"⛔ Bot {name}: MAX DRAWDOWN {dd*100:.1f}% atteint — ARRÊT DU BOT", "WARN")
                     from live.notifier import notify
                     notify(
                         f"⛔ <b>Bot {name} MAX DRAWDOWN</b> {dd*100:.1f}%\n"
-                        f"Seuil: {config.MAX_DRAWDOWN*100:.0f}%"
+                        f"Seuil: {config.MAX_DRAWDOWN*100:.0f}%\n"
+                        f"⚠️ Le bot s'est arrêté — intervention manuelle requise"
                     )
+                    max_dd_hit = True
+            if max_dd_hit:
+                log("⛔ MAX DRAWDOWN atteint — arrêt de la boucle de trading", "WARN")
+                break  # Stoppe réellement la boucle while True (ne continuait qu'avec un Telegram avant)
 
             # ── 17. Snapshot journalier pour Bot A ────────────────────────────
             bot_a._check_daily_snapshot(state_a)

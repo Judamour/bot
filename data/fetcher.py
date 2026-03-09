@@ -38,6 +38,8 @@ def _get_eurusd_rate() -> float:
             return float(df["Close"].iloc[-1])
     except Exception:
         pass
+    import logging
+    logging.warning("[fetcher] Taux EUR/USD indisponible — fallback 1.08 appliqué (sizing xStocks approximatif)")
     return 1.08
 
 

@@ -73,8 +73,10 @@ def load_state() -> dict:
 
 def save_state(state: dict):
     os.makedirs(os.path.dirname(STATE_FILE), exist_ok=True)
-    with open(STATE_FILE, "w") as f:
+    tmp = STATE_FILE + ".tmp"
+    with open(tmp, "w") as f:
         json.dump(state, f, indent=2, default=str)
+    os.replace(tmp, STATE_FILE)
 
 
 def log(msg: str, level: str = "INFO"):
@@ -229,7 +231,8 @@ def run_rs_leaders_cycle(state: dict, daily_cache: dict, macro_context: dict = N
         stop = pos.get("stop", 0)
         exit_reason = None
         exit_price = current_price
-        if stop > 0 and current_price <= stop:
+        low_price = float(df["low"].iloc[-1])  # Bot I : stop sur low comme A/C/G/H (stops intraday daily)
+        if stop > 0 and low_price <= stop:
             exit_reason = "trailing_stop"
             exit_price = stop
         # Exit : hard stop -10%
@@ -244,7 +247,15 @@ def run_rs_leaders_cycle(state: dict, daily_cache: dict, macro_context: dict = N
                 exit_reason = "sma50_break"
 
         if exit_reason:
-            exit_eff = exit_price * (1 - config.SLIPPAGE)
+            if not config.PAPER_TRADING:
+                from live.order_executor import execute_sell as _exec_sell
+                _order = _exec_sell(symbol, pos["size"], exit_price, reason=exit_reason)
+                if not _order.success:
+                    log(f"⛔ SELL {symbol} échoué en live: {_order.error} — position maintenue", "WARN")
+                    continue
+                exit_eff = _order.filled_price * (1 - config.EXCHANGE_FEE)
+            else:
+                exit_eff = exit_price * (1 - config.SLIPPAGE)
             fee = exit_eff * pos["size"] * config.EXCHANGE_FEE
             proceeds = exit_eff * pos["size"] - fee
             pnl = proceeds - pos["cost"]
@@ -317,7 +328,16 @@ def run_rs_leaders_cycle(state: dict, daily_cache: dict, macro_context: dict = N
             df = daily_cache.get(symbol)
             if df is None:
                 continue
-            exit_price = float(df["close"].iloc[-1]) * (1 - config.SLIPPAGE)
+            _raw_exit = float(df["close"].iloc[-1])
+            if not config.PAPER_TRADING:
+                from live.order_executor import execute_sell as _exec_sell
+                _order = _exec_sell(symbol, pos["size"], _raw_exit, reason=f"rs_exit_rank{rank}")
+                if not _order.success:
+                    log(f"⛔ SELL {symbol} échoué en live: {_order.error} — position maintenue", "WARN")
+                    continue
+                exit_price = _order.filled_price * (1 - config.EXCHANGE_FEE)
+            else:
+                exit_price = _raw_exit * (1 - config.SLIPPAGE)
             fee = exit_price * pos["size"] * config.EXCHANGE_FEE
             proceeds = exit_price * pos["size"] - fee
             pnl = proceeds - pos["cost"]
@@ -372,6 +392,17 @@ def run_rs_leaders_cycle(state: dict, daily_cache: dict, macro_context: dict = N
         if total_cost > state["capital"] or size <= 0:
             log(f"{symbol} — Capital insuffisant ({state['capital']:.2f}€)", "WARN")
             continue
+
+        if not config.PAPER_TRADING:
+            from live.order_executor import execute_buy as _exec_buy
+            _order = _exec_buy(symbol, size, entry_price)
+            if not _order.success:
+                log(f"⛔ BUY {symbol} échoué en live: {_order.error}", "WARN")
+                continue
+            entry_price = _order.filled_price
+            size = _order.filled_size
+            fee = entry_price * size * config.EXCHANGE_FEE
+            total_cost = size * entry_price + fee
 
         atr_s = compute_atr(df["high"], df["low"], df["close"], ATR_PERIOD)
         atr = float(atr_s.iloc[-1])
