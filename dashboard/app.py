@@ -576,6 +576,75 @@ def api_trades():
     })
 
 
+@app.route("/api/openclaw")
+def api_openclaw():
+    """Résumé compact pour OpenClaw — lecture seule, toutes données clés."""
+    # Bot Z
+    z_state = {}
+    if os.path.exists(_BOT_Z_FILE):
+        try:
+            with open(_BOT_Z_FILE) as f:
+                z_state = json.load(f)
+        except Exception:
+            pass
+
+    budget_file = os.path.join(BASE_DIR, "logs", "bot_z", "budget.json")
+    budget = {}
+    if os.path.exists(budget_file):
+        try:
+            with open(budget_file) as f:
+                budget = json.load(f).get("budget", {})
+        except Exception:
+            pass
+
+    z_capital = z_state.get("z_capital", 10000.0)
+    initial   = z_state.get("initial_capital", 10000.0)
+    engine    = z_state.get("current_engine", "UNKNOWN")
+    perf_pct  = round((z_capital - initial) / initial * 100, 2) if initial else 0
+
+    # Sub-bots A/B/C/G
+    bots_summary = []
+    for bot_id in ["a", "b", "c", "g", "h", "i"]:
+        state   = load_bot_state(bot_id)
+        metrics = compute_metrics(state, _live_prices)
+        positions = []
+        for pos in metrics["positions"]:
+            positions.append(f"{pos['symbol']} {pos['pnl_pct']:+.1f}%")
+        bots_summary.append({
+            "id":           bot_id.upper(),
+            "name":         _BOT_NAMES.get(bot_id, bot_id),
+            "capital_eur":  metrics["capital"],
+            "total_eur":    metrics["total_value"],
+            "pnl_pct":      metrics["pnl_pct"],
+            "pnl_eur":      metrics["pnl_eur"],
+            "open_trades":  metrics["open_trades"],
+            "total_trades": metrics["total_trades"],
+            "win_rate":     metrics["win_rate"],
+            "positions":    positions,
+            "budget_eur":   budget.get(bot_id, 0),
+        })
+
+    return jsonify({
+        "timestamp":    datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC"),
+        "paper_mode":   config.PAPER_TRADING,
+        "bot_z": {
+            "capital_eur": round(z_capital, 2),
+            "initial_eur": round(initial, 2),
+            "pnl_pct":     perf_pct,
+            "pnl_eur":     round(z_capital - initial, 2),
+            "engine":      engine,
+            "drawdown_pct": z_state.get("port_dd", 0),
+            "cb_factor":   z_state.get("cb_factor", 1.0),
+            "days_running": z_state.get("days_running", 0),
+            "vix":         z_state.get("last_regime_info", {}).get("vix", _vix_cache),
+            "regime":      z_state.get("last_regime", "RANGE"),
+            "warnings":    z_state.get("last_warnings", []),
+        },
+        "bots":          bots_summary,
+        "fear_greed":    _fear_greed_cache,
+    })
+
+
 @app.route("/api/alerts")
 def api_alerts():
     """Retourne les alertes API actives (crédits épuisés)."""
