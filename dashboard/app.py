@@ -9,7 +9,7 @@ import threading
 import time
 from datetime import datetime, timedelta
 
-from flask import Flask, jsonify, render_template
+from flask import Flask, jsonify, render_template, request
 from flask_socketio import SocketIO
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -39,6 +39,8 @@ BOT_CLAW_API = "http://127.0.0.1:5001/api/status"
 _BOT_Z_FILE = os.path.join(BASE_DIR, "logs", "bot_z", "state.json")
 MULTI_LOG   = os.path.join(BASE_DIR, "logs", "multi_runner.log")
 MULTI_INITIAL_CAPITAL = 1000.0
+CLAW_DISPLAY_FILE = os.path.join(BASE_DIR, "logs", "claw_display.json")
+CLAW_PUBLISH_TOKEN = os.getenv("CLAW_PUBLISH_TOKEN", "claw-token-change-me")
 
 
 def load_bot_state(bot_id: str) -> dict:
@@ -661,6 +663,55 @@ def api_openclaw():
         "bots":          bots_summary,
         "fear_greed":    _fear_greed_cache,
     })
+
+
+@app.route("/api/claw/content")
+def api_claw_content():
+    """Retourne le contenu publié par OpenClaw (whiteboard)."""
+    if os.path.exists(CLAW_DISPLAY_FILE):
+        try:
+            with open(CLAW_DISPLAY_FILE) as f:
+                return jsonify(json.load(f))
+        except Exception:
+            pass
+    return jsonify({"blocks": [], "last_updated": None})
+
+
+@app.route("/api/claw/publish", methods=["POST"])
+def api_claw_publish():
+    """OpenClaw publie du contenu à afficher dans l'onglet Claw.
+
+    Auth : header X-Claw-Token
+    Body JSON :
+    {
+        "title": "Analyse marché",
+        "blocks": [
+            {"type": "markdown", "content": "## BTC\n..."},
+            {"type": "table",    "headers": ["Bot","PnL"], "rows": [["A","+3%"]]},
+            {"type": "alert",    "level": "warning", "content": "VIX élevé"},
+            {"type": "metric",   "label": "Capital Z", "value": "10 042€", "delta": "+0.4%"}
+        ]
+    }
+    """
+    token = request.headers.get("X-Claw-Token", "")
+    if token != CLAW_PUBLISH_TOKEN:
+        return jsonify({"error": "unauthorized"}), 401
+
+    data = request.get_json(silent=True) or {}
+    payload = {
+        "title":        data.get("title", "Claw Analysis"),
+        "blocks":       data.get("blocks", []),
+        "last_updated": datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC"),
+        "author":       data.get("author", "OpenClaw"),
+    }
+
+    tmp = CLAW_DISPLAY_FILE + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(payload, f, indent=2, ensure_ascii=False)
+    os.replace(tmp, CLAW_DISPLAY_FILE)
+
+    socketio.emit("claw_update", payload)
+    return jsonify({"status": "ok", "blocks": len(payload["blocks"])})
 
 
 @app.route("/api/alerts")

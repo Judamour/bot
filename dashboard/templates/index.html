@@ -398,6 +398,7 @@
   <button class="nav-btn" onclick="switchTab('strategies')">Strategies <span class="nav-badge" id="nb-strat">4</span></button>
   <button class="nav-btn" onclick="switchTab('trades')">Trades <span class="nav-badge" id="nb-trades">—</span></button>
   <button class="nav-btn" onclick="switchTab('lab')">Lab LLM <span class="nav-badge">D/E/F</span></button>
+  <button class="nav-btn" onclick="switchTab('claw')">🦞 Claw</button>
   <button class="nav-btn" onclick="switchTab('logs')">Logs</button>
   <button class="nav-btn" onclick="switchTab('docs')">Documentation</button>
 </nav>
@@ -416,13 +417,13 @@
     <span class="bnav-icon">💹</span>
     <span class="bnav-lbl">Trades</span>
   </button>
+  <button class="bnav-btn" onclick="switchTab('claw')" id="bnav-claw">
+    <span class="bnav-icon">🦞</span>
+    <span class="bnav-lbl">Claw</span>
+  </button>
   <button class="bnav-btn" onclick="switchTab('logs')" id="bnav-logs">
     <span class="bnav-icon">📋</span>
     <span class="bnav-lbl">Logs</span>
-  </button>
-  <button class="bnav-btn" onclick="switchTab('docs')" id="bnav-docs">
-    <span class="bnav-icon">📖</span>
-    <span class="bnav-lbl">Docs</span>
   </button>
 </nav>
 
@@ -720,6 +721,24 @@
 
 </div><!-- /tab-lab -->
 
+
+<!-- ═══════════════════════════════════════════════════════════════
+     TAB: CLAW WHITEBOARD
+═══════════════════════════════════════════════════════════════ -->
+<div id="tab-claw" class="tab-content">
+  <div class="section-row" style="margin-top:0">
+    <div class="section-title">🦞 Claw Whiteboard</div>
+    <div class="section-line"></div>
+    <button onclick="loadClawContent()" style="background:var(--surface2);border:1px solid var(--border);color:var(--muted);padding:4px 12px;border-radius:6px;cursor:pointer;font-size:11px;font-family:inherit;min-height:44px">Rafraîchir</button>
+  </div>
+  <div id="claw-meta" style="font-size:11px;color:var(--muted);margin-bottom:16px"></div>
+  <div id="claw-content">
+    <div style="color:var(--muted);font-size:13px;text-align:center;padding:60px 20px">
+      Aucun contenu publié par OpenClaw.<br>
+      <span style="font-size:11px;margin-top:8px;display:block">Demandez à OpenClaw de publier une analyse via <code>POST /api/claw/publish</code></span>
+    </div>
+  </div>
+</div><!-- /tab-claw -->
 
 <!-- ═══════════════════════════════════════════════════════════════
      TAB: LOGS
@@ -1104,6 +1123,7 @@ function switchTab(tab) {
 
   // Lazy load
   if (tab === 'logs')       loadLogs();
+  if (tab === 'claw')       loadClawContent();
   if (tab === 'strategies' && !_stratLoaded) { _stratLoaded = true; loadStrategies(); }
   if (tab === 'lab'        && !_labLoaded)   { _labLoaded   = true; loadLab(); }
   if (tab === 'trades')     loadTrades();
@@ -1773,6 +1793,75 @@ function colorLog(line) {
     return `<span style="color:var(--purple)">${esc}</span>`;
   return `<span style="color:var(--muted)">${esc}</span>`;
 }
+
+// ── Claw Whiteboard ──────────────────────────────────────────────────────────
+async function loadClawContent() {
+  try {
+    const r = await fetch('/api/claw/content');
+    const d = await r.json();
+    const meta = document.getElementById('claw-meta');
+    const container = document.getElementById('claw-content');
+
+    if (!d.blocks || d.blocks.length === 0) {
+      meta.textContent = '';
+      container.innerHTML = `<div style="color:var(--muted);font-size:13px;text-align:center;padding:60px 20px">
+        Aucun contenu publié par OpenClaw.<br>
+        <span style="font-size:11px;margin-top:8px;display:block">Demandez à OpenClaw de publier une analyse</span>
+      </div>`;
+      return;
+    }
+
+    meta.textContent = `${d.author || 'OpenClaw'} — ${d.last_updated || ''}`;
+    if (d.title) meta.innerHTML = `<strong style="color:var(--text)">${d.title}</strong> &nbsp;·&nbsp; ${d.author || 'OpenClaw'} — ${d.last_updated || ''}`;
+
+    let html = '';
+    for (const block of d.blocks) {
+      if (block.type === 'markdown') {
+        // Rendu markdown basique
+        let md = block.content || '';
+        md = md.replace(/^### (.+)$/gm, '<h3 style="color:var(--accent);font-size:14px;margin:16px 0 8px">$1</h3>');
+        md = md.replace(/^## (.+)$/gm, '<h2 style="color:var(--text);font-size:16px;margin:20px 0 10px">$1</h2>');
+        md = md.replace(/^# (.+)$/gm, '<h1 style="color:var(--text);font-size:18px;margin:20px 0 12px">$1</h1>');
+        md = md.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+        md = md.replace(/\*(.+?)\*/g, '<em>$1</em>');
+        md = md.replace(/`(.+?)`/g, '<code style="background:var(--surface2);padding:1px 5px;border-radius:3px;font-size:11px">$1</code>');
+        md = md.replace(/^- (.+)$/gm, '<li style="margin:4px 0;color:var(--muted)">$1</li>');
+        md = md.replace(/(<li.*<\/li>\n?)+/g, '<ul style="padding-left:20px;margin:8px 0">$&</ul>');
+        md = md.replace(/\n\n/g, '</p><p style="margin:8px 0;color:var(--muted);line-height:1.6">');
+        html += `<div class="card" style="margin-bottom:12px"><p style="margin:0;color:var(--muted);line-height:1.6">${md}</p></div>`;
+
+      } else if (block.type === 'table') {
+        const headers = (block.headers || []).map(h => `<th style="text-align:left;padding:8px;border-bottom:1px solid var(--border);color:var(--muted);font-size:11px;text-transform:uppercase">${h}</th>`).join('');
+        const rows = (block.rows || []).map(row =>
+          '<tr>' + row.map(cell => `<td style="padding:8px;border-bottom:1px solid rgba(29,46,70,0.4);font-size:13px">${cell}</td>`).join('') + '</tr>'
+        ).join('');
+        html += `<div class="card" style="margin-bottom:12px;overflow-x:auto"><table style="width:100%;border-collapse:collapse"><thead><tr>${headers}</tr></thead><tbody>${rows}</tbody></table></div>`;
+
+      } else if (block.type === 'alert') {
+        const colors = {warning:'#ffa657', error:'#ff7b72', info:'var(--accent)', success:'#3fb950'};
+        const color = colors[block.level] || 'var(--muted)';
+        html += `<div style="border-left:3px solid ${color};padding:12px 16px;background:var(--surface2);border-radius:0 6px 6px 0;margin-bottom:12px;color:${color};font-size:13px">${block.content || ''}</div>`;
+
+      } else if (block.type === 'metric') {
+        const delta = block.delta || '';
+        const deltaColor = delta.startsWith('+') ? '#3fb950' : delta.startsWith('-') ? '#ff7b72' : 'var(--muted)';
+        html += `<div class="card" style="display:inline-block;margin:0 8px 8px 0;min-width:140px;text-align:center">
+          <div style="font-size:11px;color:var(--muted);margin-bottom:4px">${block.label || ''}</div>
+          <div style="font-size:22px;font-weight:700;color:var(--text)">${block.value || ''}</div>
+          ${delta ? `<div style="font-size:12px;color:${deltaColor}">${delta}</div>` : ''}
+        </div>`;
+      }
+    }
+    container.innerHTML = html;
+  } catch(e) {
+    document.getElementById('claw-content').innerHTML = `<div style="color:var(--muted);font-size:13px">Erreur: ${e.message}</div>`;
+  }
+}
+
+// Auto-refresh Claw via WebSocket
+socket.on('claw_update', () => {
+  if (document.getElementById('tab-claw').classList.contains('active')) loadClawContent();
+});
 
 async function loadLogs() {
   try {
