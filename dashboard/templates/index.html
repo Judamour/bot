@@ -133,6 +133,7 @@
     .main { padding: 24px; max-width: 1400px; margin: 0 auto; }
     .tab-content { display: none; }
     .tab-content.active { display: block; }
+    #tab-canvas.active { display: flex; }
 
     /* ── Cards ── */
     .card {
@@ -748,7 +749,7 @@
 <!-- ═══════════════════════════════════════════════════════════════
      TAB: CANVAS
 ═══════════════════════════════════════════════════════════════ -->
-<div id="tab-canvas" class="tab-content" style="padding:0;height:calc(100vh - 52px);display:flex;flex-direction:column">
+<div id="tab-canvas" class="tab-content" style="padding:0;height:calc(100vh - 52px);flex-direction:column">
   <div style="display:flex;align-items:center;gap:12px;padding:12px 20px;background:var(--surface);border-bottom:1px solid var(--border);flex-shrink:0">
     <div style="font-size:14px;font-weight:700;color:var(--text)">🖼 Canvas OpenClaw</div>
     <div style="flex:1"></div>
