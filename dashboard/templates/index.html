@@ -1187,6 +1187,8 @@ async function loadPortfolio() {
     renderPortfolio(d);
   } catch(e) {
     console.error('loadPortfolio error:', e);
+    const tb = document.getElementById('alloc-tbody');
+    if (tb) tb.innerHTML = `<tr><td colspan="8" style="color:var(--red);text-align:center;padding:20px">Erreur: ${e.message}</td></tr>`;
   }
 }
 
@@ -1883,11 +1885,6 @@ async function loadClawContent() {
   }
 }
 
-// Auto-refresh Claw via WebSocket
-socket.on('claw_update', () => {
-  if (document.getElementById('tab-claw').classList.contains('active')) loadClawContent();
-});
-
 // Canvas — recharge l'iframe et affiche/masque l'état vide
 async function reloadCanvas() {
   try {
@@ -1909,8 +1906,6 @@ async function reloadCanvas() {
   } catch(e) { console.error('canvas reload error', e); }
 }
 
-socket.on('canvas_update', () => { reloadCanvas(); });
-
 async function loadLogs() {
   try {
     const r = await fetch('/api/log');
@@ -1926,29 +1921,27 @@ function escHtml(s) {
   return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
+// ── Init (avant socket.io pour éviter tout blocage) ──────────────────────────
+
+loadPortfolio();
+loadHistory();
+
 // ── WebSocket ─────────────────────────────────────────────────────────────────
 
-const socket = io();
-
-socket.on('bot_update', (data) => {
-  // Refresh portfolio if a sub-bot state changed
-  loadPortfolio();
-});
-
-socket.on('sentiment_update', (data) => {
-  if (data.vix) document.getElementById('hdr-vix').textContent = parseFloat(data.vix).toFixed(1);
-});
-
-// ── Init ─────────────────────────────────────────────────────────────────────
-
-async function init() {
-  // Charger UNIQUEMENT les charts visibles au démarrage (Portfolio tab)
-  // Les tabs cachés sont chargés lazily au premier clic — sinon Chart.js
-  // entre en boucle de resize infinie sur des éléments display:none
-  await Promise.all([loadPortfolio(), loadHistory()]);
+let socket;
+try {
+  socket = io();
+  socket.on('bot_update', () => { loadPortfolio(); });
+  socket.on('sentiment_update', (data) => {
+    if (data.vix) document.getElementById('hdr-vix').textContent = parseFloat(data.vix).toFixed(1);
+  });
+  socket.on('claw_update', () => {
+    if (document.getElementById('tab-claw').classList.contains('active')) loadClawContent();
+  });
+  socket.on('canvas_update', () => { reloadCanvas(); });
+} catch(e) {
+  console.warn('socket.io non disponible:', e);
 }
-
-init();
 
 // ── Countdown prochain cycle + heure Paris ────────────────────────────────
 const CYCLE_HOURS_UTC = [3, 7, 11, 15, 19, 23];
