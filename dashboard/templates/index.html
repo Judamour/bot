@@ -761,7 +761,7 @@
     <div style="font-size:14px">Aucune page publiée</div>
     <div style="font-size:11px;text-align:center;max-width:400px">Demandez à OpenClaw de créer une interface et de la publier via<br><code style="color:var(--accent)">POST /api/claw/canvas</code></div>
   </div>
-  <iframe id="canvas-iframe" src="/claw/canvas" style="flex:1;border:none;width:100%;display:none" sandbox="allow-scripts allow-same-origin allow-forms"></iframe>
+  <iframe id="canvas-iframe" style="flex:1;border:none;width:100%;display:none" sandbox="allow-scripts allow-same-origin allow-forms"></iframe>
 </div><!-- /tab-canvas -->
 
 <!-- ═══════════════════════════════════════════════════════════════
@@ -1891,18 +1891,17 @@ socket.on('claw_update', () => {
 // Canvas — recharge l'iframe et affiche/masque l'état vide
 async function reloadCanvas() {
   try {
-    const r = await fetch('/api/claw/canvas', {method:'HEAD'});
-    const hasContent = r.ok && r.headers.get('X-Canvas-Empty') !== 'true';
+    const d = await fetch('/api/claw/canvas/status').then(r => r.json());
     const iframe = document.getElementById('canvas-iframe');
     const empty  = document.getElementById('canvas-empty');
     const ts     = document.getElementById('canvas-ts');
-    if (hasContent) {
+    if (d.has_content) {
       iframe.src = '/claw/canvas?_t=' + Date.now();
       iframe.style.display = 'block';
       empty.style.display  = 'none';
-      const lastMod = r.headers.get('X-Canvas-Updated') || '';
-      ts.textContent = lastMod ? 'Mis à jour : ' + lastMod : '';
+      ts.textContent = d.updated ? 'Mis à jour : ' + d.updated : '';
     } else {
+      iframe.src = '';
       iframe.style.display = 'none';
       empty.style.display  = 'flex';
       ts.textContent = 'Aucun contenu';
@@ -1910,13 +1909,7 @@ async function reloadCanvas() {
   } catch(e) { console.error('canvas reload error', e); }
 }
 
-socket.on('canvas_update', () => {
-  const tab = document.getElementById('tab-canvas');
-  reloadCanvas();
-  if (tab && tab.classList.contains('active')) {
-    // iframe already reloaded by reloadCanvas()
-  }
-});
+socket.on('canvas_update', () => { reloadCanvas(); });
 
 async function loadLogs() {
   try {

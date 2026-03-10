@@ -738,6 +738,16 @@ def claw_canvas():
 </body></html>""", mimetype="text/html")
 
 
+@app.route("/api/claw/canvas/status")
+def api_claw_canvas_status():
+    exists = os.path.exists(CLAW_CANVAS_FILE)
+    updated = ""
+    if exists:
+        mtime = os.path.getmtime(CLAW_CANVAS_FILE)
+        updated = datetime.utcfromtimestamp(mtime).strftime("%Y-%m-%d %H:%M UTC")
+    return jsonify({"has_content": exists, "updated": updated})
+
+
 @app.route("/api/claw/canvas", methods=["HEAD", "POST"])
 def api_claw_canvas():
     """OpenClaw publie une page HTML complète dans le canvas.
