@@ -33,14 +33,32 @@ _BOT_PATHS = {
     "i": os.path.join(BASE_DIR, "logs", "rs_leaders", "state.json"),
     "j": os.path.join(BASE_DIR, "logs", "mean_reversion", "state.json"),
 }
-_BOT_NAMES  = {"a": "Supertrend+MR", "b": "Momentum", "c": "Breakout", "d": "DeepSeek R1", "e": "Claude Sonnet", "f": "Claude Haiku", "g": "Trend Multi-Asset", "h": "VCB Breakout", "i": "RS Leaders", "j": "Mean Reversion"}
-_BOT_COLORS = {"a": "#58a6ff", "b": "#3fb950", "c": "#ffa657", "d": "#c792ea", "e": "#ff7b72", "f": "#f7c948", "g": "#39d353", "h": "#e06c75", "i": "#79c0ff", "j": "#b3d9ff"}
+_BOT_NAMES  = {"a": "Supertrend+MR", "b": "Momentum", "c": "Breakout", "d": "DeepSeek R1", "e": "Claude Sonnet", "f": "Claude Haiku", "g": "Trend Multi-Asset", "h": "VCB Breakout", "i": "RS Leaders", "j": "Mean Reversion", "k": "GPT-5.4 (bot-claw)"}
+_BOT_COLORS = {"a": "#58a6ff", "b": "#3fb950", "c": "#ffa657", "d": "#c792ea", "e": "#ff7b72", "f": "#f7c948", "g": "#39d353", "h": "#e06c75", "i": "#79c0ff", "j": "#b3d9ff", "k": "#f0883e"}
+BOT_CLAW_API = "http://127.0.0.1:5001/api/status"
 _BOT_Z_FILE = os.path.join(BASE_DIR, "logs", "bot_z", "state.json")
 MULTI_LOG   = os.path.join(BASE_DIR, "logs", "multi_runner.log")
 MULTI_INITIAL_CAPITAL = 1000.0
 
 
 def load_bot_state(bot_id: str) -> dict:
+    # Bot K = bot-claw, état via API locale port 5001
+    if bot_id == "k":
+        try:
+            import urllib.request
+            with urllib.request.urlopen(BOT_CLAW_API, timeout=2) as r:
+                data = json.loads(r.read())
+            return {
+                "capital":         data.get("capital", 10000.0),
+                "positions":       data.get("positions", {}),
+                "trades":          data.get("trades", []),
+                "initial_capital": 10000.0,
+                "last_run_at":     data.get("last_run_at", ""),
+            }
+        except Exception:
+            pass
+        return {"capital": 10000.0, "positions": {}, "trades": [], "initial_capital": 10000.0}
+
     path = _BOT_PATHS.get(bot_id)
     # Fallback to legacy path for Bot A
     if bot_id == "a" and (not path or not os.path.exists(path)):
@@ -604,7 +622,7 @@ def api_openclaw():
 
     # Sub-bots A/B/C/G
     bots_summary = []
-    for bot_id in ["a", "b", "c", "g", "h", "i"]:
+    for bot_id in ["a", "b", "c", "g", "h", "i", "k"]:
         state   = load_bot_state(bot_id)
         metrics = compute_metrics(state, _live_prices)
         positions = []
@@ -692,7 +710,7 @@ def api_bot(bot_id):
 def api_contest():
     """Vue d'ensemble des 3 bots — classement et courbes d'équité."""
     bots_data = []
-    for bot_id in ["a", "b", "c", "d", "e", "f", "g", "h", "i"]:
+    for bot_id in ["a", "b", "c", "d", "e", "f", "g", "h", "i", "k"]:
         state = load_bot_state(bot_id)
         metrics = compute_metrics(state, _live_prices)
         bots_data.append({
