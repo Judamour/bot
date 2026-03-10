@@ -399,6 +399,7 @@
   <button class="nav-btn" onclick="switchTab('trades')">Trades <span class="nav-badge" id="nb-trades">—</span></button>
   <button class="nav-btn" onclick="switchTab('lab')">Lab LLM <span class="nav-badge">D/E/F</span></button>
   <button class="nav-btn" onclick="switchTab('claw')">🦞 Claw</button>
+  <button class="nav-btn" onclick="switchTab('canvas')">🖼 Canvas</button>
   <button class="nav-btn" onclick="switchTab('logs')">Logs</button>
   <button class="nav-btn" onclick="switchTab('docs')">Documentation</button>
 </nav>
@@ -420,6 +421,10 @@
   <button class="bnav-btn" onclick="switchTab('claw')" id="bnav-claw">
     <span class="bnav-icon">🦞</span>
     <span class="bnav-lbl">Claw</span>
+  </button>
+  <button class="bnav-btn" onclick="switchTab('canvas')" id="bnav-canvas">
+    <span class="bnav-icon">🖼</span>
+    <span class="bnav-lbl">Canvas</span>
   </button>
   <button class="bnav-btn" onclick="switchTab('logs')" id="bnav-logs">
     <span class="bnav-icon">📋</span>
@@ -739,6 +744,24 @@
     </div>
   </div>
 </div><!-- /tab-claw -->
+
+<!-- ═══════════════════════════════════════════════════════════════
+     TAB: CANVAS
+═══════════════════════════════════════════════════════════════ -->
+<div id="tab-canvas" class="tab-content" style="padding:0;height:calc(100vh - 52px);display:flex;flex-direction:column">
+  <div style="display:flex;align-items:center;gap:12px;padding:12px 20px;background:var(--surface);border-bottom:1px solid var(--border);flex-shrink:0">
+    <div style="font-size:14px;font-weight:700;color:var(--text)">🖼 Canvas OpenClaw</div>
+    <div style="flex:1"></div>
+    <span id="canvas-ts" style="font-size:11px;color:var(--muted)">Aucun contenu</span>
+    <button onclick="reloadCanvas()" style="background:var(--surface2);border:1px solid var(--border);color:var(--muted);padding:4px 12px;border-radius:6px;cursor:pointer;font-size:11px;font-family:inherit;min-height:36px">⟳ Rafraîchir</button>
+  </div>
+  <div id="canvas-empty" style="flex:1;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px;color:var(--muted)">
+    <div style="font-size:48px">🖼</div>
+    <div style="font-size:14px">Aucune page publiée</div>
+    <div style="font-size:11px;text-align:center;max-width:400px">Demandez à OpenClaw de créer une interface et de la publier via<br><code style="color:var(--accent)">POST /api/claw/canvas</code></div>
+  </div>
+  <iframe id="canvas-iframe" src="/claw/canvas" style="flex:1;border:none;width:100%;display:none" sandbox="allow-scripts allow-same-origin allow-forms"></iframe>
+</div><!-- /tab-canvas -->
 
 <!-- ═══════════════════════════════════════════════════════════════
      TAB: LOGS
@@ -1124,6 +1147,7 @@ function switchTab(tab) {
   // Lazy load
   if (tab === 'logs')       loadLogs();
   if (tab === 'claw')       loadClawContent();
+  if (tab === 'canvas')     reloadCanvas();
   if (tab === 'strategies' && !_stratLoaded) { _stratLoaded = true; loadStrategies(); }
   if (tab === 'lab'        && !_labLoaded)   { _labLoaded   = true; loadLab(); }
   if (tab === 'trades')     loadTrades();
@@ -1861,6 +1885,36 @@ async function loadClawContent() {
 // Auto-refresh Claw via WebSocket
 socket.on('claw_update', () => {
   if (document.getElementById('tab-claw').classList.contains('active')) loadClawContent();
+});
+
+// Canvas — recharge l'iframe et affiche/masque l'état vide
+async function reloadCanvas() {
+  try {
+    const r = await fetch('/api/claw/canvas', {method:'HEAD'});
+    const hasContent = r.ok && r.headers.get('X-Canvas-Empty') !== 'true';
+    const iframe = document.getElementById('canvas-iframe');
+    const empty  = document.getElementById('canvas-empty');
+    const ts     = document.getElementById('canvas-ts');
+    if (hasContent) {
+      iframe.src = '/claw/canvas?_t=' + Date.now();
+      iframe.style.display = 'block';
+      empty.style.display  = 'none';
+      const lastMod = r.headers.get('X-Canvas-Updated') || '';
+      ts.textContent = lastMod ? 'Mis à jour : ' + lastMod : '';
+    } else {
+      iframe.style.display = 'none';
+      empty.style.display  = 'flex';
+      ts.textContent = 'Aucun contenu';
+    }
+  } catch(e) { console.error('canvas reload error', e); }
+}
+
+socket.on('canvas_update', () => {
+  const tab = document.getElementById('tab-canvas');
+  reloadCanvas();
+  if (tab && tab.classList.contains('active')) {
+    // iframe already reloaded by reloadCanvas()
+  }
 });
 
 async function loadLogs() {

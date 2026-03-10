@@ -40,6 +40,7 @@ _BOT_Z_FILE = os.path.join(BASE_DIR, "logs", "bot_z", "state.json")
 MULTI_LOG   = os.path.join(BASE_DIR, "logs", "multi_runner.log")
 MULTI_INITIAL_CAPITAL = 1000.0
 CLAW_DISPLAY_FILE = os.path.join(BASE_DIR, "logs", "claw_display.json")
+CLAW_CANVAS_FILE  = os.path.join(BASE_DIR, "logs", "claw_canvas.html")
 CLAW_PUBLISH_TOKEN = os.getenv("CLAW_PUBLISH_TOKEN", "claw-token-change-me")
 
 
@@ -712,6 +713,69 @@ def api_claw_publish():
 
     socketio.emit("claw_update", payload)
     return jsonify({"status": "ok", "blocks": len(payload["blocks"])})
+
+
+@app.route("/claw/canvas")
+def claw_canvas():
+    """Sert la page HTML publiée par OpenClaw (canvas libre)."""
+    from flask import Response
+    if os.path.exists(CLAW_CANVAS_FILE):
+        with open(CLAW_CANVAS_FILE, encoding="utf-8") as f:
+            return Response(f.read(), mimetype="text/html")
+    return Response("""<!DOCTYPE html><html><head>
+<meta charset="utf-8">
+<style>
+  body{margin:0;background:#0d1117;color:#8b949e;font-family:system-ui,sans-serif;
+       display:flex;align-items:center;justify-content:center;height:100vh;text-align:center}
+  h2{color:#58a6ff;margin-bottom:12px}
+  code{background:#161b22;padding:4px 10px;border-radius:6px;font-size:13px}
+</style></head><body>
+<div>
+  <h2>🦞 Canvas vide</h2>
+  <p>Demandez à OpenClaw de construire une interface ici.</p>
+  <p><code>POST /api/claw/canvas</code></p>
+</div>
+</body></html>""", mimetype="text/html")
+
+
+@app.route("/api/claw/canvas", methods=["HEAD", "POST"])
+def api_claw_canvas():
+    """OpenClaw publie une page HTML complète dans le canvas.
+
+    Auth : header X-Claw-Token
+    Body : HTML brut (Content-Type: text/html)
+        OU JSON : {"html": "...", "title": "..."}
+    """
+    if request.method == "HEAD":
+        from flask import Response as _Resp
+        exists = os.path.exists(CLAW_CANVAS_FILE)
+        headers = {"X-Canvas-Empty": "false" if exists else "true"}
+        if exists:
+            mtime = os.path.getmtime(CLAW_CANVAS_FILE)
+            headers["X-Canvas-Updated"] = datetime.utcfromtimestamp(mtime).strftime("%Y-%m-%d %H:%M UTC")
+        return _Resp("", status=200, headers=headers)
+
+    token = request.headers.get("X-Claw-Token", "")
+    if token != CLAW_PUBLISH_TOKEN:
+        return jsonify({"error": "unauthorized"}), 401
+
+    content_type = request.content_type or ""
+    if "application/json" in content_type:
+        data = request.get_json(silent=True) or {}
+        html = data.get("html", "")
+    else:
+        html = request.get_data(as_text=True)
+
+    if not html.strip():
+        return jsonify({"error": "empty html"}), 400
+
+    tmp = CLAW_CANVAS_FILE + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write(html)
+    os.replace(tmp, CLAW_CANVAS_FILE)
+
+    socketio.emit("canvas_update", {"ts": datetime.utcnow().isoformat()})
+    return jsonify({"status": "ok", "size": len(html)})
 
 
 @app.route("/api/alerts")
