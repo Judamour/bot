@@ -79,7 +79,9 @@ TARGET_VOL          = 0.15   # volatilité cible (pour rolling score)
 # ── Améliorations Meta v2+ ────────────────────────────────────────────────────
 SWITCH_PENALTY         = 0.05   # pénalité de score si changement d'engine (évite micro-switchs)
 TARGET_PORTFOLIO_VOL   = 0.20   # vol annualisée cible portefeuille (vol targeting global)
-BTC_HIGH_VOL_THRESHOLD = 0.80   # vol réalisée BTC > 80% annualisé → force HIGH_VOL
+BTC_HIGH_VOL_THRESHOLD = 1.50   # vol réalisée BTC > 150% annualisé → force HIGH_VOL
+# Données live 8 jours (mars 2026) : BTC vol ~143% en bull normal → seuil 80% trop bas
+# BTC bull typique : 60-120% | Crise/crash : 150%+ | Sources : historique 2020-2026
 CORR_REDUCE_THRESHOLD  = 0.70   # corrélation inter-bots > 70% → réduction exposition ×0.80
 REGIME_PERSIST_DAYS    = 7      # jours pour confiance pleine dans un régime (persist factor)
 
@@ -177,6 +179,10 @@ def select_engine_live(vix: float, btc_bearish: bool, qqq_bearish: bool,
 
     max_vol = max(bot_vols.values()) if bot_vols else TARGET_VOL
     avg_vol = (sum(bot_vols.values()) / len(bot_vols)) if bot_vols else TARGET_VOL
+    # Quand tous les bots ont le même vol (début paper, < 5 trades), la normalisation
+    # inv_risk donne SHIELD=0.75, BULL/BALANCED=0.0 → biais structurel vers SHIELD.
+    # Fix : vol équivoques → facteur neutre 0.5 pour tous les engines.
+    equal_vols = (max_vol <= 0) or (abs(max_vol - avg_vol) < 0.001)
 
     best_engine = None
     best_score  = -1.0
@@ -190,7 +196,10 @@ def select_engine_live(vix: float, btc_bearish: bool, qqq_bearish: bool,
         rf = ENGINE_REGIME_FIT[eng].get(regime, 0.5) * regime_confidence * regime_strength
 
         # Inverse vol : chaque engine a un profil différent
-        if eng == "SHIELD":
+        if equal_vols:
+            # Pas de données vol différenciées → scoring neutre, laisse regime_fit décider
+            inv_risk_norm = 0.5
+        elif eng == "SHIELD":
             # SHIELD favorisé quand vol haute
             inv_risk_norm = min(1.0, avg_vol / max(TARGET_VOL, 0.01))
         elif eng == "PARITY":
@@ -387,7 +396,17 @@ def detect_regime_score(macro: dict) -> dict:
 
     # Score de confiance basé sur la force du signal
     if regime == "HIGH_VOL":
-        confidence = min(1.0, (vix - CASH_VIX_THRESHOLD) / 15.0 + 0.5)
+        btc_vol = macro.get("btc_realized_vol", 0.0)
+        if vix > CASH_VIX_THRESHOLD:
+            # HIGH_VOL déclenché par VIX élevé → confiance proportionnelle au VIX
+            confidence = min(1.0, (vix - CASH_VIX_THRESHOLD) / 15.0 + 0.5)
+        elif btc_vol > BTC_HIGH_VOL_THRESHOLD:
+            # HIGH_VOL déclenché par BTC vol → confiance proportionnelle au dépassement
+            # (27.2 - 35) / 15 + 0.5 = -0.02 était faux → on utilise la vol BTC
+            confidence = min(1.0, max(0.35, 0.45 + (btc_vol - BTC_HIGH_VOL_THRESHOLD) / BTC_HIGH_VOL_THRESHOLD * 0.4))
+        else:
+            # HIGH_VOL via momentum overlay (QQQ ou BTC bearish) → confiance modérée
+            confidence = 0.55
     elif regime == "BEAR":
         confidence = 0.8 if not qqq_ok else min(1.0, (vix - 25) / 10.0 + 0.4)
     elif regime == "BULL":
