@@ -1,5 +1,6 @@
 import os
-import anthropic
+import subprocess
+import json
 
 
 def ask_claude(
@@ -31,11 +32,7 @@ def ask_claude(
     Demande à Claude de valider un signal d'achat.
     Retourne (confirme: bool, raison: str)
     """
-    api_key = os.getenv("ANTHROPIC_API_KEY", "")
-    if not api_key:
-        return True, "Clé API manquante — signal accepté par défaut"
-
-    client = anthropic.Anthropic(api_key=api_key)
+    # Utilise Claude Code CLI (abonnement Max) au lieu de la clé API
 
     # ── Indicateurs techniques ──
     trend = "HAUSSIER (Golden Cross)" if ema50 > ema200 else "BAISSIER (Death Cross)"
@@ -141,12 +138,13 @@ DÉCISION: CONFIRME ou IGNORE
 RAISON: [1-2 phrases : facteur décisif + filtres doux les plus significatifs]"""
 
     try:
-        message = client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=160,
-            messages=[{"role": "user", "content": prompt}],
+        result = subprocess.run(
+            ["claude", "-p", prompt, "--model", "claude-haiku-4-5-20251001"],
+            capture_output=True, text=True, timeout=30,
         )
-        response = message.content[0].text.strip()
+        response = result.stdout.strip()
+        if result.returncode != 0 or not response:
+            return True, f"Erreur Claude CLI ({result.stderr.strip()}) — signal accepté"
 
         confirme = "CONFIRME" in response.upper()
         lines = response.split("\n")
@@ -154,12 +152,9 @@ RAISON: [1-2 phrases : facteur décisif + filtres doux les plus significatifs]""
             (l.replace("RAISON:", "").strip() for l in lines if "RAISON:" in l),
             response,
         )
+        from live.notifier import clear_api_alert
+        clear_api_alert("anthropic")
         return confirme, raison
 
     except Exception as e:
-        from live.notifier import is_credit_error, set_api_alert, clear_api_alert
-        if is_credit_error(e):
-            set_api_alert("anthropic", str(e))
-        else:
-            clear_api_alert("anthropic")
-        return True, f"Erreur API Claude ({e}) — signal accepté"
+        return True, f"Erreur Claude CLI ({e}) — signal accepté"

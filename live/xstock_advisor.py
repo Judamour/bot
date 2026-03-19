@@ -4,7 +4,7 @@ import json
 import sys
 from datetime import datetime
 
-import anthropic
+import subprocess
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
@@ -66,13 +66,14 @@ def run_premarket_analysis(
             summaries.append({"symbol": symbol, "error": str(e)})
 
     prompt = _build_prompt(summaries, state["capital"], state.get("trades", []), btc_context, vix, fear_greed)
-    client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
-    response = client.messages.create(
-        model="claude-haiku-4-5-20251001",
-        max_tokens=1200,
-        messages=[{"role": "user", "content": prompt}],
+    result = subprocess.run(
+        ["claude", "-p", prompt, "--model", "claude-haiku-4-5-20251001"],
+        capture_output=True, text=True, timeout=60,
     )
-    analysis = response.content[0].text
+    if result.returncode != 0 or not result.stdout.strip():
+        analysis = f"Erreur Claude CLI — analyse indisponible ({result.stderr.strip()})"
+    else:
+        analysis = result.stdout.strip()
 
     _log_signal("PREMARKET_ANALYSIS", "ALL", {
         "summaries": summaries,
