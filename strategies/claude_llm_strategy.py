@@ -160,29 +160,21 @@ Respond ONLY with valid JSON (no markdown):
 
 
 def _call_claude(prompt: str) -> tuple:
-    """Returns (decision_dict, usage_dict)."""
+    """Returns (decision_dict, usage_dict). Uses Claude CLI (Max subscription)."""
     try:
-        from anthropic import Anthropic
-        client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
-        response = client.messages.create(
-            model=CLAUDE_MODEL,
-            max_tokens=280,  # Sonnet mérite de raisonner (vs 120 avant)
-            messages=[{"role": "user", "content": prompt}]
+        import subprocess
+        result = subprocess.run(
+            ["claude", "-p", prompt, "--model", CLAUDE_MODEL],
+            capture_output=True, text=True, timeout=60,
         )
-        raw = response.content[0].text.strip()
+        raw = result.stdout.strip()
+        if result.returncode != 0 or not raw:
+            log(f"Claude CLI error: {result.stderr.strip()}", "WARN")
+            return {"action": "HOLD", "confidence": 0, "reason": "cli_error"}, {"input": 0, "output": 0}
         raw = re.sub(r"```(?:json)?\s*", "", raw).strip("`").strip()
-        usage = {
-            "input":  response.usage.input_tokens,
-            "output": response.usage.output_tokens,
-        }
-        return json.loads(raw), usage
+        return json.loads(raw), {"input": 0, "output": 0}
     except Exception as e:
-        log(f"Claude API error: {e}", "WARN")
-        from live.notifier import is_credit_error, set_api_alert, clear_api_alert
-        if is_credit_error(e):
-            set_api_alert("anthropic", str(e))
-        else:
-            clear_api_alert("anthropic")
+        log(f"Claude CLI error: {e}", "WARN")
         return {"action": "HOLD", "confidence": 0, "reason": f"error: {e}"}, {"input": 0, "output": 0}
 
 
