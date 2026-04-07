@@ -198,7 +198,7 @@ REASON: one sentence"""
         return confirme, raison
 
     except anthropic.AuthenticationError:
-        # Token expiré — tenter un refresh via CLI
+        # Token expiré — tenter un refresh via CLI puis retry
         _refresh_token_via_cli()
         try:
             client = _get_client()
@@ -217,7 +217,11 @@ REASON: one sentence"""
             )
             return confirme, raison
         except Exception as e2:
-            return True, f"Erreur Claude SDK après refresh ({e2}) — signal accepté"
+            from live.notifier import set_api_alert
+            set_api_alert("anthropic", f"Auth expired + refresh failed: {e2}")
+            return False, f"Claude indisponible (auth expired) — trade bloqué par sécurité"
 
     except Exception as e:
-        return True, f"Erreur Claude SDK ({e}) — signal accepté"
+        from live.notifier import set_api_alert
+        set_api_alert("anthropic", str(e))
+        return False, f"Claude indisponible ({e}) — trade bloqué par sécurité"
