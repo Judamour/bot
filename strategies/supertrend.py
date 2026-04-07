@@ -45,7 +45,7 @@ def compute_adx(high: pd.Series, low: pd.Series, close: pd.Series, length: int =
         index=low.index,
     )
 
-    atr = compute_atr(high, low, close, length)
+    atr = compute_atr(high, low, close, length).clip(lower=1e-10)
     plus_di = 100 * plus_dm.ewm(alpha=1 / length, adjust=False).mean() / atr
     minus_di = 100 * minus_dm.ewm(alpha=1 / length, adjust=False).mean() / atr
 
