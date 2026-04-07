@@ -205,6 +205,8 @@ def _vol_target_size(capital: float, annual_vol: float, entry_price: float) -> f
 
 def run_rs_leaders_cycle(state: dict, daily_cache: dict, macro_context: dict = None) -> dict:
     """Run one cycle of the Relative Strength Leaders strategy."""
+    if state.get("dd_frozen"):
+        return state  # Bot gelé (MAX DRAWDOWN)
     macro = macro_context or {}
     vix = macro.get("vix", 0.0)
     qqq_ok = macro.get("qqq_regime_ok", True)

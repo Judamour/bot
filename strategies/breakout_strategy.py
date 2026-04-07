@@ -107,6 +107,8 @@ def run_breakout_cycle(state: dict, daily_cache: dict, macro_context: dict = Non
     Run one cycle of the Donchian breakout strategy.
     Checks each BREAKOUT_SYMBOL for exit and entry conditions.
     """
+    if state.get("dd_frozen"):
+        return state  # Bot gelé (MAX DRAWDOWN)
     # ── Ajustement du risque selon le VIX ──
     vix = macro_context.get("vix", 0.0) if macro_context else 0.0
     if vix <= VIX_SCALE_START:

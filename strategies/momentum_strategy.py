@@ -128,6 +128,10 @@ def run_momentum_cycle(state: dict, daily_cache: dict, macro_context: dict = Non
     Run one cycle of the momentum rotation strategy.
     Only rebalances weekly; otherwise tracks positions passively.
     """
+    if state.get("dd_frozen"):
+        log("Bot gelé (MAX DRAWDOWN) — cycle ignoré, positions conservées", "WARN")
+        return state
+
     # ── 0. Stop loss individuel (-12%) — vérifié à chaque cycle ──
     for symbol in list(state["positions"].keys()):
         pos = state["positions"][symbol]

@@ -124,6 +124,8 @@ def process_symbol(
     ohlcv_daily: dict = None,  # BUG-11 : cache daily passé depuis multi_runner pour éviter fetch redondant
 ) -> dict:
     """Analyse un symbole et exécute les ordres si nécessaire."""
+    if state.get("dd_frozen"):
+        return state  # Bot gelé — pas de nouveaux trades
     try:
         if df is None:
             df = fetch_ohlcv(symbol, config.TIMEFRAME, days=45)
@@ -257,8 +259,7 @@ def process_symbol(
 
     # ── Ouvrir position sur signal achat ──
     if signal == 1 and symbol in config.XSTOCKS and not _is_us_market_open():
-        log(f"{symbol} — Marché US fermé, entrée ignorée", "INFO")
-        return state
+        return state  # Silencieux — marché US fermé (évite spam logs)
 
     if signal == 1 and symbol in config.XSTOCKS and not qqq_regime_ok:
         log(f"{symbol} — Signal ignoré (régime baissier : {qqq_description})", "WARN")

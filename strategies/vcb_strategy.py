@@ -125,6 +125,8 @@ def _add_indicators(df):
 
 def run_vcb_cycle(state: dict, ohlcv_4h: dict, macro_context: dict = None) -> dict:
     """Run one cycle of the Volatility Compression Breakout strategy."""
+    if state.get("dd_frozen"):
+        return state  # Bot gelé (MAX DRAWDOWN)
     macro_context = macro_context or {}
     vix = macro_context.get("vix", 0.0)
     engine = macro_context.get("bot_z_engine", "BALANCED")  # filtre régime Bot Z

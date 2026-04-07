@@ -139,12 +139,15 @@ RAISON: [1-2 phrases : facteur décisif + filtres doux les plus significatifs]""
 
     try:
         result = subprocess.run(
-            ["claude", "-p", prompt, "--model", "claude-haiku-4-5-20251001"],
+            ["claude", "-p", prompt, "--model", "claude-haiku-4-5-20251001",
+             "--output-format", "text", "--effort", "low"],
             capture_output=True, text=True, timeout=30,
+            env={**os.environ, "HOME": os.path.expanduser("~")},
         )
         response = result.stdout.strip()
         if result.returncode != 0 or not response:
-            return True, f"Erreur Claude CLI ({result.stderr.strip()}) — signal accepté"
+            err = result.stderr.strip() or "(exit code {})".format(result.returncode)
+            return True, f"Erreur Claude CLI ({err}) — signal accepté"
 
         confirme = "CONFIRME" in response.upper()
         lines = response.split("\n")

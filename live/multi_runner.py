@@ -84,6 +84,9 @@ def _apply_z_budget(state: dict, z_budget_eur: float) -> dict:
     Si Bot Z alloue 4 000€ à Bot A (qui avait 1 000€ initial), le capital disponible
     est multiplié ×4 tout en préservant le ratio de PnL accumulé.
     """
+    # Préserver le capital original pour le drawdown check (jamais rescalé)
+    if "original_capital" not in state:
+        state["original_capital"] = state.get("initial_capital", INITIAL_CAPITAL_PER_BOT)
     prev = state.get("z_budget_eur", state.get("initial_capital", INITIAL_CAPITAL_PER_BOT))
     if prev <= 0:
         prev = INITIAL_CAPITAL_PER_BOT
@@ -521,23 +524,20 @@ def run():
                     log(f"[notify_cycle_summary] erreur: {_e}", "WARN")
 
             # ── 16. Drawdown checks ───────────────────────────────────────────
-            max_dd_hit = False
             for name, state in [("A", state_a), ("B", state_b), ("C", state_c), ("D", state_d), ("E", state_e), ("F", state_f), ("G", state_g), ("H", state_h), ("I", state_i), ("J", state_j)]:
                 total = _portfolio_value(state, ohlcv_daily)
-                init = state.get("initial_capital", INITIAL_CAPITAL_PER_BOT)
-                dd = (total - init) / init
-                if dd <= config.MAX_DRAWDOWN:
-                    log(f"⛔ Bot {name}: MAX DRAWDOWN {dd*100:.1f}% atteint — ARRÊT DU BOT", "WARN")
+                # Utiliser le capital original (jamais rescalé par Bot Z) pour un vrai drawdown
+                init = state.get("original_capital", state.get("initial_capital", INITIAL_CAPITAL_PER_BOT))
+                dd = (total - init) / init if init > 0 else 0
+                if dd <= config.MAX_DRAWDOWN and not state.get("dd_frozen"):
+                    state["dd_frozen"] = True  # Flag : bot gelé, ne trade plus (mais ne stoppe pas les autres)
+                    log(f"⛔ Bot {name}: MAX DRAWDOWN {dd*100:.1f}% — bot gelé (positions conservées)", "WARN")
                     from live.notifier import notify
                     notify(
                         f"⛔ <b>Bot {name} MAX DRAWDOWN</b> {dd*100:.1f}%\n"
                         f"Seuil: {config.MAX_DRAWDOWN*100:.0f}%\n"
-                        f"⚠️ Le bot s'est arrêté — intervention manuelle requise"
+                        f"⚠️ Bot gelé — les autres bots continuent"
                     )
-                    max_dd_hit = True
-            if max_dd_hit:
-                log("⛔ MAX DRAWDOWN atteint — arrêt de la boucle de trading", "WARN")
-                break  # Stoppe réellement la boucle while True (ne continuait qu'avec un Telegram avant)
 
             # ── 17. Snapshot journalier pour Bot A ────────────────────────────
             bot_a._check_daily_snapshot(state_a)

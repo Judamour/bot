@@ -124,6 +124,8 @@ def run_mr_cycle(state: dict, daily_cache: dict, macro_context: dict = None) -> 
     Cycle Bot J — Mean Reversion.
     daily_cache : {symbol: DataFrame OHLCV daily}
     """
+    if state.get("dd_frozen"):
+        return state  # Bot gelé (MAX DRAWDOWN)
     macro_context = macro_context or {}
     engine = macro_context.get("bot_z_engine", "BALANCED")  # filtre régime Bot Z
 

@@ -112,6 +112,8 @@ def _vol_target_size(capital: float, annual_vol: float, entry_price: float) -> f
 
 def run_trend_cycle(state: dict, daily_cache: dict, macro_context: dict = None) -> dict:
     """Run one cycle of the multi-asset trend following strategy."""
+    if state.get("dd_frozen"):
+        return state  # Bot gelé (MAX DRAWDOWN)
     vix = macro_context.get("vix", 0.0) if macro_context else 0.0
     no_new_entries = vix > VIX_NO_ENTRY
     if no_new_entries:
