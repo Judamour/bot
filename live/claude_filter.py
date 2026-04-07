@@ -13,13 +13,21 @@ _CREDS_PATHS = [
 ]
 
 
-def _get_token() -> str:
-    """Read OAuth access token from Claude CLI credentials file."""
+def _get_api_key() -> str:
+    """Get API key from env (permanent, preferred) or OAuth token (fallback)."""
+    # 1. Clé API permanente (prioritaire — pas d'expiration)
+    env_key = os.getenv("ANTHROPIC_API_KEY", "")
+    if env_key and not env_key.startswith("sk-ant-api03-U2RW"):  # Skip l'ancienne clé épuisée
+        return env_key
+
+    # 2. Fallback : token OAuth depuis le fichier credentials CLI
     for path in _CREDS_PATHS:
         try:
             with open(path) as f:
                 creds = json.load(f)
-            return creds["claudeAiOauth"]["accessToken"]
+            token = creds["claudeAiOauth"]["accessToken"]
+            if token:
+                return token
         except (FileNotFoundError, KeyError, json.JSONDecodeError):
             continue
     return ""
@@ -37,12 +45,12 @@ def _refresh_token_via_cli():
 
 
 def _get_client() -> anthropic.Anthropic:
-    """Get Anthropic client with fresh OAuth token."""
-    token = _get_token()
-    if not token:
+    """Get Anthropic client. Uses API key if available, else OAuth token."""
+    key = _get_api_key()
+    if not key:
         _refresh_token_via_cli()
-        token = _get_token()
-    return anthropic.Anthropic(api_key=token)
+        key = _get_api_key()
+    return anthropic.Anthropic(api_key=key)
 
 
 # ── Claude filter ────────────────────────────────────────────────────────────
