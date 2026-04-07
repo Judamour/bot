@@ -289,7 +289,29 @@ def run():
         try:
             log(f"\n--- Cycle {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ---")
 
-            # ── 0. Resend pending API credit alerts ───────────────────────────
+            # ── 0. Pre-refresh Claude OAuth token ─────────────────────────────
+            # Le token expire toutes les ~7h. Le bot cycle toutes les 4h.
+            # Refresh proactif au début de chaque cycle (comme OpenClaw gateway).
+            try:
+                from live.claude_filter import _refresh_token_via_cli, _get_api_key
+                import time as _t
+                # Vérifier si le token expire dans < 2h
+                for _p in ["/home/botuser/.claude/.credentials.json", "/home/ubuntu/.claude/.credentials.json"]:
+                    try:
+                        with open(_p) as _f:
+                            _creds = json.load(_f)
+                        _exp = _creds.get("claudeAiOauth", {}).get("expiresAt", 0)
+                        _remaining_h = (_exp / 1000 - _t.time()) / 3600
+                        if _remaining_h < 2:
+                            log(f"Token Claude expire dans {_remaining_h:.1f}h — refresh proactif...", "WARN")
+                            _refresh_token_via_cli()
+                            log("Token Claude refreshé", "INFO")
+                        break
+                    except (FileNotFoundError, json.JSONDecodeError):
+                        continue
+            except Exception as _e:
+                log(f"Token refresh check failed (non-bloquant): {_e}", "WARN")
+
             from live.notifier import resend_pending_alerts
             resend_pending_alerts()
 
