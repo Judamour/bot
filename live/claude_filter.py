@@ -85,22 +85,23 @@ def ask_claude(
     soft_str = ""
     if soft_filters is not None:
         sf_items = [
-            ("adx_trending", "ADX>20 (tendance)"),
+            ("adx_trending", "ADX>20 (trending)"),
             ("volume_strong", "Volume>110% MA"),
-            ("structure",     "EMA50>EMA200 (structure haussière)"),
-            ("momentum",      "EMA9>EMA21 (momentum court terme)"),
-            ("mtf_1d",        "Tendance 1d (ST↑ + >EMA200)"),
-            ("qqq_regime",    "QQQ > SMA200 (régime Risk-ON)"),
+            ("structure",     "EMA50>EMA200 (bullish structure)"),
+            ("momentum",      "EMA9>EMA21 (short-term momentum)"),
+            ("mtf_1d",        "Daily trend (ST up + >EMA200)"),
+            ("qqq_regime",    "QQQ > SMA200 (Risk-ON regime)"),
+            ("no_rsi_div",    "No RSI bearish divergence"),
         ]
         ok_count = sum(1 for k, _ in sf_items if soft_filters.get(k, True))
         sf_lines = []
         for k, label in sf_items:
             ok = soft_filters.get(k, True)
-            line = f"  {'✓' if ok else '⚠'} {label}"
+            line = f"  {'OK' if ok else 'WARN'} {label}"
             if k == "mtf_1d" and not ok and daily_trend_reason:
                 line += f" ({daily_trend_reason})"
             sf_lines.append(line)
-        soft_str = f"\nFILTRES DOUX ({ok_count}/6 validés — tu es le décideur) :\n" + "\n".join(sf_lines) + "\n"
+        soft_str = f"\nSoft filters ({ok_count}/7 passed):\n" + "\n".join(sf_lines) + "\n"
 
     # ── Actualités récentes ──
     news_str = ""

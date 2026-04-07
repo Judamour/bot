@@ -202,6 +202,8 @@ def run_breakout_cycle(state: dict, daily_cache: dict, macro_context: dict = Non
                 continue  # Don't check entry after closing
 
         # ── Entry checks (no open position for this symbol) ──
+        if macro_context and macro_context.get("exposure_blocked"):
+            continue  # Exposition portfolio > 80%
         if symbol not in state["positions"]:
             breakout = current_price > dc_upper if dc_upper > 0 else False
             adx_ok = adx > ADX_MIN

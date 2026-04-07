@@ -193,6 +193,9 @@ def run_mr_cycle(state: dict, daily_cache: dict, macro_context: dict = None) -> 
     if engine in ("SHIELD", "PRO"):
         _log(f"Engine={engine} — nouveaux BUY bloqués (régime défensif Bot Z)", "WARN")
         return state
+    if macro_context.get("exposure_blocked"):
+        _log("Exposition portfolio > 80% — nouvelles entrées suspendues", "WARN")
+        return state
 
     for symbol in config.SYMBOLS:
         if symbol in state["positions"]:

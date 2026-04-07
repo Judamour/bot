@@ -370,8 +370,12 @@ def run_rs_leaders_cycle(state: dict, daily_cache: dict, macro_context: dict = N
     log("Rebalancement hebdomadaire déclenché")
 
     # ── 5. Entrer sur les leaders non déjà détenus ───────────────────────────
+    if macro and macro.get("exposure_blocked"):
+        log("Exposition portfolio > 80% — nouvelles entrées suspendues", "WARN")
+        to_buy = []
+    else:
+        to_buy = [s for s in top_symbols if s not in state["positions"]]
     portfolio_val = _portfolio_value(state, daily_cache)
-    to_buy = [s for s in top_symbols if s not in state["positions"]]
 
     for symbol in to_buy:
         df = daily_cache.get(symbol)

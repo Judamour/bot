@@ -132,6 +132,8 @@ def run_momentum_cycle(state: dict, daily_cache: dict, macro_context: dict = Non
         log("Bot gelé (MAX DRAWDOWN) — cycle ignoré, positions conservées", "WARN")
         return state
 
+    _no_new_entries = bool(macro_context and macro_context.get("exposure_blocked"))
+
     # ── 0. Stop loss individuel (-12%) — vérifié à chaque cycle ──
     for symbol in list(state["positions"].keys()):
         pos = state["positions"][symbol]
@@ -263,8 +265,11 @@ def run_momentum_cycle(state: dict, daily_cache: dict, macro_context: dict = Non
             )
 
     # ── 6. Open positions for new top_N not already held ──
-    # Sizing basé sur la valeur totale du portefeuille / TOP_N (équilibré)
-    to_buy = [s for s in top_symbols if s not in state["positions"]]
+    if _no_new_entries:
+        log("Exposition portfolio > 80% — nouvelles entrées suspendues", "WARN")
+        to_buy = []
+    else:
+        to_buy = [s for s in top_symbols if s not in state["positions"]]
     total_portfolio = _portfolio_value(state, daily_cache)
     target_per_pos = total_portfolio / TOP_N  # Cible uniforme par position
 

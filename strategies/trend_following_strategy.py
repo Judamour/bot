@@ -115,7 +115,7 @@ def run_trend_cycle(state: dict, daily_cache: dict, macro_context: dict = None) 
     if state.get("dd_frozen"):
         return state  # Bot gelé (MAX DRAWDOWN)
     vix = macro_context.get("vix", 0.0) if macro_context else 0.0
-    no_new_entries = vix > VIX_NO_ENTRY
+    no_new_entries = vix > VIX_NO_ENTRY or bool(macro_context and macro_context.get("exposure_blocked"))
     if no_new_entries:
         log(f"VIX={vix:.1f} > {VIX_NO_ENTRY} — nouvelles entrées suspendues", "WARN")
 

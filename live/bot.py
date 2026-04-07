@@ -345,6 +345,7 @@ def process_symbol(
             "momentum":      bool(last["f_momentum"]),   # EMA9 > EMA21
             "mtf_1d":        ok_1d,                      # Tendance 1d
             "qqq_regime":    qqq_regime_ok,              # QQQ > SMA200
+            "no_rsi_div":    bool(last.get("f_no_rsi_div", True)),  # Pas de divergence RSI baissière
         }
 
         confirme, raison = ask_claude(

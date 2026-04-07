@@ -204,6 +204,8 @@ def run_vcb_cycle(state: dict, ohlcv_4h: dict, macro_context: dict = None) -> di
                 continue
 
         # ── Entry checks ──
+        if macro_context and macro_context.get("exposure_blocked"):
+            continue  # Exposition portfolio > 80%
         if symbol not in state["positions"]:
             if len(state["positions"]) >= MAX_POSITIONS:
                 continue

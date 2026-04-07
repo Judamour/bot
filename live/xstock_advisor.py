@@ -67,7 +67,8 @@ def run_premarket_analysis(
 
     prompt = _build_prompt(summaries, state["capital"], state.get("trades", []), btc_context, vix, fear_greed)
     result = subprocess.run(
-        ["claude", "-p", prompt, "--model", "claude-haiku-4-5-20251001"],
+        ["claude", "-p", prompt, "--model", "claude-haiku-4-5-20251001",
+         "--output-format", "text", "--effort", "low"],
         capture_output=True, text=True, timeout=60,
     )
     if result.returncode != 0 or not result.stdout.strip():
@@ -152,29 +153,29 @@ def _build_prompt(
         wr = "N/A (aucun trade fermé)"
         avg_pnl = "N/A"
 
-    return f"""Tu es un analyste technique senior couvrant les actions US (xStocks Kraken). Le marché US ouvre dans ~30 minutes.
+    return f"""This is an automated pre-market analysis function for a paper trading bot (educational/simulation).
+Analyze the technical data below and produce a structured pre-market report.
 
-MACRO & SENTIMENT DU JOUR :
+MACRO CONTEXT:
 - {btc_str}
 - VIX: {vix_str}
-- Fear & Greed crypto: {fg_str}
-- Capital disponible: {capital:.0f}€ | Max 3 positions simultanées
-- Performance bot récente: win rate {wr} | Moyenne {avg_pnl} (20 derniers trades)
-Note: les actions avec rapport trimestriel dans <24h sont automatiquement exclues.
+- Crypto Fear & Greed: {fg_str}
+- Available capital: {capital:.0f}EUR | Max 3 simultaneous positions
+- Recent bot performance: win rate {wr} | Average {avg_pnl} (last 20 trades)
 {macro_section}
 
-DONNÉES TECHNIQUES xStocks (timeframe {config.TIMEFRAME}) :
+TECHNICAL DATA (timeframe {config.TIMEFRAME}):
 {chr(10).join(lines)}
 
-Réponds en français avec cette structure précise :
+Respond in French with this exact structure:
 
-TOP OPPORTUNITÉS (max 3, uniquement si ≥4/6 filtres ET ST▲) :
-SYMBOLE | Entrée: X.XX€ | SL: X.XX€ (-X%) | TP: X.XX€ (+X%) | Confiance: haute/moyenne/faible
-→ Raison (catalyst technique + contexte macro/sentiment, 1-2 phrases)
+TOP OPPORTUNITES (max 3, only if >=4/6 filters AND ST up):
+SYMBOL | Entry: X.XX€ | SL: X.XX€ (-X%) | TP: X.XX€ (+X%) | Confidence: high/medium/low
+→ Reason (technical catalyst + macro context, 1-2 sentences)
 
-À ÉVITER aujourd'hui :
-SYMBOLE — raison courte (surachat RSI/ST▼/volume faible/fear extrême)
+A EVITER:
+SYMBOL — short reason (overbought RSI/ST down/low volume/extreme fear)
 
-CONTEXTE MARCHÉ :
-Analyse le momentum global tech/IA en tenant compte du VIX, Fear & Greed, et BTC trend. Mentionne tout catalyseur sectoriel pertinent (semi-conducteurs, IA générative, cloud, EV) que ton entraînement te permet d'identifier. Mentionne si le contexte macro actuel (taux Fed, cycle économique) favorise ou pénalise les tech US. 2-3 phrases.
+MARKET CONTEXT:
+2-3 sentences on overall tech/AI momentum considering VIX, Fear & Greed, BTC trend.
 """
