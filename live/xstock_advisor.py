@@ -4,8 +4,6 @@ import json
 import sys
 from datetime import datetime
 
-import subprocess
-
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
 from data.fetcher import fetch_ohlcv, fetch_news_yfinance, fetch_news_macro_rss, _xstock_ticker
@@ -66,15 +64,17 @@ def run_premarket_analysis(
             summaries.append({"symbol": symbol, "error": str(e)})
 
     prompt = _build_prompt(summaries, state["capital"], state.get("trades", []), btc_context, vix, fear_greed)
-    result = subprocess.run(
-        ["claude", "-p", prompt, "--model", "claude-haiku-4-5-20251001",
-         "--output-format", "text", "--effort", "low"],
-        capture_output=True, text=True, timeout=60,
-    )
-    if result.returncode != 0 or not result.stdout.strip():
-        analysis = f"Erreur Claude CLI — analyse indisponible ({result.stderr.strip()})"
-    else:
-        analysis = result.stdout.strip()
+    try:
+        from live.claude_filter import _get_client
+        client = _get_client()
+        resp = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=1200,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        analysis = resp.content[0].text.strip()
+    except Exception as e:
+        analysis = f"Erreur Claude SDK — analyse indisponible ({e})"
 
     _log_signal("PREMARKET_ANALYSIS", "ALL", {
         "summaries": summaries,

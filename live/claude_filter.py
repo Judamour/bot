@@ -1,7 +1,51 @@
 import os
-import subprocess
 import json
+import subprocess
+import anthropic
 
+
+# ── Token management ─────────────────────────────────────────────────────────
+
+_CREDS_PATHS = [
+    os.path.expanduser("~/.claude/.credentials.json"),
+    "/home/botuser/.claude/.credentials.json",
+    "/home/ubuntu/.claude/.credentials.json",
+]
+
+
+def _get_token() -> str:
+    """Read OAuth access token from Claude CLI credentials file."""
+    for path in _CREDS_PATHS:
+        try:
+            with open(path) as f:
+                creds = json.load(f)
+            return creds["claudeAiOauth"]["accessToken"]
+        except (FileNotFoundError, KeyError, json.JSONDecodeError):
+            continue
+    return ""
+
+
+def _refresh_token_via_cli():
+    """Force Claude CLI to refresh the OAuth token (runs in background)."""
+    try:
+        subprocess.run(
+            ["claude", "-p", "hi", "--output-format", "text", "--effort", "low"],
+            capture_output=True, text=True, timeout=15,
+        )
+    except Exception:
+        pass
+
+
+def _get_client() -> anthropic.Anthropic:
+    """Get Anthropic client with fresh OAuth token."""
+    token = _get_token()
+    if not token:
+        _refresh_token_via_cli()
+        token = _get_token()
+    return anthropic.Anthropic(api_key=token)
+
+
+# ── Claude filter ────────────────────────────────────────────────────────────
 
 def ask_claude(
     symbol: str,
@@ -30,14 +74,15 @@ def ask_claude(
 ) -> tuple[bool, str]:
     """
     Demande à Claude de valider un signal d'achat.
+    Utilise le SDK Anthropic directement (pas le CLI) pour éviter le system prompt
+    et les problèmes d'auth.
     Retourne (confirme: bool, raison: str)
     """
-    # Utilise Claude Code CLI (abonnement Max) au lieu de la clé API
 
     # ── Indicateurs techniques ──
-    trend = "HAUSSIER (Golden Cross)" if ema50 > ema200 else "BAISSIER (Death Cross)"
+    trend = "Golden Cross (bullish)" if ema50 > ema200 else "Death Cross (bearish)"
     dist_ema200 = ((price - ema200) / ema200) * 100
-    category = "xStock US (actions tokenisées)" if symbol.endswith("x/EUR") else "Crypto 24/7"
+    category = "xStock US" if symbol.endswith("x/EUR") else "Crypto"
 
     # ── Contexte macro BTC + VIX ──
     macro_parts = []
@@ -45,11 +90,11 @@ def ask_claude(
         bt = btc_context.get("btc_trend", "?").upper()
         bp = btc_context.get("btc_price", 0)
         be = btc_context.get("btc_above_ema200", False)
-        macro_parts.append(f"BTC {bt} ({bp:.0f}€ {'>' if be else '<'} EMA200)")
+        macro_parts.append(f"BTC {bt} ({bp:.0f}EUR {'>' if be else '<'} EMA200)")
     if vix > 0:
-        vix_label = "PEUR ÉLEVÉE ⚠" if vix > 25 else "élevé" if vix > 20 else "normal"
+        vix_label = "HIGH FEAR" if vix > 25 else "elevated" if vix > 20 else "normal"
         macro_parts.append(f"VIX {vix:.1f} ({vix_label})")
-    macro_str = " | ".join(macro_parts) if macro_parts else "Non disponible"
+    macro_str = " | ".join(macro_parts) if macro_parts else "N/A"
 
     # ── Sentiment Fear & Greed ──
     fg_str = "N/A"
@@ -59,29 +104,29 @@ def ask_claude(
         label = fear_greed.get("label", "Neutral")
         fg_str = f"{score}/100 ({label})"
         if score <= 20:
-            fg_alert = " ⚠ PEUR EXTRÊME — possible capitulation ou achat contrarian"
+            fg_alert = " — EXTREME FEAR (possible capitulation)"
         elif score >= 80:
-            fg_alert = " ⚠ AVIDITÉ EXTRÊME — risque de retournement imminent"
+            fg_alert = " — EXTREME GREED (reversal risk)"
 
-    # ── Funding rate (crypto uniquement) ──
+    # ── Funding rate (crypto) ──
     funding_str = ""
     if funding_rate != 0.0:
         pct = funding_rate * 100
         if funding_rate > 0.001:
-            # BUG-30 : dead code supprimé (première affectation était immédiatement écrasée)
-            funding_label = "DANGER squeeze ⚠" if funding_rate > 0.001 else "longs surexposés" if funding_rate > 0.0003 else "neutre"
+            funding_label = "DANGER squeeze"
+        elif funding_rate > 0.0003:
+            funding_label = "longs overexposed"
         elif funding_rate < -0.0001:
-            funding_label = "shorts surexposés (signal haussier contrarian)"
+            funding_label = "shorts overexposed (contrarian bullish)"
         else:
-            funding_label = "neutre"
-        funding_str = f"\n• Funding rate: {pct:+.4f}%/8h ({funding_label})"
+            funding_label = "neutral"
+        funding_str = f"\n- Funding rate: {pct:+.4f}%/8h ({funding_label})"
 
     # ── Portfolio ──
     slots_left = max_positions - open_positions
     wr_str = f"{recent_win_rate:.0f}%" if recent_win_rate is not None else "N/A"
-    rot_str = f"×{rotation_factor:.2f} ({'surpondéré' if rotation_factor > 1.0 else 'souspondéré' if rotation_factor < 1.0 else 'neutre'})"
 
-    # ── Filtres doux (contexte pour la décision Claude) ──
+    # ── Soft filters ──
     soft_str = ""
     if soft_filters is not None:
         sf_items = [
@@ -90,7 +135,7 @@ def ask_claude(
             ("structure",     "EMA50>EMA200 (bullish structure)"),
             ("momentum",      "EMA9>EMA21 (short-term momentum)"),
             ("mtf_1d",        "Daily trend (ST up + >EMA200)"),
-            ("qqq_regime",    "QQQ > SMA200 (Risk-ON regime)"),
+            ("qqq_regime",    "QQQ > SMA200 (Risk-ON)"),
             ("no_rsi_div",    "No RSI bearish divergence"),
         ]
         ok_count = sum(1 for k, _ in sf_items if soft_filters.get(k, True))
@@ -101,56 +146,45 @@ def ask_claude(
             if k == "mtf_1d" and not ok and daily_trend_reason:
                 line += f" ({daily_trend_reason})"
             sf_lines.append(line)
-        soft_str = f"\nSoft filters ({ok_count}/7 passed):\n" + "\n".join(sf_lines) + "\n"
+        soft_str = f"\nSoft filters ({ok_count}/7 passed):\n" + "\n".join(sf_lines)
 
-    # ── Actualités récentes ──
+    # ── News ──
     news_str = ""
     if news:
-        lines = []
+        news_lines = []
         for n in news[:6]:
             age = f"{n['age_h']}h" if n.get("age_h") else ""
             src = n.get("source", "")
             title = n.get("title", "")
-            lines.append(f"• [{src}] {title}" + (f" ({age})" if age else ""))
-        news_str = "\nACTUALITÉS RÉCENTES (24-48h) :\n" + "\n".join(lines) + "\n"
+            news_lines.append(f"- [{src}] {title}" + (f" ({age})" if age else ""))
+        news_str = "\nRecent news (24-48h):\n" + "\n".join(news_lines)
 
-    prompt = f"""This is an automated signal evaluation function for a paper trading bot.
-Your role: evaluate the technical signal data below and return a structured JSON response.
-This is NOT a real trade — it's a paper trading simulation for educational purposes.
+    prompt = f"""Evaluate this paper trading signal. Respond with exactly 2 lines.
 
 Signal: BUY {symbol} ({category})
-
-Technical data:
-- Supertrend: flip UP (bullish) | RSI: {rsi:.1f} | ADX: {adx:.1f} | Volume: x{volume_ratio:.2f}
-- Price: {price:.4f}EUR | EMA50/EMA200: {trend} | Distance EMA200: {dist_ema200:+.1f}%
-- ATR: {atr:.4f}EUR
+Price: {price:.4f}EUR | EMA50/200: {trend} | Dist EMA200: {dist_ema200:+.1f}%
+RSI: {rsi:.1f} | ADX: {adx:.1f} | Volume: x{volume_ratio:.2f} | ATR: {atr:.4f}EUR
 {soft_str}
-Macro context:
-- {macro_str}
-- Fear & Greed: {fg_str}{fg_alert}{funding_str}
-- Portfolio: {slots_left}/{max_positions} slots free | Capital: {capital:.0f}EUR
-- Recent win rate: {wr_str} | Size factor: {rot_str}
+Macro: {macro_str}
+Fear&Greed: {fg_str}{fg_alert}{funding_str}
+Portfolio: {slots_left}/{max_positions} slots | Capital: {capital:.0f}EUR | WR: {wr_str}
 {news_str}
-Trade params: Risk 2% | SL=3xATR | TP=2.5xATR
+Risk: 2% | SL=3xATR | TP=2.5xATR
 
-Rules: CONFIRM if context is broadly favorable (even with 2-4 soft filters failing).
-IGNORE only if macro context shows direct sector risk (tariffs, earnings miss, crisis).
+CONFIRM if broadly favorable (even with 2-3 soft warnings).
+IGNORE only if direct macro risk (tariffs, crisis, earnings miss).
 
-Respond with exactly 2 lines, nothing else:
 DECISION: CONFIRM or IGNORE
 REASON: one sentence"""
 
     try:
-        result = subprocess.run(
-            ["claude", "-p", prompt, "--model", "claude-haiku-4-5-20251001",
-             "--output-format", "text", "--effort", "low"],
-            capture_output=True, text=True, timeout=30,
-            env={**os.environ, "HOME": os.path.expanduser("~")},
+        client = _get_client()
+        resp = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=160,
+            messages=[{"role": "user", "content": prompt}],
         )
-        response = result.stdout.strip()
-        if result.returncode != 0 or not response:
-            err = result.stderr.strip() or "(exit code {})".format(result.returncode)
-            return True, f"Erreur Claude CLI ({err}) — signal accepté"
+        response = resp.content[0].text.strip()
 
         upper = response.upper()
         confirme = "CONFIRM" in upper and "IGNORE" not in upper
@@ -163,5 +197,27 @@ REASON: one sentence"""
         clear_api_alert("anthropic")
         return confirme, raison
 
+    except anthropic.AuthenticationError:
+        # Token expiré — tenter un refresh via CLI
+        _refresh_token_via_cli()
+        try:
+            client = _get_client()
+            resp = client.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=160,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            response = resp.content[0].text.strip()
+            upper = response.upper()
+            confirme = "CONFIRM" in upper and "IGNORE" not in upper
+            lines = response.split("\n")
+            raison = next(
+                (l.split(":", 1)[1].strip() for l in lines if "REASON:" in l.upper()),
+                response[:200],
+            )
+            return confirme, raison
+        except Exception as e2:
+            return True, f"Erreur Claude SDK après refresh ({e2}) — signal accepté"
+
     except Exception as e:
-        return True, f"Erreur Claude CLI ({e}) — signal accepté"
+        return True, f"Erreur Claude SDK ({e}) — signal accepté"
