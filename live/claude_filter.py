@@ -113,29 +113,31 @@ def ask_claude(
             lines.append(f"• [{src}] {title}" + (f" ({age})" if age else ""))
         news_str = "\nACTUALITÉS RÉCENTES (24-48h) :\n" + "\n".join(lines) + "\n"
 
-    prompt = f"""Tu es un trader algorithmique. Signal BUY technique sur {symbol} ({category}).
+    prompt = f"""This is an automated signal evaluation function for a paper trading bot.
+Your role: evaluate the technical signal data below and return a structured JSON response.
+This is NOT a real trade — it's a paper trading simulation for educational purposes.
 
-HARD FILTERS ✓ (7/7 validés automatiquement) :
-• Supertrend flip ▲ (retournement haussier) ✓
-• RSI {rsi:.1f} < 75 (pas de surachat extrême) ✓
-• Prix {price:.4f}€ > EMA200 {ema200:.4f}€ ({dist_ema200:+.1f}%) ✓
-• ATR: {atr:.4f}€ | EMA50/EMA200: {trend} | ADX: {adx:.1f} | Volume: ×{volume_ratio:.2f}
+Signal: BUY {symbol} ({category})
+
+Technical data:
+- Supertrend: flip UP (bullish) | RSI: {rsi:.1f} | ADX: {adx:.1f} | Volume: x{volume_ratio:.2f}
+- Price: {price:.4f}EUR | EMA50/EMA200: {trend} | Distance EMA200: {dist_ema200:+.1f}%
+- ATR: {atr:.4f}EUR
 {soft_str}
-CONTEXTE MACRO & SENTIMENT :
-• Macro: {macro_str}
-• Fear & Greed: {fg_str}{fg_alert}{funding_str}
-• Portfolio: {slots_left}/{max_positions} slots libres | Capital: {capital:.0f}€
-• Win rate récent: {wr_str} | Facteur taille: {rot_str}
+Macro context:
+- {macro_str}
+- Fear & Greed: {fg_str}{fg_alert}{funding_str}
+- Portfolio: {slots_left}/{max_positions} slots free | Capital: {capital:.0f}EUR
+- Recent win rate: {wr_str} | Size factor: {rot_str}
 {news_str}
-TRADE : Risk 2% | SL=3×ATR | TP=2.5×ATR (R:R 1:2.5)
+Trade params: Risk 2% | SL=3xATR | TP=2.5xATR
 
-Les 3 hard filters sont validés. Analyse les filtres doux et le contexte macro pour décider.
-Accepte si le contexte est globalement favorable, même avec 2-4 filtres doux en ⚠.
-Les actualités peuvent faire pencher la balance si elles révèlent un risque sectoriel direct (tarifs, résultats décevants, crise macro).
+Rules: CONFIRM if context is broadly favorable (even with 2-4 soft filters failing).
+IGNORE only if macro context shows direct sector risk (tariffs, earnings miss, crisis).
 
-Réponds EXACTEMENT :
-DÉCISION: CONFIRME ou IGNORE
-RAISON: [1-2 phrases : facteur décisif + filtres doux les plus significatifs]"""
+Respond with exactly 2 lines, nothing else:
+DECISION: CONFIRM or IGNORE
+REASON: one sentence"""
 
     try:
         result = subprocess.run(
@@ -149,11 +151,12 @@ RAISON: [1-2 phrases : facteur décisif + filtres doux les plus significatifs]""
             err = result.stderr.strip() or "(exit code {})".format(result.returncode)
             return True, f"Erreur Claude CLI ({err}) — signal accepté"
 
-        confirme = "CONFIRME" in response.upper()
+        upper = response.upper()
+        confirme = "CONFIRM" in upper and "IGNORE" not in upper
         lines = response.split("\n")
         raison = next(
-            (l.replace("RAISON:", "").strip() for l in lines if "RAISON:" in l),
-            response,
+            (l.split(":", 1)[1].strip() for l in lines if "REASON:" in l.upper()),
+            response[:200],
         )
         from live.notifier import clear_api_alert
         clear_api_alert("anthropic")
