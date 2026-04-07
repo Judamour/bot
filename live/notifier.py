@@ -186,6 +186,33 @@ def notify_cycle_summary(engine: str, vix: float, regime: str, z_capital: float,
     notify("\n".join(lines))
 
 
+def notify_data_stale(symbol: str, timeframe: str, age_hours: float):
+    """Alerte quand les données OHLCV sont périmées."""
+    notify(
+        f"⚠️ <b>Données périmées</b> — {symbol} ({timeframe})\n"
+        f"Dernière bougie : il y a <b>{age_hours:.1f}h</b>\n"
+        f"Le bot continue avec des données potentiellement obsolètes."
+    )
+
+
+def notify_winrate_drop(bot_name: str, winrate: float, last_n: int):
+    """Alerte quand le winrate chute sous un seuil critique."""
+    notify(
+        f"📉 <b>Win rate critique — Bot {bot_name}</b>\n"
+        f"<b>{winrate:.0f}%</b> sur les {last_n} derniers trades\n"
+        f"⚠️ Vérifier la stratégie ou les conditions de marché."
+    )
+
+
+def notify_exposure_high(total_pct: float, details: str):
+    """Alerte quand l'exposition totale du portfolio dépasse le seuil."""
+    notify(
+        f"🔥 <b>Exposition élevée</b> — {total_pct:.0f}% du capital\n"
+        f"{details}\n"
+        f"Les nouvelles entrées sont suspendues."
+    )
+
+
 def resend_pending_alerts():
     """
     Renvoie toutes les alertes actives (appelé au début de chaque cycle).

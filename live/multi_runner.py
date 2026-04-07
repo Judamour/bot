@@ -373,8 +373,33 @@ def run():
             # Injecter l'engine Bot Z dans macro pour H/I/J (filtre régime sans dispatch capital)
             macro["bot_z_engine"] = z_summary.get("current_engine", "BALANCED") if z_summary else "BALANCED"
 
+            # ── 4b. Portfolio exposure cap — suspension si > 80% ─────────────
+            MAX_PORTFOLIO_EXPOSURE = 0.80
+            all_active = [("A", state_a), ("B", state_b), ("C", state_c),
+                          ("G", state_g), ("H", state_h), ("I", state_i), ("J", state_j)]
+            total_pos_value = sum(
+                sum(p.get("entry", 0) * p.get("size", 0) for p in s.get("positions", {}).values())
+                for _, s in all_active
+            )
+            total_capital = sum(s.get("initial_capital", INITIAL_CAPITAL_PER_BOT) for _, s in all_active)
+            exposure_pct = total_pos_value / total_capital if total_capital > 0 else 0
+            exposure_high = exposure_pct > MAX_PORTFOLIO_EXPOSURE
+            if exposure_high:
+                from live.notifier import notify_exposure_high
+                sector_counts = {}
+                for _, s in all_active:
+                    for sym in s.get("positions", {}):
+                        sec = config.SECTORS.get(sym, "other")
+                        sector_counts[sec] = sector_counts.get(sec, 0) + 1
+                details = " | ".join(f"{s}:{n}" for s, n in sorted(sector_counts.items()))
+                notify_exposure_high(exposure_pct * 100, details)
+                log(f"⚠ Exposition portfolio {exposure_pct*100:.0f}% > {MAX_PORTFOLIO_EXPOSURE*100:.0f}% — nouvelles entrées suspendues", "WARN")
+            # Passer le flag aux bots pour bloquer les nouvelles entrées
+            macro["exposure_blocked"] = exposure_high
+
             # ── 5. Bot A: Supertrend + filters ────────────────────────────────
             log(f"\n{Fore.CYAN}--- Bot A: Supertrend+MR ---{Style.RESET_ALL}")
+            state_a["_exposure_blocked"] = exposure_high
 
             rotation = bot_a._compute_rotation_factors(state_a.get("trades", []))
             momentum_filter = bot_a._update_momentum_filter(state_a)

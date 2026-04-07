@@ -257,6 +257,14 @@ def process_symbol(
             else:
                 notify(f"⏹ <b>{symbol}</b> EXIT [{reason}] {pnl:+.2f}€ ({pnl_r:+.1f}R)")
 
+            # ── Win rate degradation alert ──
+            recent = state.get("trades", [])[-10:]
+            if len(recent) >= 10:
+                wr = sum(1 for t in recent if t.get("pnl", 0) > 0) / len(recent) * 100
+                if wr < 20:
+                    from live.notifier import notify_winrate_drop
+                    notify_winrate_drop("A", wr, len(recent))
+
     # ── Ouvrir position sur signal achat ──
     if signal == 1 and symbol in config.XSTOCKS and not _is_us_market_open():
         return state  # Silencieux — marché US fermé (évite spam logs)
@@ -273,6 +281,11 @@ def process_symbol(
             return state
 
     if signal == 1 and symbol not in state["positions"]:
+        # Portfolio exposure cap
+        if state.get("_exposure_blocked"):
+            log(f"{symbol} — Signal ignoré (exposition portfolio > 80%)", "WARN")
+            return state
+
         if len(state["positions"]) >= config.MAX_OPEN_TRADES:
             log(f"{symbol} — Signal ignoré (max {config.MAX_OPEN_TRADES} positions ouvertes)", "WARN")
             log_signal("BUY_SKIP_MAX_POS", symbol, {"price": current_price, "open_positions": len(state["positions"])})
@@ -356,14 +369,11 @@ def process_symbol(
             news=news if news else None,
             soft_filters=soft_filters,
         )
-        # ── MODE SHADOW : Claude consulté mais décision non appliquée ────────
-        # Bot A tourne en pur technique depuis 2026-03-08.
-        # L'avis Claude est loggé en CLAUDE_SHADOW pour analyse au 2026-04-30 :
-        # "est-ce que les trades que Claude aurait bloqués étaient mauvais ?"
-        log(f"{symbol} — Claude shadow: {'✓ AURAIT CONFIRMÉ' if confirme else '✗ AURAIT IGNORÉ'} | {raison}", "INFO")
-        log_signal("CLAUDE_SHADOW", symbol, {
-            "claude_decision": "CONFIRME" if confirme else "IGNORE",
-            "claude_applied": False,   # ← clé pour filtrer en analyse
+        # ── Filtre Claude ACTIF — bloque les trades si Claude dit IGNORE ────
+        log(f"{symbol} — Claude: {'✓ CONFIRM' if confirme else '✗ IGNORE'} | {raison}", "INFO")
+        log_signal("CLAUDE_FILTER", symbol, {
+            "claude_decision": "CONFIRM" if confirme else "IGNORE",
+            "claude_applied": True,
             "raison": raison,
             "adx": round(adx, 2),
             "rsi": round(float(last["rsi"]), 2),
@@ -375,17 +385,34 @@ def process_symbol(
             "btc_trend": btc_context.get("btc_trend") if btc_context else None,
             "rotation_factor": vix_factor,
         })
-        # NE PAS bloquer le trade — Bot A décide sur le signal technique seul
+        if not confirme:
+            log(f"{symbol} — Trade bloqué par Claude: {raison}", "WARN")
+            log_signal("BUY_SKIP_CLAUDE", symbol, {"raison": raison, "price": current_price})
+            return state
 
         effective_buy = current_price * (1 + config.SLIPPAGE)
         base_eur = max(config.POSITION_MIN_EUR, state["capital"] * config.POSITION_SIZE_PCT)
-        position_eur = base_eur * vix_factor * vol_exposure
-        if vix_factor != 1.0 or vol_exposure != 1.0:
+        # Dynamic sizing : réduire les positions en drawdown (protection anti-ruin)
+        init_cap = state.get("original_capital", state.get("initial_capital", config.PAPER_CAPITAL))
+        if init_cap > 0:
+            dd_ratio = (state["capital"] - init_cap) / init_cap  # négatif en perte
+            dd_scale = max(0.3, 1.0 + dd_ratio * 2)  # -10% DD → scale 0.80, -25% DD → scale 0.50, min 0.30
+        else:
+            dd_scale = 1.0
+        position_eur = base_eur * vix_factor * vol_exposure * dd_scale
+        size_factors = []
+        if vix_factor != 1.0:
+            size_factors.append(f"VIX ×{vix_factor:.2f}")
+        if vol_exposure != 1.0:
+            size_factors.append(f"vol ×{vol_exposure:.2f}")
+        if dd_scale != 1.0:
+            size_factors.append(f"DD ×{dd_scale:.2f}")
+        if size_factors:
             log(
                 f"{symbol} — Position {position_eur:.0f}€ ({config.POSITION_SIZE_PCT*100:.0f}% capital"
-                f" × VIX/rotation ×{vix_factor:.2f} × vol ×{vol_exposure:.2f}"
+                f" × {' × '.join(size_factors)}"
                 f"{f' | σ {realized_vol*100:.1f}%' if realized_vol > 0 else ''})",
-                "WARN" if vix_factor < 1.0 or vol_exposure < 0.5 else "INFO",
+                "WARN" if dd_scale < 0.8 or vix_factor < 1.0 else "INFO",
             )
         else:
             log(f"{symbol} — Position {position_eur:.0f}€ ({config.POSITION_SIZE_PCT*100:.0f}% du capital {state['capital']:.0f}€)", "INFO")

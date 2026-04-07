@@ -1,12 +1,39 @@
 import ccxt
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import time
 import sys
 import os
+import logging
+
+logger = logging.getLogger(__name__)
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
+
+
+def _check_data_freshness(df: pd.DataFrame, timeframe: str) -> tuple:
+    """
+    Check if OHLCV data is fresh enough for the given timeframe.
+    Returns (is_fresh: bool, age_hours: float).
+    For 4h timeframe: last candle should be within 5 hours of now.
+    For 1d timeframe: last candle should be within 2 days of now.
+    """
+    if df is None or df.empty:
+        return False, float("inf")
+
+    now = datetime.now(timezone.utc)
+    last_ts = df.index[-1]
+    if last_ts.tzinfo is None:
+        last_ts = last_ts.tz_localize("UTC")
+
+    age = now - last_ts
+    age_hours = age.total_seconds() / 3600
+
+    max_age_hours = {"4h": 5.0, "1d": 48.0}.get(timeframe, 8.0)
+    is_fresh = age_hours <= max_age_hours
+
+    return is_fresh, round(age_hours, 1)
 
 
 def _is_xstock(symbol: str) -> bool:
@@ -84,6 +111,13 @@ def fetch_yfinance_ohlcv(
         df[col] = df[col] / eurusd
 
     print(f"  ✓ {len(df)} bougies {ticker_sym} USD→EUR @{eurusd:.4f} ({df.index[0].date()} → {df.index[-1].date()})")
+
+    is_fresh, age_hours = _check_data_freshness(df, timeframe)
+    if not is_fresh:
+        logger.warning(f"[fetcher] STALE DATA: {symbol} last candle is {age_hours}h old (timeframe={timeframe})")
+    df.attrs["is_fresh"] = is_fresh
+    df.attrs["age_hours"] = age_hours
+
     return df
 
 
@@ -159,6 +193,13 @@ def fetch_ohlcv(
     df = df[~df.index.duplicated(keep="last")].sort_index()
 
     print(f"  ✓ {len(df)} bougies récupérées ({df.index[0].date()} → {df.index[-1].date()})")
+
+    is_fresh, age_hours = _check_data_freshness(df, timeframe)
+    if not is_fresh:
+        logger.warning(f"[fetcher] STALE DATA: {symbol} last candle is {age_hours}h old (timeframe={timeframe})")
+    df.attrs["is_fresh"] = is_fresh
+    df.attrs["age_hours"] = age_hours
+
     return df
 
 

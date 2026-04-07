@@ -515,13 +515,38 @@ def compute_portfolio_vol(z_capital_history: list) -> float:
     return max(0.05, min(2.0, annual_vol))
 
 
-def compute_bot_correlation(all_states: dict) -> float:
+def compute_bot_correlation(all_states: dict, ohlcv: dict = None) -> float:
     """
-    Corrélation moyenne (pairwise) entre les bots sur les 20 derniers trades.
+    Corrélation moyenne (pairwise) entre les bots.
+    Méthode 1: PnL des trades (si assez de données).
+    Méthode 2: mark-to-market daily returns via OHLCV (fallback plus robuste).
     Retourne 0.0 si pas assez de données.
     """
     window = 20
     bot_returns = {}
+
+    # Méthode 2 (fallback) : daily returns mark-to-market via positions ouvertes
+    if ohlcv:
+        for bot_id, state in all_states.items():
+            positions = state.get("positions", {})
+            if not positions:
+                continue
+            # Calculer les returns daily pondérés par les positions
+            returns = []
+            for sym, pos in positions.items():
+                df = ohlcv.get(sym)
+                if df is not None and len(df) >= window:
+                    closes = df["close"].tail(window).values
+                    sym_returns = [(closes[i] - closes[i-1]) / closes[i-1] for i in range(1, len(closes))]
+                    returns.append(sym_returns)
+            if returns:
+                # Moyenne des returns de toutes les positions du bot
+                min_r = min(len(r) for r in returns)
+                if min_r >= 5:
+                    avg_returns = [sum(r[i] for r in returns) / len(returns) for i in range(min_r)]
+                    bot_returns[bot_id] = avg_returns
+
+    # Méthode 1 (prioritaire si disponible) : PnL des trades
     for bot_id, state in all_states.items():
         trades = state.get("trades", [])[-window:]
         if len(trades) < 5:
@@ -1006,7 +1031,7 @@ def run_bot_z_cycle(macro: dict, ohlcv: dict = None) -> dict:
     cb_factor_vol = round(cb_factor * vol_factor, 3)
 
     # Corrélation inter-bots : si trop corrélés → réduit l'exposition de 20%
-    avg_corr = compute_bot_correlation(all_states)
+    avg_corr = compute_bot_correlation(all_states, ohlcv=ohlcv)
     corr_factor = 0.80 if avg_corr > CORR_REDUCE_THRESHOLD else 1.0
     # BUG-05 : cb_factor_final plafonné à 1.0 pour éviter que le budget total dépasse z_capital.
     # vol_factor peut monter jusqu'à 1.5 après J+14 → budget = z_capital × 1.5 × weights = 150% du capital.

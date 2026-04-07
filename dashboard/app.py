@@ -980,6 +980,106 @@ def background_thread():
         time.sleep(POLL_INTERVAL)
 
 
+# ── Exposure par secteur (tous bots) ──────────────────────────────────────────
+
+@app.route("/api/exposure")
+def api_exposure():
+    """Exposition agrégée par secteur à travers tous les bots."""
+    ALL_BOTS = list(_BOT_PATHS.keys()) + ["k"]
+    sectors = {}
+    total_exposure = 0.0
+    total_initial = 0.0
+
+    for bot_id in ALL_BOTS:
+        try:
+            state = load_bot_state(bot_id)
+            initial = state.get("initial_capital", MULTI_INITIAL_CAPITAL)
+            if bot_id == "k":
+                initial = 10000.0
+            total_initial += initial
+            positions = state.get("positions", {})
+            for symbol, pos in positions.items():
+                entry = pos.get("entry", 0)
+                size = pos.get("size", 0)
+                size_eur = round(entry * size, 2)
+                total_exposure += size_eur
+                sector = config.SECTORS.get(symbol, "other")
+                if sector not in sectors:
+                    sectors[sector] = {"total_eur": 0.0, "positions": []}
+                sectors[sector]["total_eur"] += size_eur
+                sectors[sector]["positions"].append({
+                    "bot": _BOT_NAMES.get(bot_id, bot_id.upper()),
+                    "symbol": symbol,
+                    "size_eur": size_eur,
+                })
+        except Exception:
+            continue
+
+    # Calcul des pourcentages
+    for sector in sectors:
+        sectors[sector]["total_eur"] = round(sectors[sector]["total_eur"], 2)
+        sectors[sector]["pct_of_total"] = round(
+            (sectors[sector]["total_eur"] / total_exposure * 100) if total_exposure else 0, 2
+        )
+
+    return jsonify({
+        "sectors": sectors,
+        "total_exposure_eur": round(total_exposure, 2),
+        "total_exposure_pct": round(
+            (total_exposure / total_initial * 100) if total_initial else 0, 2
+        ),
+    })
+
+
+# ── Equity curve Bot Z (shadow.jsonl, sampled) ───────────────────────────────
+
+@app.route("/api/equity-curve")
+def api_equity_curve():
+    """Courbe equity Bot Z échantillonnée depuis shadow.jsonl (max 200 points)."""
+    shadow_log = os.path.join(BASE_DIR, "logs", "bot_z", "shadow.jsonl")
+    if not os.path.exists(shadow_log):
+        return jsonify({"curve": [], "count": 0})
+
+    records = []
+    try:
+        with open(shadow_log) as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                    records.append(rec)
+                except Exception:
+                    pass
+    except Exception:
+        return jsonify({"curve": [], "count": 0})
+
+    total = len(records)
+    # Échantillonnage : garder ~200 points max
+    step = max(1, total // 200)
+    sampled = records[::step]
+    # Toujours inclure le dernier point
+    if records and sampled[-1] is not records[-1]:
+        sampled.append(records[-1])
+
+    curve = []
+    for rec in sampled:
+        ts = rec.get("timestamp", "")
+        z_cap = rec.get("z_capital_eur", rec.get("total_simulated_eur", 10000))
+        initial = 10000.0
+        perf = ((z_cap - initial) / initial * 100) if initial else 0
+        curve.append({
+            "date":    ts[:10],
+            "z_capital": round(z_cap, 2),
+            "perf_pct":  round(perf, 2),
+            "regime":    rec.get("regime", "RANGE"),
+            "engine":    rec.get("current_engine", "BALANCED"),
+        })
+
+    return jsonify({"curve": curve, "count": total})
+
+
 def run(host: str = "0.0.0.0", port: int = 5000, debug: bool = False):
     """Lance le serveur Flask."""
     t = threading.Thread(target=background_thread, daemon=True)

@@ -36,7 +36,7 @@ def fetch_btc_context() -> dict:
 
 
 def fetch_vix_value() -> float:
-    """Current VIX value. Returns 0.0 if unavailable."""
+    """Current VIX value. Returns 25.0 (conservative default) if unavailable."""
     try:
         import yfinance as yf
         df = yf.Ticker("^VIX").history(period="2d", interval="1h")
@@ -44,7 +44,7 @@ def fetch_vix_value() -> float:
             return round(float(df["Close"].iloc[-1]), 2)
     except Exception:
         pass
-    return 0.0
+    return 25.0
 
 
 def fetch_macro_context() -> dict:

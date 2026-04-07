@@ -178,8 +178,33 @@ def generate_signals(df: pd.DataFrame) -> pd.DataFrame:
     df.loc[trend_buy,  "signal"] = 1
     df.loc[trend_exit, "signal"] = -1
 
+    # ── Improvement 1: 2-bar confirmation for BUY signals ────────────────────
+    # Require 2 consecutive bars of BUY signal to filter false signals in ranging markets
+    # SELL signals (-1) remain immediate — no delay on exits
+    raw_buy = df["signal"] == 1
+    confirmed_buy = raw_buy & raw_buy.shift(1, fill_value=False)
+    df.loc[raw_buy & ~confirmed_buy, "signal"] = 0
+
     df.loc[mr_buy,  "mr_signal"] = 1
     df.loc[mr_exit, "mr_signal"] = -1
+
+    # ── Improvement 2: RSI bearish divergence detection ──────────────────────
+    # Bearish divergence = price makes higher high but RSI makes lower high over 10 bars
+    lookback = 10
+    price_high_roll = df["high"].rolling(window=lookback, min_periods=2).max()
+    rsi_at_price_high = df["rsi"].rolling(window=lookback, min_periods=2).max()
+
+    # Current bar highs vs previous window highs
+    prev_price_high = df["high"].shift(1).rolling(window=lookback, min_periods=2).max()
+    prev_rsi_high = df["rsi"].shift(1).rolling(window=lookback, min_periods=2).max()
+
+    df["rsi_bearish_div"] = (
+        (price_high_roll > prev_price_high) &  # Price made a higher high
+        (rsi_at_price_high < prev_rsi_high)     # RSI made a lower high
+    ).fillna(False)
+
+    # Soft filter column for downstream use
+    df["f_no_rsi_div"] = ~df["rsi_bearish_div"]
 
     return df
 
