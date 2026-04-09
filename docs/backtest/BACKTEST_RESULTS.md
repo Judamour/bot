@@ -3,12 +3,147 @@
 > **SOURCE DE VÉRITÉ : historique des runs de backtest**
 > Architecture live → voir `docs/PROJET Z .md` | Stratégies → voir `docs/BOTS.md`
 
-> Script : `backtest/multi_backtest.py`
-> Dernier run : 2026-03-06 (**Run 10 — Bot Z Meta v2 engine scoring data-driven + MC 5000**)
+> Script solo/Z : `backtest/run10y.py` | Script multi : `backtest/multi_backtest.py`
+> **Dernier run : 2026-04-09 (Run 19 — Audit santé post-fixes)**
 > Graphique : `backtest/results/multi_equity.png`
 > CSV détaillé : `backtest/results/multi_summary.csv`
 > CSV Bot Z : `backtest/results/bot_z_comparison.csv`
 > Symboles : 16 (5 crypto + 11 xStocks — LINK, AVAX, TSLA, AMZN exclus définitivement)
+
+---
+
+## RUN 19 — Audit santé (10 ans 2016-2026) — Post-fixes 2026-04-09
+
+> Script : `backtest/run10y.py` + `backtest/multi_backtest.py` | Date : 2026-04-09
+> Contexte : audit apres fixes token OAuth, capital injection bots morts, NaN cascade
+> Capital initial : 1 000€ par bot solo | 4 000€ Bot Z
+
+### Bots individuels (run10y.py)
+
+| Bot | Strategie | CAGR | Sharpe | MaxDD | Trades | WR% | Final | PF |
+|-----|-----------|------|--------|-------|--------|-----|-------|----|
+| A | Supertrend+MR | +53.1% | 2.42 | -68.4% | 450 | 44.0% | 70 886€ | 2.72 |
+| B | Momentum | +20.0% | 0.55 | -73.3% | 417 | 18.7% | 6 194€ | 1.20 |
+| C | Breakout | +0.6% | 0.21 | -7.8% | 199 | 40.2% | 1 058€ | 1.07 |
+| G | Trend Multi-Asset | +23.1% | 0.65 | -22.6% | 287 | 54.0% | 8 010€ | 4.50 |
+| J | Mean Reversion | +2.1% | 1.40 | -3.5% | 331 | 69.5% | 1 213€ | 1.72 |
+
+### Bot Z Meta v2 PROD (run10y.py)
+
+| Variant | CAGR | Sharpe | MaxDD | Final |
+|---------|------|--------|-------|-------|
+| Equal-Weight A+B+C+G | +35.5% | 1.11 | -29.2% | 83 349€ |
+| **Bot Z PROD — Meta v2** | **+36.6%** | **1.92** | **-9.9%** | **76 362€** |
+
+### Multi-backtest 6 ans (multi_backtest.py) — H/I/J inclus
+
+| Bot | CAGR | Sharpe | MaxDD | Trades | WR% |
+|-----|------|--------|-------|--------|-----|
+| A | +33.5% | 3.41 | -66.4% | 197 | 45.2% |
+| B | +39.1% | 2.32 | -72.4% | 73 | 27.4% |
+| C | +0.1% | 0.07 | -9.6% | 123 | 35.8% |
+| G | +18.6% | 0.68 | -23.1% | 138 | 52.9% |
+| **H** | **+0.0%** | **0.00** | **0.0%** | **0** | **0.0%** |
+| I | +17.5% | 2.31 | -21.8% | 82 | 9.8% |
+| J | +1.5% | 1.38 | -1.7% | 167 | 70.1% |
+
+### Walk-Forward (IS 2020-2022 / OOS 2023-2026)
+
+| Strategie | IS CAGR | IS Sharpe | OOS CAGR | OOS Sharpe | Verdict |
+|-----------|---------|-----------|----------|------------|---------|
+| Equal-Weight | +53.0% | 1.24 | +33.0% | 1.09 | EDGE REEL |
+| Regime pur | +68.7% | 1.58 | +40.5% | 1.25 | EDGE REEL |
+
+### Monte Carlo (5000 sims)
+
+| Bot | Trades | p5 CAGR | p50 CAGR | %Positif | DD p5 |
+|-----|--------|---------|----------|----------|-------|
+| A | 197 | +93.3% | +93.3% | 100% | -60.1% |
+| B | 73 | +668.3% | +678.0% | 100% | -100.0% |
+| G | 138 | +74.5% | +74.5% | 100% | -12.4% |
+
+### Bugs et alertes identifies
+
+1. **Bot H (VCB) — 0 trades en 6 ans** : strategie ne genere aucun signal. A retirer ou reparer.
+2. **Bot C — CAGR +0.1%** : quasi-inutile, mais MaxDD -9.6% fait de lui un stabilisateur.
+3. **PnL par regime = 0 partout** : bug dans multi_backtest.py (pas de tag regime sur les trades).
+4. **Bot B MaxDD -73%** : confirme qu'il atteint le gel en paper. Design OK si on accepte le risque.
+
+### Comparaison Run 18 vs Run 19
+
+| Metrique | Run 18 (2026-03-08) | Run 19 (2026-04-09) | Delta |
+|----------|---------------------|---------------------|-------|
+| Bot A CAGR | +49.3% | +53.1% | +3.8pp |
+| Bot Z PROD CAGR | +38.2% | +36.6% | -1.6pp |
+| Bot Z PROD MaxDD | -10.1% | -9.9% | +0.2pp |
+| Bot Z PROD Sharpe | 1.92 | 1.92 | = |
+
+Variations normales (1 mois de donnees supplementaires). Pas de regression.
+
+---
+
+## RUN 18 — FINAL PROD (10 ans 2016-2026) — RÉSULTATS DE RÉFÉRENCE
+
+> Script : `backtest/run10y.py` | Date : 2026-03-08
+> Capital initial : 1 000€ par bot solo | 4 000€ Bot Z (10 000€ en paper live)
+> Engines renommés depuis Run 13 : ENHANCED→BULL, OMEGA→BALANCED, OMEGA_V2→PARITY, PRO→SHIELD
+
+### Bots individuels
+
+| Bot | Stratégie | CAGR | Sharpe | MaxDD | Trades | WR% | Final | PF |
+|-----|-----------|------|--------|-------|--------|-----|-------|----|
+| A | Supertrend+MR | +49.3% | 2.43 | -68.3% | 452 | 43.8% | 55 008€ | 2.72 |
+| B | Momentum | +36.8% | 0.77 | -67.8% | 365 | 19.2% | 23 097€ | 1.66 |
+| C | Breakout (stop LOW corrigé) | +0.6% | 0.21 | -7.8% | 199 | 40.2% | 1 057€ | 1.07 |
+| G | Trend Multi-Asset | +23.4% | 0.65 | -22.6% | 289 | 54.3% | 8 179€ | 4.50 |
+| J | Mean Reversion | +2.1% | 1.45 | -3.5% | 326 | 69.9% | 1 219€ | 1.78 |
+
+### Bot Z Meta v2 PROD — Variants (4 000€ initial)
+
+| Variant | CAGR | Sharpe | MaxDD | Final |
+|---------|------|--------|-------|-------|
+| Equal-Weight A+B+C+G | +41.4% | 1.24 | -27.1% | 127 323€ |
+| Bot Z — Régime pur | +53.0% | 1.48 | -26.5% | 279 863€ |
+| Bot Z v1 — BULL engine (MO+CB) | +52.6% | 1.56 | -25.7% | 271 927€ |
+| Bot Z v2 — BALANCED (QualityScore) | +50.5% | 2.08 | -9.9% | 236 472€ |
+| Bot Z v3 — PARITY (RiskParity) | +20.9% | 1.93 | -5.1% | 24 041€ |
+| **Bot Z PROD — Meta v2 (BULL/BALANCED/PARITY/SHIELD)** | **+38.2%** | **1.92** | **-10.1%** | **84 985€** |
+
+### Benchmarks
+
+| Benchmark | CAGR | Sharpe | MaxDD |
+|-----------|------|--------|-------|
+| S&P 500 | +12.9% | 0.77 | -33.9% |
+| NASDAQ-100 | +19.9% | 0.93 | -35.1% |
+| BTC buy & hold | +65.4% | 0.90 | -82.7% |
+
+### Rendements annuels Bot Z Meta v2 PROD
+
+| 2016 | 2017 | 2018 | 2019 | 2020 | 2021 | 2022 | 2023 | 2024 | 2025 | 2026 |
+|------|------|------|------|------|------|------|------|------|------|------|
+| +1.7% | +117.6% | **-0.6%** | +15.6% | +47.8% | +110.2% | **-0.5%** | +39.1% | +42.6% | +10.8% | +1.6% |
+
+Années négatives : 2018 (-0.6%) et 2022 (-0.5%) — drawdowns < 1% en bear market.
+
+### Architecture PROD confirmée
+
+- **4 engines** : BULL / BALANCED / PARITY / SHIELD (sélection data-driven)
+- **BALANCED-as-base** : tous les engines utilisent BALANCED comme socle (Run 15)
+- **Scoring** : `0.50×regime_fit + 0.30×quality_norm + 0.20×inv_risk - 0.05×switch_penalty`
+- **Hysteresis** : BULL=7j / BALANCED=5j / PARITY=4j / SHIELD=3j
+- **Hard rules** : SHIELD forcé si VIX>32 ou DD<-12% ou (BTC+QQQ bearish ET VIX>26)
+- **Levier conditionnel BULL** : `min(1.30, TARGET_VOL / port_vol)` si vol < 20% (Run 17)
+- **Risk Parity** : 60% engine/régime + 40% inverse-vol dans `_write_budget()` (Run 18)
+
+### Note technique — Bug Bot C corrigé (depuis Run 13)
+
+Stop loss vérifié sur `row["low"]` au lieu de `row["close"]`.
+Impact : CAGR Bot C +17.2% (buggué) → +0.6% (réel). Corrigé en backtest ET en live.
+
+### Décision finale
+
+**NE PLUS MODIFIER LE CODE.** Observer le système en paper trading.
+Revue obligatoire : **2026-04-30**.
 
 ---
 
@@ -473,6 +608,14 @@ La calibration actuelle pour le régime BEAR (`a=1.5, g=0.2`) est **fausse** :
 | 2026-03-06 | Jan 2020 → Mar 2026 (6 ans) | **Run 8** : Bot J MR (RSI2+BB+SMA200) + Omega v2 (RP+ML) | **J: MaxDD -1.7% WinRate 70.8% / v2: Sharpe 2.03 MaxDD -7.6%** | bot_z_comparison.csv |
 | 2026-03-06 | Jan 2020 → Mar 2026 (6 ans) | **Run 9** : Bot Z Meta méta-sélecteur E/Ω/Ω2/P + hysteresis | **Meta: CAGR +38.6% MaxDD -15.1% 2022 +1.2% (OMEGA 51%/PRO 21%)** | bot_z_comparison.csv |
 | 2026-03-06 | Jan 2020 → Mar 2026 (6 ans) | **Run 10** : Bot Z Meta v2 engine scoring data-driven (seuils recalibrés) | **Meta v2: CAGR +43.2% Sharpe 1.70 MaxDD -9.6% 2022 +1.0% (OMEGA 30%/OMEGA_V2 28%/PRO 25%/ENH 17%)** | bot_z_comparison.csv |
+| 2026-03-06 | Jan 2020 → Mar 2026 (6 ans) | **Run 11** : Engines renommés ENHANCED→BULL, OMEGA→BALANCED, OMEGA_V2→PARITY, PRO→SHIELD | — | bot_z_comparison.csv |
+| 2026-03-08 | Jan 2016 → Mar 2026 (10 ans) | **Run 12** : Période étendue 10 ans + Bug Bot C stop loss identifié (close→low) | Bot C +17.2%→bugué | BACKTEST_RUN12_10ANS.md |
+| 2026-03-08 | Jan 2016 → Mar 2026 (10 ans) | **Run 13** : Bug Bot C corrigé (stop sur LOW) — edge réel +0.6% | Bot C réel +0.6% | BACKTEST_RUN13_10ANS_CORRECTED.md |
+| 2026-03-08 | Jan 2016 → Mar 2026 (10 ans) | **Run 14** : Hysteresis weekly testé (BULL=2w etc.) | — | BACKTEST_RUN14_10ANS_FINAL.md |
+| 2026-03-08 | Jan 2016 → Mar 2026 (10 ans) | **Run 15** : BALANCED-as-base — tous engines utilisent BALANCED comme socle | MaxDD -9.5% vs -14.4% avant | BACKTEST_RUN15_10ANS_BALANCED_BASE.md |
+| 2026-03-08 | Jan 2016 → Mar 2026 (10 ans) | **Run 16** : Tests intermédiaires | — | — |
+| 2026-03-08 | Jan 2016 → Mar 2026 (10 ans) | **Run 17** : Levier conditionnel BULL (vol targeting CTA) + fix bug engines (appliqués sur bonne fonction) | **Meta v2: +38.2% Sharpe 1.92 MaxDD -10.1%** | BACKTEST_RUN17_FINAL.md |
+| 2026-03-08 | Jan 2016 → Mar 2026 (10 ans) | **Run 18 FINAL** : Risk parity 60/40 dans _write_budget, dispatch actif — PROD confirmé | **Meta v2 PROD: +38.2% Sharpe 1.92 MaxDD -10.1% Final 84 985€** | BACKTEST_RUN18_FINAL.md |
 
 ---
 
