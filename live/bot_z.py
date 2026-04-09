@@ -878,20 +878,27 @@ def run_bot_z_cycle(macro: dict, ohlcv: dict = None) -> dict:
         val = s.get("capital", 1000.0)
         for sym, p in s.get("positions", {}).items():
             entry_price = p.get("entry", 0)
+            size = p.get("size", 0)
             # Mark-to-market : utilise le dernier close OHLCV si disponible
             if ohlcv and sym in ohlcv:
                 try:
                     df = ohlcv[sym]
                     if df is not None and not df.empty:
                         live_price = float(df["close"].iloc[-1])
-                        mtm_prices[sym] = round(live_price, 4)
-                        val += live_price * p.get("size", 0)
-                        continue
+                        import math
+                        if not math.isnan(live_price) and live_price > 0:
+                            mtm_prices[sym] = round(live_price, 4)
+                            val += live_price * size
+                            continue
                 except Exception:
                     pass
             # Fallback : prix d'entrée
             mtm_prices.setdefault(sym, entry_price)
-            val += entry_price * p.get("size", 0)
+            val += entry_price * size
+        # Protection NaN : si val est NaN (données corrompues), utiliser le capital seul
+        import math
+        if math.isnan(val):
+            val = s.get("capital", 1000.0)
         bot_values[bot_id] = round(val, 2)
 
     # Retour pondéré du cycle : retours de chaque bot × poids du cycle précédent
@@ -904,6 +911,12 @@ def run_bot_z_cycle(macro: dict, ohlcv: dict = None) -> dict:
         for b in VALID_BOTS
     }
     weighted_return = sum(prev_weights.get(b, 0) * cycle_returns.get(b, 0) for b in VALID_BOTS)
+
+    # Protection NaN cascade (données corrompues → return NaN → z_capital = 0)
+    import math
+    if math.isnan(weighted_return):
+        print(f"[BOT Z] WARN: weighted_return NaN (bot_values={bot_values}, prev={prev_bot_values}) → forcé à 0")
+        weighted_return = 0.0
 
     # Sanity cap : un retour > 15% sur un cycle 4h signale un saut de données
     # (ex : Bot Z crashé → sub-bots ont accumulé des gains → faux "mega-cycle")
