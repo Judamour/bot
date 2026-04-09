@@ -247,6 +247,46 @@ def notify_token_warning(hours_remaining: float, refresh_ok: bool):
         )
 
 
+def notify_daily_health(bots_status: list[dict], z_capital: float, engine: str, days_running: int):
+    """Rapport quotidien de santé — envoyé 1x/jour au cycle de 20h UTC.
+    bots_status: [{id, name, capital, positions, trades, dd_frozen, pnl_pct}]
+    """
+    lines = [
+        f"📊 <b>Rapport quotidien — Jour {days_running}</b>",
+        f"Bot Z: <b>{z_capital:.0f}€</b> | Engine: {engine}",
+        "",
+    ]
+
+    warnings = []
+    for b in bots_status:
+        bid = b["id"].upper()
+        frozen = "🧊" if b.get("dd_frozen") else ""
+        n_pos = b.get("positions", 0)
+        n_trades = b.get("trades", 0)
+        pnl = b.get("pnl_pct", 0)
+        capital = b.get("capital", 0)
+
+        if capital < 5 and n_pos == 0:
+            warnings.append(f"💀 Bot {bid} — capital épuisé ({capital:.0f}€)")
+        elif b.get("dd_frozen"):
+            warnings.append(f"🧊 Bot {bid} — gelé (drawdown)")
+        elif n_trades == 0 and n_pos == 0:
+            warnings.append(f"😴 Bot {bid} — 0 trades depuis le début")
+
+        sign = "+" if pnl >= 0 else ""
+        lines.append(
+            f"Bot {bid}: <b>{capital:.0f}€</b> {frozen} | "
+            f"{n_pos} pos | {n_trades} trades | {sign}{pnl:.1f}%"
+        )
+
+    if warnings:
+        lines.append("")
+        lines.append("<b>⚠️ Alertes:</b>")
+        lines.extend(warnings)
+
+    notify("\n".join(lines))
+
+
 def resend_pending_alerts():
     """
     Renvoie toutes les alertes actives (appelé au début de chaque cycle).

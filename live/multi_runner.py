@@ -106,8 +106,11 @@ def _apply_z_budget(state: dict, z_budget_eur: float) -> dict:
         notify_bot_revived(bot_id, z_budget_eur)
         state["capital"] = round(z_budget_eur, 2)
         state["positions"] = {}
+        state["trades"] = []  # Reset historique — nouveau départ
         state["initial_capital"] = round(z_budget_eur, 2)
         state["z_budget_eur"] = round(z_budget_eur, 2)
+        state["original_capital"] = round(z_budget_eur, 2)  # Reset drawdown baseline
+        state["dd_frozen"] = False  # Dégeler le bot
         return state
 
     prev = state.get("z_budget_eur", state.get("initial_capital", INITIAL_CAPITAL_PER_BOT))
@@ -596,6 +599,38 @@ def run():
                     )
                 except Exception as _e:
                     log(f"[notify_cycle_summary] erreur: {_e}", "WARN")
+
+            # ── 15b. Daily health report (1x/jour au cycle 19h UTC = 21h Paris) ──
+            _now_utc = datetime.now(timezone.utc)
+            if _now_utc.hour == 19 and z_summary:
+                try:
+                    from live.notifier import notify_daily_health
+                    _all_bots = [
+                        ("A", "Supertrend", state_a), ("B", "Momentum", state_b),
+                        ("C", "Breakout", state_c), ("G", "Trend CTA", state_g),
+                        ("H", "VCB", state_h), ("I", "RS Leaders", state_i), ("J", "MeanRev", state_j),
+                    ]
+                    _bots_status = []
+                    for _bid, _bname, _bstate in _all_bots:
+                        _bval = _portfolio_value(_bstate, ohlcv_daily)
+                        _binit = _bstate.get("original_capital", _bstate.get("initial_capital", INITIAL_CAPITAL_PER_BOT))
+                        _bpnl = ((_bval - _binit) / _binit * 100) if _binit > 0 else 0
+                        _bots_status.append({
+                            "id": _bid, "name": _bname,
+                            "capital": _bval,
+                            "positions": len(_bstate.get("positions", {})),
+                            "trades": len(_bstate.get("trades", [])),
+                            "dd_frozen": _bstate.get("dd_frozen", False),
+                            "pnl_pct": _bpnl,
+                        })
+                    notify_daily_health(
+                        _bots_status,
+                        z_capital=z_summary.get("z_capital_eur", 10000),
+                        engine=z_summary.get("current_engine", "?"),
+                        days_running=z_summary.get("days_running", 0),
+                    )
+                except Exception as _e:
+                    log(f"[daily_health] erreur: {_e}", "WARN")
 
             # ── 16. Drawdown checks ───────────────────────────────────────────
             for name, state in [("A", state_a), ("B", state_b), ("C", state_c), ("D", state_d), ("E", state_e), ("F", state_f), ("G", state_g), ("H", state_h), ("I", state_i), ("J", state_j)]:
