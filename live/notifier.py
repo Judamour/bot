@@ -213,20 +213,71 @@ def notify_exposure_high(total_pct: float, details: str):
     )
 
 
+def notify_bot_death(bot_id: str, capital: float):
+    """Alerte quand un bot perd tout son capital."""
+    notify(
+        f"💀 <b>Bot {bot_id.upper()} — Capital épuisé</b>\n"
+        f"Capital restant : <b>{capital:.2f}€</b>\n"
+        f"Le bot sera re-capitalisé au prochain dispatch Bot Z."
+    )
+
+
+def notify_bot_revived(bot_id: str, new_capital: float):
+    """Alerte quand un bot mort reçoit du capital frais."""
+    notify(
+        f"🔄 <b>Bot {bot_id.upper()} — Re-capitalisé</b>\n"
+        f"Nouveau capital : <b>{new_capital:.0f}€</b>\n"
+        f"Le bot reprend le trading."
+    )
+
+
+def notify_token_warning(hours_remaining: float, refresh_ok: bool):
+    """Alerte quand le token OAuth approche de l'expiration."""
+    if refresh_ok:
+        notify(
+            f"🔑 Token Claude — Rafraîchi avec succès\n"
+            f"(restait {hours_remaining:.1f}h avant expiration)"
+        )
+    else:
+        notify(
+            f"🚨 <b>Token Claude — Refresh échoué</b>\n"
+            f"Expire dans <b>{hours_remaining:.1f}h</b>\n"
+            f"⚠️ Le filtre Claude sera indisponible après expiration.\n"
+            f"Action requise : <code>ssh ubuntu@VPS 'claude auth login'</code>"
+        )
+
+
 def resend_pending_alerts():
     """
     Renvoie toutes les alertes actives (appelé au début de chaque cycle).
     Garantit que l'alerte ne passe pas inaperçue.
+    Limite : 1 rappel toutes les 6h par alerte pour éviter le spam.
     """
     alerts = _load_alerts()
     if not alerts:
         return
 
+    now = datetime.now()
+    updated = False
     for api, data in alerts.items():
+        # Anti-spam : 1 rappel toutes les 6h max
+        last_resend = data.get("last_resend", "")
+        if last_resend:
+            try:
+                last_dt = datetime.fromisoformat(last_resend)
+                if (now - last_dt).total_seconds() < 6 * 3600:
+                    continue
+            except ValueError:
+                pass
+
         ts = data.get("ts", "")[:16].replace("T", " ")
         notify(
-            f"🔁 <b>RAPPEL — Crédits {api.upper()} épuisés</b>\n\n"
+            f"🔁 <b>RAPPEL — {api.upper()} indisponible</b>\n\n"
             f"Signalé depuis : {ts}\n"
-            f"<code>{data.get('message', '')[:200]}</code>\n\n"
-            f"Rechargez votre compte {api.upper()} pour arrêter ces alertes."
+            f"<code>{data.get('message', '')[:200]}</code>"
         )
+        data["last_resend"] = now.isoformat()
+        updated = True
+
+    if updated:
+        _save_alerts(alerts)

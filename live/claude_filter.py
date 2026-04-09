@@ -1,8 +1,12 @@
 import os
 import json
+import logging
 import subprocess
+import time
 import anthropic
 
+
+_log = logging.getLogger("claude_filter")
 
 # ── Token management ─────────────────────────────────────────────────────────
 
@@ -13,6 +17,32 @@ _CREDS_PATHS = [
 ]
 
 
+def _read_best_token() -> tuple[str, float]:
+    """Read the OAuth token with the longest remaining lifetime.
+    Returns (access_token, remaining_seconds). Token may be expired (negative remaining).
+    """
+    best_token = ""
+    best_remaining = -999999.0
+
+    for path in _CREDS_PATHS:
+        try:
+            with open(path) as f:
+                creds = json.load(f)
+            oauth = creds.get("claudeAiOauth", {})
+            token = oauth.get("accessToken", "")
+            expires_at = oauth.get("expiresAt", 0)
+            if not token:
+                continue
+            remaining = (expires_at / 1000) - time.time()
+            if remaining > best_remaining:
+                best_remaining = remaining
+                best_token = token
+        except (FileNotFoundError, KeyError, json.JSONDecodeError):
+            continue
+
+    return best_token, best_remaining
+
+
 def _get_api_key() -> str:
     """Get API key from env (permanent, preferred) or OAuth token (fallback)."""
     # 1. Clé API permanente (prioritaire — pas d'expiration)
@@ -20,36 +50,55 @@ def _get_api_key() -> str:
     if env_key and not env_key.startswith("sk-ant-api03-U2RW"):  # Skip l'ancienne clé épuisée
         return env_key
 
-    # 2. Fallback : token OAuth depuis le fichier credentials CLI
-    for path in _CREDS_PATHS:
-        try:
-            with open(path) as f:
-                creds = json.load(f)
-            token = creds["claudeAiOauth"]["accessToken"]
-            if token:
-                return token
-        except (FileNotFoundError, KeyError, json.JSONDecodeError):
-            continue
+    # 2. Fallback : token OAuth (le meilleur parmi les fichiers dispo)
+    token, remaining = _read_best_token()
+    if token and remaining > 0:
+        return token
+    # Token expiré — tenter un refresh
+    if token:
+        _log.warning(f"Token OAuth expiré (remaining: {remaining/3600:.1f}h) — tentative de refresh...")
+        if _refresh_token():
+            token2, rem2 = _read_best_token()
+            if token2 and rem2 > 0:
+                return token2
+        # Même expiré, certaines API l'acceptent brièvement — retourner quand même
+        return token
     return ""
 
 
-def _refresh_token_via_cli():
-    """Force Claude CLI to refresh the OAuth token (runs in background)."""
+def _refresh_token() -> bool:
+    """Refresh OAuth token. Tries CLI method. Returns True if refresh succeeded."""
+    return _refresh_token_via_cli()
+
+
+def _refresh_token_via_cli() -> bool:
+    """Force Claude CLI to refresh the OAuth token. Returns True on success."""
     try:
-        subprocess.run(
-            ["claude", "-p", "hi", "--output-format", "text", "--effort", "low"],
-            capture_output=True, text=True, timeout=15,
+        result = subprocess.run(
+            ["claude", "-p", "hi", "--output-format", "text", "--max-turns", "1"],
+            capture_output=True, text=True, timeout=30,
         )
-    except Exception:
-        pass
+        if result.returncode == 0:
+            _log.info("Token refreshed via CLI")
+            return True
+        _log.warning(f"CLI refresh failed (rc={result.returncode}): {result.stderr[:200]}")
+        return False
+    except FileNotFoundError:
+        _log.warning("Claude CLI not found — cannot refresh token")
+        return False
+    except subprocess.TimeoutExpired:
+        _log.warning("CLI refresh timed out (30s)")
+        return False
+    except Exception as e:
+        _log.warning(f"CLI refresh error: {e}")
+        return False
 
 
 def _get_client() -> anthropic.Anthropic:
     """Get Anthropic client. Uses API key if available, else OAuth token."""
     key = _get_api_key()
     if not key:
-        _refresh_token_via_cli()
-        key = _get_api_key()
+        _log.error("No valid API key or OAuth token available")
     return anthropic.Anthropic(api_key=key)
 
 

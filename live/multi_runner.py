@@ -83,10 +83,33 @@ def _apply_z_budget(state: dict, z_budget_eur: float) -> dict:
 
     Si Bot Z alloue 4 000€ à Bot A (qui avait 1 000€ initial), le capital disponible
     est multiplié ×4 tout en préservant le ratio de PnL accumulé.
+
+    Si le bot est "mort" (capital + positions < 5€), injecte le budget comme capital frais
+    au lieu de scaler 0 × N = 0.
     """
     # Préserver le capital original pour le drawdown check (jamais rescalé)
     if "original_capital" not in state:
         state["original_capital"] = state.get("initial_capital", INITIAL_CAPITAL_PER_BOT)
+
+    # Calculer la valeur totale du bot (cash + positions mark-to-market)
+    positions_value = sum(
+        p.get("entry", 0) * p.get("size", 0)
+        for p in state.get("positions", {}).values()
+    )
+    total_value = state.get("capital", 0) + positions_value
+
+    # Bot mort : injecter capital frais au lieu de scaler 0
+    if total_value < 5.0 and z_budget_eur > 0:
+        bot_id = state.get("_bot_id", "?")
+        log(f"[Z→] Bot {bot_id} mort ({total_value:.2f}€) — injection {z_budget_eur:.0f}€", "WARN")
+        from live.notifier import notify_bot_revived
+        notify_bot_revived(bot_id, z_budget_eur)
+        state["capital"] = round(z_budget_eur, 2)
+        state["positions"] = {}
+        state["initial_capital"] = round(z_budget_eur, 2)
+        state["z_budget_eur"] = round(z_budget_eur, 2)
+        return state
+
     prev = state.get("z_budget_eur", state.get("initial_capital", INITIAL_CAPITAL_PER_BOT))
     if prev <= 0:
         prev = INITIAL_CAPITAL_PER_BOT
@@ -291,24 +314,23 @@ def run():
 
             # ── 0. Pre-refresh Claude OAuth token ─────────────────────────────
             # Le token expire toutes les ~7h. Le bot cycle toutes les 4h.
-            # Refresh proactif au début de chaque cycle (comme OpenClaw gateway).
+            # Refresh proactif : vérifie le meilleur token, refresh si < 2h, alerte si échec.
             try:
-                from live.claude_filter import _refresh_token_via_cli, _get_api_key
-                import time as _t
-                # Vérifier si le token expire dans < 2h
-                for _p in ["/home/botuser/.claude/.credentials.json", "/home/ubuntu/.claude/.credentials.json"]:
-                    try:
-                        with open(_p) as _f:
-                            _creds = json.load(_f)
-                        _exp = _creds.get("claudeAiOauth", {}).get("expiresAt", 0)
-                        _remaining_h = (_exp / 1000 - _t.time()) / 3600
-                        if _remaining_h < 2:
-                            log(f"Token Claude expire dans {_remaining_h:.1f}h — refresh proactif...", "WARN")
-                            _refresh_token_via_cli()
-                            log("Token Claude refreshé", "INFO")
-                        break
-                    except (FileNotFoundError, json.JSONDecodeError):
-                        continue
+                from live.claude_filter import _read_best_token, _refresh_token
+                _token, _remaining = _read_best_token()
+                _remaining_h = _remaining / 3600
+                if _token and _remaining_h < 2:
+                    log(f"Token Claude expire dans {_remaining_h:.1f}h — refresh proactif...", "WARN")
+                    _refresh_ok = _refresh_token()
+                    if _refresh_ok:
+                        _token2, _rem2 = _read_best_token()
+                        log(f"Token Claude refreshé (nouveau TTL: {_rem2/3600:.1f}h)", "INFO")
+                    else:
+                        log(f"Token Claude refresh ÉCHOUÉ — filtre Claude indisponible", "WARN")
+                        from live.notifier import notify_token_warning
+                        notify_token_warning(_remaining_h, False)
+                elif not _token:
+                    log("Aucun token OAuth Claude trouvé — filtre désactivé", "WARN")
             except Exception as _e:
                 log(f"Token refresh check failed (non-bloquant): {_e}", "WARN")
 
@@ -362,6 +384,11 @@ def run():
                 # si Bot Z crashe (weighted_return > 15% → recalage sur ratio réel).
                 z_budget_alloc = z_summary.get("budget", {})
                 if z_budget_alloc:
+                    # Tag bot_id pour les logs de _apply_z_budget (injection capital mort)
+                    state_a["_bot_id"] = "A"
+                    state_b["_bot_id"] = "B"
+                    state_c["_bot_id"] = "C"
+                    state_g["_bot_id"] = "G"
                     state_a = _apply_z_budget(state_a, z_budget_alloc.get("a", INITIAL_CAPITAL_PER_BOT))
                     state_b = _apply_z_budget(state_b, z_budget_alloc.get("b", INITIAL_CAPITAL_PER_BOT))
                     state_c = _apply_z_budget(state_c, z_budget_alloc.get("c", INITIAL_CAPITAL_PER_BOT))
