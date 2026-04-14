@@ -10,7 +10,6 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
 from data.fetcher import fetch_ohlcv, get_exchange, fetch_fear_greed, fetch_funding_rates, fetch_news_yfinance, fetch_news_macro_rss, fetch_qqq_regime
 from strategies.supertrend import generate_signals, calculate_position_size, add_indicators
-from live.claude_filter import ask_claude
 from live.notifier import notify, notify_file
 
 init(autoreset=True)
@@ -317,79 +316,9 @@ def process_symbol(
 
         log(
             f"{symbol} — Signal BUY | ADX: {adx:.1f} | Vol×{volume_ratio:.2f} | "
-            f"RSI: {last['rsi']:.1f} — consultation Claude...",
+            f"RSI: {last['rsi']:.1f} — exécution autonome",
             "INFO",
         )
-        recent_trades = state.get("trades", [])[-20:]
-        recent_wr = (
-            sum(1 for t in recent_trades if t.get("pnl", 0) > 0) / len(recent_trades) * 100
-            if recent_trades else None
-        )
-
-        # ── News : symbol-specific (lazy, seulement si BUY) + macro du cycle ──
-        news = list(macro_news or [])
-        if symbol in config.XSTOCKS:
-            from data.fetcher import _xstock_ticker
-            sym_ticker = _xstock_ticker(symbol)          # NVDAx/EUR → NVDA
-            sym_news = fetch_news_yfinance(sym_ticker, limit=3, hours=48)
-        else:
-            crypto_ticker = symbol.split("/")[0] + "-USD"  # BTC/EUR → BTC-USD
-            sym_news = fetch_news_yfinance(crypto_ticker, limit=3, hours=48)
-        news = sym_news + news  # symbol en priorité, macro en complément
-        news = news[:6]
-
-        soft_filters = {
-            "adx_trending": bool(last["f_trending"]),    # ADX > seuil
-            "volume_strong": bool(last["f_volume"]),     # Volume > 110% MA
-            "structure":     bool(last["f_structure"]),  # EMA50 > EMA200
-            "momentum":      bool(last["f_momentum"]),   # EMA9 > EMA21
-            "mtf_1d":        ok_1d,                      # Tendance 1d
-            "qqq_regime":    qqq_regime_ok,              # QQQ > SMA200
-            "no_rsi_div":    bool(last.get("f_no_rsi_div", True)),  # Pas de divergence RSI baissière
-        }
-
-        confirme, raison = ask_claude(
-            symbol=symbol,
-            price=current_price,
-            rsi=float(last["rsi"]),
-            ema50=float(last["ema50"]),
-            ema200=float(last["ema200"]),
-            atr=atr,
-            adx=adx,
-            volume_ratio=volume_ratio,
-            capital=state["capital"],
-            btc_context=btc_context,
-            vix=vix,
-            fear_greed=fear_greed,
-            funding_rate=funding_rate,
-            open_positions=len(state["positions"]),
-            max_positions=config.MAX_OPEN_TRADES,
-            recent_win_rate=recent_wr,
-            rotation_factor=vix_factor,
-            daily_trend_reason=reason_1d,
-            news=news if news else None,
-            soft_filters=soft_filters,
-        )
-        # ── Filtre Claude ACTIF — bloque les trades si Claude dit IGNORE ────
-        log(f"{symbol} — Claude: {'✓ CONFIRM' if confirme else '✗ IGNORE'} | {raison}", "INFO")
-        log_signal("CLAUDE_FILTER", symbol, {
-            "claude_decision": "CONFIRM" if confirme else "IGNORE",
-            "claude_applied": True,
-            "raison": raison,
-            "adx": round(adx, 2),
-            "rsi": round(float(last["rsi"]), 2),
-            "volume_ratio": round(volume_ratio, 3),
-            "price": current_price,
-            "vix": round(vix, 1) if vix else None,
-            "fear_greed_score": fear_greed.get("score") if fear_greed else None,
-            "funding_rate": round(funding_rate, 6) if funding_rate else None,
-            "btc_trend": btc_context.get("btc_trend") if btc_context else None,
-            "rotation_factor": vix_factor,
-        })
-        if not confirme:
-            log(f"{symbol} — Trade bloqué par Claude: {raison}", "WARN")
-            log_signal("BUY_SKIP_CLAUDE", symbol, {"raison": raison, "price": current_price})
-            return state
 
         effective_buy = current_price * (1 + config.SLIPPAGE)
         base_eur = max(config.POSITION_MIN_EUR, state["capital"] * config.POSITION_SIZE_PCT)
