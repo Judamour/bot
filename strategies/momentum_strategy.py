@@ -273,9 +273,11 @@ def run_momentum_cycle(state: dict, daily_cache: dict, macro_context: dict = Non
     total_portfolio = _portfolio_value(state, daily_cache)
     target_per_pos = total_portfolio / TOP_N  # Cible uniforme par position
 
+    skipped_us_closed = 0
     for symbol in to_buy:
         if symbol in config.XSTOCKS and not _is_us_market_open():
             log(f"{symbol} — Marché US fermé, BUY ignoré")
+            skipped_us_closed += 1
             continue
 
         df = daily_cache.get(symbol)
@@ -327,7 +329,14 @@ def run_momentum_cycle(state: dict, daily_cache: dict, macro_context: dict = Non
         )
 
     state["top_symbols"] = top_symbols
-    state["last_rebalance_date"] = str(date.today())
+    if to_buy and skipped_us_closed == len(to_buy):
+        log(
+            f"Rebalance reporté — tous les {len(to_buy)} BUY xStocks bloqués (marché US fermé). "
+            f"Retry au prochain cycle.",
+            "WARN",
+        )
+    else:
+        state["last_rebalance_date"] = str(date.today())
 
     # ── 7. Summary ──
     total = _portfolio_value(state, daily_cache)
