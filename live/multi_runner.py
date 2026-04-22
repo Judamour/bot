@@ -633,19 +633,32 @@ def run():
                     log(f"[daily_health] erreur: {_e}", "WARN")
 
             # ── 16. Drawdown checks ───────────────────────────────────────────
+            # DD calculé sur initial_capital (baseline rescalée par Bot Z à chaque cycle)
+            # pour isoler la vraie perte du bot vs les réallocations Bot Z.
+            # Auto-unfreeze avec hystérésis quand le DD remonte au-dessus de UNFREEZE_DD.
+            UNFREEZE_DD = -0.08  # -8% : marge de 7% depuis seuil -15%
             for name, state in [("A", state_a), ("B", state_b), ("C", state_c), ("D", state_d), ("E", state_e), ("F", state_f), ("G", state_g), ("H", state_h), ("I", state_i), ("J", state_j)]:
                 total = _portfolio_value(state, ohlcv_daily)
-                # Utiliser le capital original (jamais rescalé par Bot Z) pour un vrai drawdown
-                init = state.get("original_capital", state.get("initial_capital", INITIAL_CAPITAL_PER_BOT))
+                init = state.get("initial_capital", INITIAL_CAPITAL_PER_BOT)
                 dd = (total - init) / init if init > 0 else 0
-                if dd <= config.MAX_DRAWDOWN and not state.get("dd_frozen"):
-                    state["dd_frozen"] = True  # Flag : bot gelé, ne trade plus (mais ne stoppe pas les autres)
+                was_frozen = state.get("dd_frozen", False)
+                if dd <= config.MAX_DRAWDOWN and not was_frozen:
+                    state["dd_frozen"] = True
                     log(f"⛔ Bot {name}: MAX DRAWDOWN {dd*100:.1f}% — bot gelé (positions conservées)", "WARN")
                     from live.notifier import notify
                     notify(
                         f"⛔ <b>Bot {name} MAX DRAWDOWN</b> {dd*100:.1f}%\n"
                         f"Seuil: {config.MAX_DRAWDOWN*100:.0f}%\n"
                         f"⚠️ Bot gelé — les autres bots continuent"
+                    )
+                elif was_frozen and dd > UNFREEZE_DD:
+                    state["dd_frozen"] = False
+                    log(f"🔥 Bot {name}: dégelé (DD={dd*100:.1f}% > {UNFREEZE_DD*100:.0f}%)", "INFO")
+                    from live.notifier import notify
+                    notify(
+                        f"🔥 <b>Bot {name} dégelé</b>\n"
+                        f"DD={dd*100:.1f}% (seuil dégel: {UNFREEZE_DD*100:.0f}%)\n"
+                        f"✅ Reprise des trades"
                     )
 
             # ── 17. Snapshot journalier pour Bot A ────────────────────────────
