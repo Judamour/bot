@@ -1,33 +1,20 @@
 """
 Multi-Bot Contest Runner
-Runs 5 trading strategies simultaneously with a shared market data hub.
+Runs technical trading strategies simultaneously with a shared market data hub.
 
 Architecture:
-  One MarketSnapshot (macro + OHLCV) → Bot A + Bot B + Bot C + Bot D + Bot E
+  One MarketSnapshot (macro + OHLCV) → Bot A + Bot B + Bot C + Bot G + Bot H + Bot I + Bot J
 
-  Bot A: Supertrend + filters + MR RSI(2)     — 1000€ capital
-         [live/bot.py — unchanged logic]
-  Bot B: Momentum Rotation (Antonacci)         — 1000€ capital
-         [strategies/momentum_strategy.py]
-  Bot C: Donchian Breakout Turtle System 2     — 1000€ capital
-         [strategies/breakout_strategy.py]
-  Bot D: LLM-Driven (DeepSeek V3.2 Reasoner)  — 1000€ capital
-         [strategies/llm_strategy.py]
-  Bot E: LLM-Driven (Claude Sonnet 4.6)       — 1000€ capital
-         [strategies/claude_llm_strategy.py]
-
-API efficiency: 1× macro fetch + 2× OHLCV cache (4h + daily)
-vs 5 independent bots × 2 fetches = 10× → 5× savings
+  Bot A: Supertrend + filters + MR RSI(2)     — dispatched par Bot Z
+  Bot B: Momentum Rotation (Antonacci)         — dispatched par Bot Z
+  Bot C: Donchian Breakout Turtle System 2     — dispatched par Bot Z
+  Bot G: Trend Following Multi-Asset (CTA)     — dispatched par Bot Z
+  Bot H: VCB Breakout                          — expérimental (1000€ fixes)
+  Bot I: RS Leaders                            — expérimental (1000€ fixes)
+  Bot J: Mean Reversion                        — expérimental (1000€ fixes)
 
 Usage:
     python live/multi_runner.py
-
-State files:
-    logs/supertrend/state.json   — Bot A
-    logs/momentum/state.json     — Bot B
-    logs/breakout/state.json     — Bot C
-    logs/llm/state.json          — Bot D
-    logs/claude_llm/state.json   — Bot E
 """
 import json
 import os
@@ -45,15 +32,6 @@ from strategies.momentum_strategy import (
 from strategies.breakout_strategy import (
     run_breakout_cycle, BREAKOUT_SYMBOLS,
     load_state as load_brk, save_state as save_brk,
-)
-from strategies.llm_strategy import (
-    run_llm_cycle, load_state as load_llm, save_state as save_llm,
-)
-from strategies.claude_llm_strategy import (
-    run_claude_cycle, load_state as load_cla, save_state as save_cla,
-)
-from strategies.haiku_llm_strategy import (
-    run_haiku_cycle, load_state as load_hai, save_state as save_hai,
 )
 from strategies.trend_following_strategy import (
     run_trend_cycle, load_state as load_trd, save_state as save_trd,
@@ -174,7 +152,6 @@ def _portfolio_value(state: dict, price_cache: dict = None) -> float:
 
 
 def print_contest_status(state_a: dict, state_b: dict, state_c: dict,
-                          state_d: dict, state_e: dict, state_f: dict,
                           state_g: dict, state_h: dict, state_i: dict,
                           state_j: dict = None,
                           daily_cache: dict = None):
@@ -182,9 +159,6 @@ def print_contest_status(state_a: dict, state_b: dict, state_c: dict,
         ("A — Supertrend+MR",     state_a),
         ("B — Momentum",          state_b),
         ("C — Breakout",          state_c),
-        ("D — DeepSeek LLM",      state_d),
-        ("E — Claude Sonnet",     state_e),
-        ("F — Claude Haiku",      state_f),
         ("G — Trend Multi-Asset", state_g),
         ("H — VCB Breakout",      state_h),
         ("I — RS Leaders",        state_i),
@@ -197,7 +171,7 @@ def print_contest_status(state_a: dict, state_b: dict, state_c: dict,
     print(f"{'Bot':<26} {'Libre':>10} {'Total':>10} {'Positions':>10} {'Trades':>8} {'Perf':>8}")
     print("-" * 72)
 
-    all_states = [state_a, state_b, state_c, state_d, state_e, state_f, state_g, state_h, state_i]
+    all_states = [state_a, state_b, state_c, state_g, state_h, state_i]
     if state_j:
         all_states.append(state_j)
     for name, state in bots:
@@ -248,9 +222,6 @@ def run():
     os.makedirs("logs/supertrend", exist_ok=True)
     os.makedirs("logs/momentum",   exist_ok=True)
     os.makedirs("logs/breakout",   exist_ok=True)
-    os.makedirs("logs/llm",        exist_ok=True)
-    os.makedirs("logs/claude_llm", exist_ok=True)
-    os.makedirs("logs/haiku_llm",  exist_ok=True)
     os.makedirs("logs/trend",      exist_ok=True)
     os.makedirs("logs/vcb",             exist_ok=True)
     os.makedirs("logs/rs_leaders",      exist_ok=True)
@@ -262,22 +233,16 @@ def run():
     log(f"  Bot A: Supertrend+MR      → logs/supertrend/state.json", "INFO")
     log(f"  Bot B: Momentum Rotation  → logs/momentum/state.json", "INFO")
     log(f"  Bot C: Donchian Breakout  → logs/breakout/state.json", "INFO")
-    log(f"  Bot D: DeepSeek Reasoner  → logs/llm/state.json", "INFO")
-    log(f"  Bot E: Claude Sonnet      → logs/claude_llm/state.json", "INFO")
-    log(f"  Bot F: Claude Haiku       → logs/haiku_llm/state.json", "INFO")
     log(f"  Bot G: Trend Multi-Asset  → logs/trend/state.json", "INFO")
     log(f"  Bot H: VCB Breakout       → logs/vcb/state.json", "INFO")
     log(f"  Bot I: RS Leaders         → logs/rs_leaders/state.json", "INFO")
     log(f"  Bot J: Mean Reversion     → logs/mean_reversion/state.json", "INFO")
-    log(f"  Capital initial: {INITIAL_CAPITAL_PER_BOT:.0f}€ × 10 = {INITIAL_CAPITAL_PER_BOT*10:.0f}€", "INFO")
+    log(f"  Capital initial: {INITIAL_CAPITAL_PER_BOT:.0f}€ × 7 = {INITIAL_CAPITAL_PER_BOT*7:.0f}€", "INFO")
     log(f"{'='*60}", "INFO")
 
     state_a = load_state_a()
     state_b = load_mom()
     state_c = load_brk()
-    state_d = load_llm()
-    state_e = load_cla()
-    state_f = load_hai()
     state_g = load_trd()
     state_h = load_vcb()
     state_i = load_rsl()
@@ -303,9 +268,6 @@ def run():
     log(f"Bot A capital: {state_a['capital']:.2f}€ | Positions: {list(state_a['positions'].keys())}")
     log(f"Bot B capital: {state_b['capital']:.2f}€ | Positions: {list(state_b['positions'].keys())}")
     log(f"Bot C capital: {state_c['capital']:.2f}€ | Positions: {list(state_c['positions'].keys())}")
-    log(f"Bot D capital: {state_d['capital']:.2f}€ | Positions: {list(state_d['positions'].keys())}")
-    log(f"Bot E capital: {state_e['capital']:.2f}€ | Positions: {list(state_e['positions'].keys())}")
-    log(f"Bot F capital: {state_f['capital']:.2f}€ | Positions: {list(state_f['positions'].keys())}")
     log(f"Bot G capital: {state_g['capital']:.2f}€ | Positions: {list(state_g['positions'].keys())}")
     log(f"Bot H capital: {state_h['capital']:.2f}€ | Positions: {list(state_h['positions'].keys())}")
     log(f"Bot I capital: {state_i['capital']:.2f}€ | Positions: {list(state_i['positions'].keys())}")
@@ -513,16 +475,7 @@ def run():
                 f"Trades: {len(state_c['trades'])}"
             )
 
-            # ── 8. Bot D: DeepSeek LLM (DÉSACTIVÉ — coût tokens) ────────────
-            log(f"\n[D] Bot D DeepSeek — désactivé (coût tokens)")
-
-            # ── 9. Bot E: Claude Sonnet (DÉSACTIVÉ — coût tokens) ────────────
-            log(f"[E] Bot E Claude Sonnet — désactivé (coût tokens)")
-
-            # ── 10. Bot F: Claude Haiku (DÉSACTIVÉ — coût tokens) ─────────────
-            log(f"[F] Bot F Claude Haiku — désactivé (coût tokens)")
-
-            # ── 11. Bot G: Trend Following Multi-Asset ────────────────────────
+            # ── 8. Bot G: Trend Following Multi-Asset ─────────────────────────
             log(f"\n{Fore.CYAN}--- Bot G: Trend Following Multi-Asset ---{Style.RESET_ALL}")
             state_g = run_trend_cycle(state_g, ohlcv_daily, macro)
             save_trd(state_g)
@@ -563,7 +516,7 @@ def run():
             )
 
             # ── 15. Contest summary ───────────────────────────────────────────
-            print_contest_status(state_a, state_b, state_c, state_d, state_e, state_f, state_g, state_h, state_i, state_j, ohlcv_daily)
+            print_contest_status(state_a, state_b, state_c, state_g, state_h, state_i, state_j, ohlcv_daily)
 
             # ── Cycle summary Telegram (résumé compact chaque cycle) ──────────
             if z_summary:
@@ -637,7 +590,7 @@ def run():
             # pour isoler la vraie perte du bot vs les réallocations Bot Z.
             # Auto-unfreeze avec hystérésis quand le DD remonte au-dessus de UNFREEZE_DD.
             UNFREEZE_DD = -0.08  # -8% : marge de 7% depuis seuil -15%
-            for name, state in [("A", state_a), ("B", state_b), ("C", state_c), ("D", state_d), ("E", state_e), ("F", state_f), ("G", state_g), ("H", state_h), ("I", state_i), ("J", state_j)]:
+            for name, state in [("A", state_a), ("B", state_b), ("C", state_c), ("G", state_g), ("H", state_h), ("I", state_i), ("J", state_j)]:
                 total = _portfolio_value(state, ohlcv_daily)
                 init = state.get("initial_capital", INITIAL_CAPITAL_PER_BOT)
                 dd = (total - init) / init if init > 0 else 0
@@ -678,9 +631,6 @@ def run():
             save_state_a(state_a)
             save_mom(state_b)
             save_brk(state_c)
-            save_llm(state_d)
-            save_cla(state_e)
-            save_hai(state_f)
             save_trd(state_g)
             save_vcb(state_h)
             save_rsl(state_i)

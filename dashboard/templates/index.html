@@ -238,9 +238,6 @@
       font-size: 11px; color: var(--muted); padding: 0 2px;
     }
 
-    /* ── Lab LLM ── */
-    .lab-badge { font-size: 9px; padding: 2px 8px; border-radius: 99px; background: rgba(179,136,255,0.15); color: var(--purple); border: 1px solid rgba(179,136,255,0.3); font-weight: 700; letter-spacing: 0.06em; }
-
     /* ── Engine timeline ── */
     .engine-timeline { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; }
     .timeline-dot {
@@ -398,7 +395,6 @@
   <button class="nav-btn active" onclick="switchTab('portfolio')">Portfolio Z</button>
   <button class="nav-btn" onclick="switchTab('strategies')">Strategies <span class="nav-badge" id="nb-strat">4</span></button>
   <button class="nav-btn" onclick="switchTab('trades')">Trades <span class="nav-badge" id="nb-trades">—</span></button>
-  <button class="nav-btn" onclick="switchTab('lab')">Lab LLM <span class="nav-badge">D/E/F</span></button>
   <button class="nav-btn" onclick="switchTab('claw')">🦞 Claw</button>
   <button class="nav-btn" onclick="switchTab('canvas')">🖼 Canvas</button>
   <button class="nav-btn" onclick="switchTab('logs')">Logs</button>
@@ -701,31 +697,6 @@
   </div>
 
 </div><!-- /tab-trades -->
-
-
-<!-- ═══════════════════════════════════════════════════════════════
-     TAB: LAB LLM
-═══════════════════════════════════════════════════════════════ -->
-<div id="tab-lab" class="tab-content">
-
-  <div class="section-row" style="margin-top:0">
-    <div class="section-title">Lab LLM — Expérimental</div>
-    <div class="section-line"></div>
-    <div class="lab-badge">NON INTÉGRÉ A BOT Z</div>
-  </div>
-
-  <div style="background:rgba(179,136,255,0.05); border:1px solid rgba(179,136,255,0.2); border-radius:var(--radius); padding:16px 20px; margin-bottom:20px; font-size:12px; color:var(--muted); line-height:1.7;">
-    Les bots D (DeepSeek R1), E (Claude Sonnet), F (Claude Haiku) sont en compétition
-    expérimentale avec capital 1 000€ chacun. Ils ne font <strong style="color:var(--text)">pas partie</strong>
-    du portfolio Bot Z — ils servent à évaluer les décisions LLM pures vs stratégies quantitatives.
-    <br>Statut actuel : <span style="color:var(--yellow)">désactivés</span> (coût tokens).
-  </div>
-
-  <div class="grid-3" id="lab-cards-grid">
-    <!-- filled by JS -->
-  </div>
-
-</div><!-- /tab-lab -->
 
 
 <!-- ═══════════════════════════════════════════════════════════════
@@ -1126,7 +1097,6 @@ let historyData  = [];
 // ── Tab switching — lazy load + bottom nav sync ───────────────────────────────
 
 let _stratLoaded = false;
-let _labLoaded   = false;
 
 function switchTab(tab) {
   document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
@@ -1150,7 +1120,6 @@ function switchTab(tab) {
   if (tab === 'claw')       loadClawContent();
   if (tab === 'canvas')     reloadCanvas();
   if (tab === 'strategies' && !_stratLoaded) { _stratLoaded = true; loadStrategies(); }
-  if (tab === 'lab'        && !_labLoaded)   { _labLoaded   = true; loadLab(); }
   if (tab === 'trades')     loadTrades();
 }
 
@@ -1728,76 +1697,6 @@ function renderTrades(d) {
       }).join('');
     }
   }
-}
-
-// ── Load Lab LLM ─────────────────────────────────────────────────────────────
-
-async function loadLab() {
-  try {
-    const grid = document.getElementById('lab-cards-grid');
-    const bots = ['d','e','f'];
-    const labNames = { d: 'DeepSeek R1', e: 'Claude Sonnet 4.6', f: 'Claude Haiku 4.5' };
-    const labDesc  = { d: 'DeepSeek Reasoner — décision BUY/SELL/HOLD | désactivé', e: 'Claude Sonnet 4.6 thinking | désactivé', f: 'Petit modèle témoin | désactivé' };
-
-    const results = await Promise.all(bots.map(bid => fetch('/api/bot/' + bid).then(r=>r.json()).catch(()=>({}))));
-
-    grid.innerHTML = bots.map((bid, i) => {
-      const d = results[i] || {};
-      const color = BOT_COLORS[bid] || '#888';
-      const perf  = d.pnl_pct || 0;
-      const tokenStats = d.token_stats;
-      return `<div class="strategy-card">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
-          <div class="strategy-card-header">
-            <div class="strategy-icon" style="background:${color}22;color:${color}">${bid.toUpperCase()}</div>
-            <div>
-              <div class="strategy-name">${labNames[bid]}</div>
-              <div class="strategy-type">${labDesc[bid]}</div>
-            </div>
-          </div>
-          <div class="lab-badge">LAB</div>
-        </div>
-        <div class="strategy-kpis">
-          <div>
-            <div class="strategy-kpi-val ${perfClass(perf)}">${fmtPct(perf)}</div>
-            <div class="strategy-kpi-lbl">Performance</div>
-          </div>
-          <div>
-            <div class="strategy-kpi-val">${d.total_trades || 0}</div>
-            <div class="strategy-kpi-lbl">Trades</div>
-          </div>
-          <div>
-            <div class="strategy-kpi-val">${fmtEur(d.total_value)}</div>
-            <div class="strategy-kpi-lbl">Valeur</div>
-          </div>
-          <div>
-            <div class="strategy-kpi-val">${fmt(d.win_rate,1)}%</div>
-            <div class="strategy-kpi-lbl">Win Rate</div>
-          </div>
-        </div>
-        ${tokenStats ? `<div style="font-size:10px;color:var(--muted);margin-top:8px;line-height:1.6">Tokens: in=${tokenStats.total_input_tokens||0} | out=${tokenStats.total_output_tokens||0} | coût≈${fmt(tokenStats.estimated_cost_eur,4)}€</div>` : ''}
-        <div class="strategy-chart-wrap" style="height:60px">
-          <canvas id="lab-chart-${bid}"></canvas>
-        </div>
-      </div>`;
-    }).join('');
-
-    bots.forEach((bid, i) => {
-      const curve = (results[i] || {}).equity_curve || [];
-      if (curve.length < 2) return;
-      const ctx = document.getElementById('lab-chart-' + bid);
-      if (!ctx) return;
-      const color = BOT_COLORS[bid] || '#888';
-      new Chart(ctx.getContext('2d'), {
-        type: 'line',
-        data: {
-          labels: curve.map(p => ''),
-          datasets: [{ data: curve.map(p => p.value), borderColor: color, borderWidth: 1.5, pointRadius: 0, fill: true, backgroundColor: color + '22', tension: 0.4 }]
-        },
-        options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false},tooltip:{enabled:false}}, scales:{x:{display:false},y:{display:false}} }
-      });
-    });
-  } catch(e) { console.error(e); }
 }
 
 // ── Logs ──────────────────────────────────────────────────────────────────────

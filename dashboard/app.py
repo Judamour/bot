@@ -25,16 +25,13 @@ _BOT_PATHS = {
     "a": os.path.join(BASE_DIR, "logs", "supertrend", "state.json"),
     "b": os.path.join(BASE_DIR, "logs", "momentum",   "state.json"),
     "c": os.path.join(BASE_DIR, "logs", "breakout",   "state.json"),
-    "d": os.path.join(BASE_DIR, "logs", "llm",        "state.json"),
-    "e": os.path.join(BASE_DIR, "logs", "claude_llm", "state.json"),
-    "f": os.path.join(BASE_DIR, "logs", "haiku_llm",  "state.json"),
     "g": os.path.join(BASE_DIR, "logs", "trend",      "state.json"),
     "h": os.path.join(BASE_DIR, "logs", "vcb",        "state.json"),
     "i": os.path.join(BASE_DIR, "logs", "rs_leaders", "state.json"),
     "j": os.path.join(BASE_DIR, "logs", "mean_reversion", "state.json"),
 }
-_BOT_NAMES  = {"a": "Supertrend+MR", "b": "Momentum", "c": "Breakout", "d": "DeepSeek R1", "e": "Claude Sonnet", "f": "Claude Haiku", "g": "Trend Multi-Asset", "h": "VCB Breakout", "i": "RS Leaders", "j": "Mean Reversion", "k": "GPT-5.4 (bot-claw)"}
-_BOT_COLORS = {"a": "#58a6ff", "b": "#3fb950", "c": "#ffa657", "d": "#c792ea", "e": "#ff7b72", "f": "#f7c948", "g": "#39d353", "h": "#e06c75", "i": "#79c0ff", "j": "#b3d9ff", "k": "#f0883e"}
+_BOT_NAMES  = {"a": "Supertrend+MR", "b": "Momentum", "c": "Breakout", "g": "Trend Multi-Asset", "h": "VCB Breakout", "i": "RS Leaders", "j": "Mean Reversion", "k": "GPT-5.4 (bot-claw)"}
+_BOT_COLORS = {"a": "#58a6ff", "b": "#3fb950", "c": "#ffa657", "g": "#39d353", "h": "#e06c75", "i": "#79c0ff", "j": "#b3d9ff", "k": "#f0883e"}
 BOT_CLAW_API = "http://127.0.0.1:5001/api/status"
 _BOT_Z_FILE = os.path.join(BASE_DIR, "logs", "bot_z", "state.json")
 MULTI_LOG   = os.path.join(BASE_DIR, "logs", "multi_runner.log")
