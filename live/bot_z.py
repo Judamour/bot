@@ -415,7 +415,15 @@ def detect_regime_score(macro: dict) -> dict:
     else:
         confidence = 0.6
 
-    return {"regime": regime, "confidence": round(confidence, 2), "vix": vix, "qqq_ok": qqq_ok}
+    # Breadth modulation : si <30% des actifs > SMA200 → +30% confidence sur BEAR/HIGH_VOL,
+    # si >70% → +20% sur BULL. Continu vs binaire QQQ. Lowry/Walter Murphy.
+    breadth = macro.get("breadth", 0.5)
+    if breadth < 0.30 and regime in ("BEAR", "HIGH_VOL"):
+        confidence = min(1.0, confidence * 1.30)
+    elif breadth > 0.70 and regime == "BULL":
+        confidence = min(1.0, confidence * 1.20)
+
+    return {"regime": regime, "confidence": round(confidence, 2), "vix": vix, "qqq_ok": qqq_ok, "breadth": breadth}
 
 
 # ── Exposition actuelle ──────────────────────────────────────────────────────

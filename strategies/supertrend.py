@@ -178,12 +178,14 @@ def generate_signals(df: pd.DataFrame) -> pd.DataFrame:
     df.loc[trend_buy,  "signal"] = 1
     df.loc[trend_exit, "signal"] = -1
 
-    # ── Improvement 1: 2-bar confirmation for BUY signals ────────────────────
-    # Require 2 consecutive bars of BUY signal to filter false signals in ranging markets
-    # SELL signals (-1) remain immediate — no delay on exits
+    # ── Improvement 1: distance filter at supertrend (replaces 2-bar confirm) ─
+    # 2-bar confirm = 8h retard sur signal 4h, manque les retournements rapides crypto.
+    # Filtre: prix > supertrend × 1.005 (0.5%) → évite l'entrée pile sur le flip
+    # sans pénaliser de 8h. Source: oracle audit jour 54.
     raw_buy = df["signal"] == 1
-    confirmed_buy = raw_buy & raw_buy.shift(1, fill_value=False)
-    df.loc[raw_buy & ~confirmed_buy, "signal"] = 0
+    if "supertrend" in df.columns:
+        far_enough = df["close"] > df["supertrend"] * 1.005
+        df.loc[raw_buy & ~far_enough, "signal"] = 0
 
     df.loc[mr_buy,  "mr_signal"] = 1
     df.loc[mr_exit, "mr_signal"] = -1

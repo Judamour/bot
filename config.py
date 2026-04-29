@@ -69,7 +69,7 @@ POSITION_SIZE_PCT = 0.15  # 15% du capital disponible par position
 POSITION_MIN_EUR  = 20    # Plancher absolu (évite des positions ridicules)
 ATR_MULTIPLIER = 3.0     # Stop-loss = 3x ATR (trend following)
 TAKE_PROFIT_RATIO = 3.0  # (référence calcul, non utilisé en live — trailing stop)
-MAX_OPEN_TRADES = 6      # Maximum de trades ouverts simultanément
+MAX_OPEN_TRADES = 8      # Maximum de trades ouverts simultanément (6 → 8 avec sector lock=2)
 TARGET_VOL   = 0.15     # Volatilité annualisée cible (15%) pour le vol targeting
 MAX_LEVERAGE = 1.3      # Exposition max (×1.3 position de base)
 

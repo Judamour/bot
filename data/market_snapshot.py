@@ -11,7 +11,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
 from data.fetcher import (
     fetch_ohlcv, fetch_fear_greed, fetch_funding_rates,
-    fetch_news_macro_rss, fetch_qqq_regime,
+    fetch_news_macro_rss, fetch_qqq_regime, fetch_btc_dominance,
 )
 
 
@@ -65,6 +65,7 @@ def fetch_macro_context() -> dict:
     funding_rates = fetch_funding_rates(config.CRYPTO)
     macro_news = fetch_news_macro_rss(limit=4)
     qqq_regime_ok, qqq_description = fetch_qqq_regime()
+    btc_dom = fetch_btc_dominance()
 
     return {
         "btc_context": btc_context,
@@ -75,6 +76,35 @@ def fetch_macro_context() -> dict:
         "macro_news": macro_news,
         "qqq_regime_ok": qqq_regime_ok,
         "qqq_description": qqq_description,
+        "btc_dominance": btc_dom,
+    }
+
+
+def compute_breadth(daily_cache: dict) -> dict:
+    """
+    Breadth indicator : pourcentage de symboles tradant au-dessus de leur SMA200.
+    Leading indicator des bear markets (Lowry, Walter Murphy) — supérieur au VIX seul.
+    Coût zéro : recycle le cache OHLCV daily déjà fetché.
+
+    Returns: {breadth: 0.0-1.0, symbols_above: int, symbols_total: int}
+    """
+    above = 0
+    total = 0
+    for symbol, df in daily_cache.items():
+        if df is None or len(df) < 200:
+            continue
+        try:
+            sma200 = float(df["close"].tail(200).mean())
+            close = float(df["close"].iloc[-1])
+            if close > sma200:
+                above += 1
+            total += 1
+        except Exception:
+            continue
+    return {
+        "breadth": round(above / total, 3) if total > 0 else 0.5,
+        "symbols_above": above,
+        "symbols_total": total,
     }
 
 

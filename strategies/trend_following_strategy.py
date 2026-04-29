@@ -51,6 +51,7 @@ STOP_ATR_MULT = 3.0
 # Position sizing — volatility targeting
 TARGET_VOL = 0.15       # Volatilité annualisée cible : 15%
 MAX_POSITION_PCT = 0.10 # Cap : 10% du capital par position
+MIN_POSITION_PCT = 0.04 # Floor : 4% sinon Bot G ne trade jamais crypto vol > 100%
 MAX_POSITIONS = 8       # Max positions simultanées
 
 # Filtre macro
@@ -100,12 +101,13 @@ def _add_indicators(df):
 
 def _vol_target_size(capital: float, annual_vol: float, entry_price: float) -> float:
     """
-    Volatility targeting : size = capital × min(TARGET_VOL / annual_vol, MAX_POSITION_PCT)
-    Retourne 0 si donnée insuffisante.
+    Volatility targeting : size = capital × clamp(TARGET_VOL / annual_vol, MIN, MAX)
+    Floor MIN_POSITION_PCT : sinon BTC σ80%/SOL σ110% → size_pct ~0.13/0.10 → trop petit
+    en absolu, Bot G ne place jamais d'ordre. Ratio Sharpe inchangé, fréquence augmente.
     """
     if annual_vol <= 0 or entry_price <= 0:
         return 0.0
-    size_pct = min(TARGET_VOL / annual_vol, MAX_POSITION_PCT)
+    size_pct = max(MIN_POSITION_PCT, min(TARGET_VOL / annual_vol, MAX_POSITION_PCT))
     dollar = capital * size_pct
     return dollar / (entry_price * (1 + config.EXCHANGE_FEE))
 

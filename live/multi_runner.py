@@ -25,7 +25,7 @@ from colorama import Fore, Style, init
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
-from data.market_snapshot import fetch_macro_context, fetch_ohlcv_cache
+from data.market_snapshot import fetch_macro_context, fetch_ohlcv_cache, compute_breadth
 from strategies.momentum_strategy import (
     run_momentum_cycle, load_state as load_mom, save_state as save_mom,
 )
@@ -312,6 +312,11 @@ def run():
             ohlcv_daily = fetch_ohlcv_cache(config.SYMBOLS, timeframe="1d", days=220)
             log(f"Daily cache: {len(ohlcv_daily)}/{len(config.SYMBOLS)} symbols ready")
 
+            # Breadth indicator (régime continu, recycle ohlcv_daily)
+            breadth_data = compute_breadth(ohlcv_daily)
+            macro["breadth"] = breadth_data["breadth"]
+            log(f"Breadth: {breadth_data['breadth']*100:.0f}% ({breadth_data['symbols_above']}/{breadth_data['symbols_total']} > SMA200)")
+
             # ── 4. Bot Z — Pilot (allocation dispatch AVANT les sub-bots) ────────
             try:
                 # Passe ohlcv_daily pour mark-to-market réel des positions
@@ -422,6 +427,7 @@ def run():
                     qqq_regime_ok=qqq_ok,
                     qqq_description=qqq_desc,
                     ohlcv_daily=ohlcv_daily,  # BUG-11 : évite fetch réseau redondant dans _confirm_daily_trend
+                    btc_dominance_up=macro.get("btc_dominance", {}).get("trend_up", False),
                 )
                 time.sleep(1)
 

@@ -127,6 +127,7 @@ def process_symbol(
     qqq_regime_ok: bool = True,
     qqq_description: str = "N/A",
     ohlcv_daily: dict = None,  # BUG-11 : cache daily passé depuis multi_runner pour éviter fetch redondant
+    btc_dominance_up: bool = False,
 ) -> dict:
     """Analyse un symbole et exécute les ordres si nécessaire."""
     if state.get("dd_frozen"):
@@ -205,6 +206,22 @@ def process_symbol(
         position = apply_trailing_stop(position, current_price, atr, symbol, df=df)
         state["positions"][symbol] = position
 
+    # ── Scale-out partiel : sortir 50% à +1.5R, laisse 50% courir en chandelier ──
+    # Réduit la variance du PnL, sécurise une partie du gain. AQR "A Century of
+    # Evidence on Trend-Following": gros gains viennent d'une minorité de trades
+    # qui courent loin → trailing residuel les capture mieux qu'un TP fixe.
+    if position and not position.get("scaled_out"):
+        risk_per_unit = abs(position["entry"] - position.get("initial_stop", position["stop"]))
+        if risk_per_unit > 0 and current_price >= position["entry"] + 1.5 * risk_per_unit:
+            half_size = position["size"] / 2
+            exit_eff = current_price * (1 - config.SLIPPAGE)
+            fee_partial = exit_eff * half_size * config.EXCHANGE_FEE
+            proceeds_partial = exit_eff * half_size - fee_partial
+            state["capital"] += proceeds_partial
+            position["size"] -= half_size
+            position["scaled_out"] = True
+            log(f"{symbol} — Scale-out 50% à +1.5R | Prix: {current_price:.4f}€ | Taille restante: {position['size']:.6f}", "INFO")
+
     # ── Vérifier stop-loss / take-profit ──
     if position:
         reason = None
@@ -215,6 +232,17 @@ def process_symbol(
             exit_price = position["stop"]
         elif signal == -1:
             reason = "signal_exit"
+        else:
+            # Time-stop 60j : libère le capital sur position zombie (pas TP/SL/signal)
+            try:
+                pos_date = position.get("date", "")
+                if pos_date:
+                    age_days = (datetime.now() - datetime.fromisoformat(pos_date.split(".")[0].replace(" ", "T"))).days
+                    if age_days >= 60:
+                        reason = "time_stop_60d"
+                        exit_price = current_price
+            except Exception:
+                pass
 
         if reason:
             if not config.PAPER_TRADING:
@@ -296,6 +324,13 @@ def process_symbol(
         log_signal("BUY_SKIP_FUNDING", symbol, {"funding_rate": funding_rate, "price": current_price})
         return state
 
+    # BTC dominance gate (altcoins) : si BTC.D > SMA20 → flux vers BTC, altcoins sous-performent
+    # Source: Alphaex Capital, Nexo "BTC Dominance Altcoin Season Signals"
+    if signal == 1 and symbol in config.CRYPTO and symbol != "BTC/EUR" and btc_dominance_up:
+        log(f"{symbol} — Signal ignoré (BTC.D en hausse — altseason terminée)", "INFO")
+        log_signal("BUY_SKIP_BTC_DOMINANCE", symbol, {"price": current_price})
+        return state
+
     if signal == 1 and symbol not in state["positions"]:
         # Portfolio exposure cap
         if state.get("_exposure_blocked"):
@@ -343,7 +378,10 @@ def process_symbol(
         init_cap = state.get("original_capital", state.get("initial_capital", config.PAPER_CAPITAL))
         if init_cap > 0:
             dd_ratio = (state["capital"] - init_cap) / init_cap  # négatif en perte
-            dd_scale = max(0.3, 1.0 + dd_ratio * 2)  # -10% DD → scale 0.80, -25% DD → scale 0.50, min 0.30
+            # Floor 0.70 : avant 0.30 = on étranglait à -12% DD (vu live: ×0.41-0.51).
+            # Le freeze hard à -15% (config.MAX_DRAWDOWN) protège le capital, le scale
+            # ne doit pas faire le même travail en doublon.
+            dd_scale = max(0.70, 1.0 + dd_ratio * 2)
         else:
             dd_scale = 1.0
         position_eur = base_eur * vix_factor * vol_exposure * dd_scale

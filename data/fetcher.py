@@ -323,6 +323,48 @@ def fetch_funding_rates(symbols: list) -> dict:
         return {}
 
 
+_BTC_DOM_CACHE = {"value": None, "ts": 0, "trend_up": True}
+
+
+def fetch_btc_dominance() -> dict:
+    """
+    BTC dominance via CoinGecko (gratuit, no key). Cache 1h.
+    Returns: {dominance: float (%), trend_up: bool, sma20: float}.
+    Si BTC.D en hausse → flux vers BTC, altcoins sous-performent.
+    """
+    import time as _t
+    now = _t.time()
+    if _BTC_DOM_CACHE["value"] is not None and now - _BTC_DOM_CACHE["ts"] < 3600:
+        return {
+            "dominance": _BTC_DOM_CACHE["value"],
+            "trend_up": _BTC_DOM_CACHE["trend_up"],
+            "sma20": _BTC_DOM_CACHE.get("sma20", _BTC_DOM_CACHE["value"]),
+        }
+    try:
+        import requests
+        # 30j de cap historique pour SMA20
+        r = requests.get(
+            "https://api.coingecko.com/api/v3/global",
+            timeout=5,
+        ).json()
+        current = float(r["data"]["market_cap_percentage"]["btc"])
+        # Pas d'historique direct → on stocke et on fait SMA glissante en cache
+        history = _BTC_DOM_CACHE.get("history", [])
+        history.append(current)
+        history = history[-20:]
+        sma20 = sum(history) / len(history)
+        _BTC_DOM_CACHE.update({
+            "value": current,
+            "ts": now,
+            "trend_up": current > sma20,
+            "sma20": sma20,
+            "history": history,
+        })
+        return {"dominance": current, "trend_up": current > sma20, "sma20": sma20}
+    except Exception:
+        return {"dominance": 50.0, "trend_up": False, "sma20": 50.0}
+
+
 def save_data(df: pd.DataFrame, symbol: str, timeframe: str) -> str:
     """Sauvegarde les données en CSV."""
     os.makedirs("data/cache", exist_ok=True)
