@@ -76,6 +76,14 @@ MAX_BOTS_SAME_ASSET = 2      # max 2 bots simultanés long sur le même actif
 CASH_VIX_THRESHOLD  = 35.0   # VIX > 35 → forcer cash 30%
 TARGET_VOL          = 0.15   # volatilité cible (pour rolling score)
 
+# ── Mode agressif ────────────────────────────────────────────────────────────
+# AGGRESSIVE_MODE=True : force engine BULL en conditions normales
+#   → équivalent backtest "Régime pur" (CAGR +39.9% vs +26.9% Meta v2 sur 3 ans 2023-2026)
+#   → MaxDD ~-23% mais survient APRÈS doublement du capital (DD sur gains, pas sur principal)
+# Hard rules SHIELD préservées (VIX>32, DD<-12%, BTC+QQQ bearish ET VIX>26)
+# Si BULL bloqué (BTC ou QQQ bearish seul) → fallback BALANCED
+AGGRESSIVE_MODE = True
+
 # ── Améliorations Meta v2+ ────────────────────────────────────────────────────
 SWITCH_PENALTY         = 0.05   # pénalité de score si changement d'engine (évite micro-switchs)
 TARGET_PORTFOLIO_VOL   = 0.20   # vol annualisée cible portefeuille (vol targeting global)
@@ -166,11 +174,15 @@ def select_engine_live(vix: float, btc_bearish: bool, qqq_bearish: bool,
       score = 0.50 × rf + 0.30 × rolling_quality_norm + 0.20 × inverse_vol_norm
               - SWITCH_PENALTY si engine différent du current (évite micro-switchs)
     """
-    # Hard rules
+    # Hard rules (sécurité non-négociable, même en AGGRESSIVE_MODE)
     force_pro = ((btc_bearish and qqq_bearish and vix > 26) or vix > 32 or port_dd < -0.12)
     if force_pro:
         return "SHIELD"
     block_enhanced = btc_bearish or qqq_bearish
+
+    # Mode agressif : force BULL en conditions normales (équivalent "Régime pur")
+    if AGGRESSIVE_MODE:
+        return "BALANCED" if block_enhanced else "BULL"
 
     # Normalisation des proxies de qualité et risque
     max_quality = max(rolling_scores.values()) if rolling_scores else 1.0
