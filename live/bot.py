@@ -206,6 +206,16 @@ def process_symbol(
         position = apply_trailing_stop(position, current_price, atr, symbol, df=df)
         state["positions"][symbol] = position
 
+    # ── Stop break-even auto à +1R : zéro perte si reversal après +1R atteint ──
+    if position and not position.get("breakeven_set"):
+        risk_per_unit = abs(position["entry"] - position.get("initial_stop", position["stop"]))
+        if risk_per_unit > 0 and current_price >= position["entry"] + risk_per_unit:
+            new_stop = round(position["entry"] * 1.001, 4)  # entrée + 0.1% pour couvrir frais
+            if new_stop > position["stop"]:
+                position["stop"] = new_stop
+                position["breakeven_set"] = True
+                log(f"{symbol} — Stop déplacé au break-even ({new_stop:.4f}€) après +1R", "INFO")
+
     # ── Scale-out partiel : sortir 50% à +1.5R, laisse 50% courir en chandelier ──
     # Réduit la variance du PnL, sécurise une partie du gain. AQR "A Century of
     # Evidence on Trend-Following": gros gains viennent d'une minorité de trades
@@ -373,7 +383,21 @@ def process_symbol(
         )
 
         effective_buy = current_price * (1 + config.SLIPPAGE)
-        base_eur = max(config.POSITION_MIN_EUR, state["capital"] * config.POSITION_SIZE_PCT)
+        # Sizing baseline = total portfolio value (cash + positions MTM), pas cash seul.
+        # Sinon les positions rétrécissent au fur et à mesure qu'on en ouvre (cash baisse).
+        # Capital total stable → toutes les positions ont le même sizing théorique.
+        positions_mtm = 0.0
+        if ohlcv_daily:
+            for _sym, _pos in state.get("positions", {}).items():
+                _df = ohlcv_daily.get(_sym)
+                if _df is not None and len(_df) > 0:
+                    positions_mtm += float(_df["close"].iloc[-1]) * _pos.get("size", 0)
+                else:
+                    positions_mtm += _pos.get("entry", 0) * _pos.get("size", 0)
+        else:
+            positions_mtm = sum(p.get("entry", 0) * p.get("size", 0) for p in state.get("positions", {}).values())
+        total_value = state["capital"] + positions_mtm
+        base_eur = max(config.POSITION_MIN_EUR, total_value * config.POSITION_SIZE_PCT)
         # Dynamic sizing : réduire les positions en drawdown (protection anti-ruin)
         init_cap = state.get("original_capital", state.get("initial_capital", config.PAPER_CAPITAL))
         if init_cap > 0:
