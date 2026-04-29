@@ -11,6 +11,35 @@ _CREDIT_KEYWORDS = [
     "quota", "402", "payment", "funds", "overdue",
 ]
 
+# ── Identité des bots — source unique pour tous les messages ─────────────────
+BOT_INFO = {
+    "a": ("Supertrend ATR",     "📈"),
+    "b": ("Dual Momentum",      "🔄"),
+    "c": ("Donchian Breakout",  "🚀"),
+    "g": ("Trend CTA",          "📊"),
+    "h": ("VCB Breakout",       "💎"),
+    "i": ("RS Leaders",         "🏆"),
+    "j": ("Mean Reversion",     "🎯"),
+}
+
+
+def _bot_label(bot_id: str) -> str:
+    """Retourne 'Bot C (Donchian Breakout)' à partir de 'c'."""
+    bid = bot_id.lower()
+    name, _ = BOT_INFO.get(bid, (bid.upper(), ""))
+    return f"Bot {bid.upper()} ({name})"
+
+
+def _format_positions(state: dict, max_show: int = 3) -> str:
+    """Formate les positions ouvertes : 'BTC, ETH, SOL +1' ou 'aucune'."""
+    positions = state.get("positions", {}) or {}
+    if not positions:
+        return "aucune"
+    syms = [k.split("/")[0].replace("x", "") for k in positions.keys()]
+    if len(syms) <= max_show:
+        return ", ".join(syms)
+    return f"{', '.join(syms[:max_show])} +{len(syms) - max_show}"
+
 
 def _credentials():
     return os.getenv("TELEGRAM_BOT_TOKEN", ""), os.getenv("TELEGRAM_CHAT_ID", "")
@@ -90,10 +119,10 @@ def set_api_alert(api: str, error_msg: str):
     _save_alerts(alerts)
 
     notify(
-        f"🚨 <b>ALERTE — Crédits {api.upper()} épuisés</b>\n\n"
+        f"🚨 <b>API {api.upper()} — Crédits épuisés</b>\n"
         f"<code>{error_msg[:200]}</code>\n\n"
-        f"⚠️ Le bot continue mais les appels {api.upper()} sont désactivés.\n"
-        f"🔄 <b>Ce message se répètera à chaque cycle jusqu'au rechargement.</b>"
+        f"⚠️ Le bot continue, mais les appels {api.upper()} sont désactivés.\n"
+        f"🔁 Rappel toutes les 6h jusqu'au rechargement."
     )
 
 
@@ -115,76 +144,126 @@ def clear_api_alert(api: str):
     )
 
 
+# ── Bot Z dispatch ───────────────────────────────────────────────────────────
+
 def notify_z_dispatch(budget: dict, z_capital: float, engine: str,
                       prev_weights: dict = None, target_weights: dict = None,
-                      weight_caps_hit: list = None):
-    """Notifie le dispatch de budget Bot Z vers les sub-bots."""
+                      weight_caps_hit: list = None, prev_budget: dict = None,
+                      perf_pct: float = None):
+    """Notifie le dispatch de budget Bot Z vers les sub-bots A/B/C/G."""
     total_dispatched = sum(budget.values())
-    lines = [f"💰 <b>Bot Z — Budget dispatché</b>",
-             f"Engine: <b>{engine}</b> | Capital: <b>{z_capital:.0f}€</b>",
-             ""]
-    for bot_id, amount in sorted(budget.items()):
-        pct = amount / z_capital * 100 if z_capital > 0 else 0
-        filled = min(10, max(0, int(pct / 10)))  # BUG-31 : clamp entre 0 et 10 (évite barre cassée si pct>100%)
-        bar = "█" * filled + "░" * (10 - filled)
-        cap_marker = " [CAP]" if weight_caps_hit and bot_id in weight_caps_hit else ""
-        lines.append(f"Bot {bot_id.upper()}: <b>{amount:.0f}€</b> ({pct:.0f}%) {bar}{cap_marker}")
+    engine_icons = {"BULL": "🟢", "BALANCED": "🔵", "PARITY": "🟡", "SHIELD": "🔴"}
+    icon = engine_icons.get(engine, "⚪")
 
-    # Transition info si les poids bougent encore
+    perf_str = ""
+    if perf_pct is not None:
+        sign = "+" if perf_pct >= 0 else ""
+        perf_str = f" ({sign}{perf_pct:.2f}%)"
+
+    lines = [
+        f"{icon} <b>Bot Z — Dispatch budget</b>",
+        f"Engine: <b>{engine}</b> | Capital: <b>{z_capital:,.0f}€</b>{perf_str}".replace(",", " "),
+        "",
+    ]
+
+    for bot_id, amount in sorted(budget.items()):
+        name, emoji = BOT_INFO.get(bot_id.lower(), (bot_id.upper(), "•"))
+        pct = amount / z_capital * 100 if z_capital > 0 else 0
+        filled = min(10, max(0, int(pct / 10)))
+        bar = "█" * filled + "░" * (10 - filled)
+
+        # Delta vs cycle précédent
+        delta_str = ""
+        if prev_budget:
+            prev_amt = prev_budget.get(bot_id, 0)
+            delta = amount - prev_amt
+            if abs(delta) >= 5:
+                arrow = "↗" if delta > 0 else "↘"
+                delta_str = f" {arrow}{abs(delta):.0f}€"
+
+        cap_marker = " <b>[CAP]</b>" if weight_caps_hit and bot_id in weight_caps_hit else ""
+        lines.append(
+            f"{emoji} {name}: <b>{amount:.0f}€</b> ({pct:.0f}%){delta_str}{cap_marker}\n"
+            f"   {bar}"
+        )
+
+    # Transition info si les poids bougent encore vers la cible
     if prev_weights and target_weights:
         transitioning = []
         for b in sorted(prev_weights.keys()):
             prev = prev_weights.get(b, 0) * 100
             tgt  = target_weights.get(b, 0) * 100
             diff = tgt - prev
-            if abs(diff) >= 1.5:  # Seuil : 1.5% de mouvement restant
+            if abs(diff) >= 1.5:
                 arrow = "↗" if diff > 0 else "↘"
                 transitioning.append(f"{b.upper()}: {prev:.0f}%→{tgt:.0f}% {arrow}")
         if transitioning:
-            lines.append(f"\n🔄 <i>Transition en cours: {' | '.join(transitioning)}</i>")
+            lines.append(f"\n🔄 <i>Transition: {' | '.join(transitioning)}</i>")
 
-    lines.append(f"\nTotal: <b>{total_dispatched:.0f}€</b> / {z_capital:.0f}€")
+    lines.append(f"\n💰 Total: <b>{total_dispatched:,.0f}€</b> / {z_capital:,.0f}€".replace(",", " "))
     notify("\n".join(lines))
 
 
+# ── Cycle summary ────────────────────────────────────────────────────────────
+
 def notify_cycle_summary(engine: str, vix: float, regime: str, z_capital: float,
                          perf_pct: float, budget: dict,
-                         obs_bots: dict = None):
+                         obs_bots: dict = None, main_bots: dict = None):
     """
     Résumé compact envoyé à chaque cycle Bot Z.
-    obs_bots : {h: {trades, positions, blocked}, i: {...}, j: {...}}
+    main_bots : {a: {positions, capital, dd_frozen}, b: {...}, ...}
+    obs_bots  : {h: {trades, positions, blocked}, i: {...}, j: {...}}
     """
     perf_sign = "+" if perf_pct >= 0 else ""
     engine_icons = {"BULL": "🟢", "BALANCED": "🔵", "PARITY": "🟡", "SHIELD": "🔴"}
     icon = engine_icons.get(engine, "⚪")
 
+    # Indicateur de régime market
+    regime_icon = ""
+    if regime:
+        regime_icon = {"BULL": "🐂", "BEAR": "🐻", "NEUTRAL": "➡️"}.get(regime.upper(), "")
+
     lines = [
         f"{icon} <b>Bot Z — Cycle</b> [{engine}]",
-        f"VIX: <b>{vix:.1f}</b> | Régime: {regime} | Capital: <b>{z_capital:.0f}€</b> ({perf_sign}{perf_pct:.2f}%)",
+        f"Capital: <b>{z_capital:,.0f}€</b> ({perf_sign}{perf_pct:.2f}%)".replace(",", " "),
+        f"Marché: VIX <b>{vix:.1f}</b> {regime_icon} {regime}",
     ]
 
-    # Budget dispatch compact
+    # Contest A/B/C/G
     if budget:
-        dispatch_parts = [f"{b.upper()}:{v:.0f}€" for b, v in sorted(budget.items())]
-        lines.append("Dispatch: " + " | ".join(dispatch_parts))
+        lines.append("\n<b>Contest (Bot Z) :</b>")
+        for bid in sorted(budget.keys()):
+            name, emoji = BOT_INFO.get(bid.lower(), (bid.upper(), "•"))
+            amt = budget[bid]
+            extras = []
+            if main_bots and bid in main_bots:
+                info = main_bots[bid]
+                pos = info.get("positions", 0)
+                if info.get("dd_frozen"):
+                    extras.append("🧊 gelé")
+                if pos > 0:
+                    extras.append(f"{pos} pos")
+            extra_str = f" — {' | '.join(extras)}" if extras else ""
+            lines.append(f"  {emoji} {name}: {amt:.0f}€{extra_str}")
 
-    # Observation bots H/I/J
+    # Bots H/I/J (expérimentaux, hors Bot Z dispatch)
     if obs_bots:
-        obs_lines = []
-        for bid, info in sorted(obs_bots.items()):
+        lines.append("\n<b>Expérimental (1000€ fixes) :</b>")
+        for bid in sorted(obs_bots.keys()):
+            info = obs_bots[bid]
+            name, emoji = BOT_INFO.get(bid.lower(), (bid.upper(), "•"))
             blocked = info.get("blocked", False)
             trades = info.get("total_trades", 0)
             positions = info.get("open_trades", 0)
             if blocked:
-                obs_lines.append(f"  {bid.upper()}: ⛔ bloqué ({engine})")
+                lines.append(f"  {emoji} {name}: ⛔ bloqué ({engine})")
             else:
-                obs_lines.append(f"  {bid.upper()}: {positions} pos | {trades} trades")
-        if obs_lines:
-            lines.append("\n👁 <i>Observation (H/I/J):</i>")
-            lines.extend(obs_lines)
+                lines.append(f"  {emoji} {name}: {positions} pos | {trades} trades")
 
     notify("\n".join(lines))
 
+
+# ── Évènements de bot ────────────────────────────────────────────────────────
 
 def notify_data_stale(symbol: str, timeframe: str, age_hours: float):
     """Alerte quand les données OHLCV sont périmées."""
@@ -195,10 +274,10 @@ def notify_data_stale(symbol: str, timeframe: str, age_hours: float):
     )
 
 
-def notify_winrate_drop(bot_name: str, winrate: float, last_n: int):
+def notify_winrate_drop(bot_id: str, winrate: float, last_n: int):
     """Alerte quand le winrate chute sous un seuil critique."""
     notify(
-        f"📉 <b>Win rate critique — Bot {bot_name}</b>\n"
+        f"📉 <b>Win rate critique — {_bot_label(bot_id)}</b>\n"
         f"<b>{winrate:.0f}%</b> sur les {last_n} derniers trades\n"
         f"⚠️ Vérifier la stratégie ou les conditions de marché."
     )
@@ -213,29 +292,83 @@ def notify_exposure_high(total_pct: float, details: str):
     )
 
 
-def notify_bot_death(bot_id: str, capital: float):
+def notify_bot_death(bot_id: str, capital: float, will_inject: float = None):
     """Alerte quand un bot perd tout son capital."""
+    inject_str = (
+        f"\n💵 Sera re-capitalisé à <b>{will_inject:.0f}€</b> au prochain dispatch"
+        if will_inject else
+        "\nSera re-capitalisé au prochain dispatch Bot Z."
+    )
     notify(
-        f"💀 <b>Bot {bot_id.upper()} — Capital épuisé</b>\n"
-        f"Capital restant : <b>{capital:.2f}€</b>\n"
-        f"Le bot sera re-capitalisé au prochain dispatch Bot Z."
+        f"💀 <b>{_bot_label(bot_id)} — Capital épuisé</b>\n"
+        f"Capital restant : <b>{capital:.2f}€</b>{inject_str}"
     )
 
 
 def notify_bot_revived(bot_id: str, new_capital: float):
     """Alerte quand un bot mort reçoit du capital frais."""
     notify(
-        f"🔄 <b>Bot {bot_id.upper()} — Re-capitalisé</b>\n"
+        f"🔄 <b>{_bot_label(bot_id)} — Re-capitalisé</b>\n"
         f"Nouveau capital : <b>{new_capital:.0f}€</b>\n"
-        f"Le bot reprend le trading."
+        f"Trades reprennent au prochain signal."
     )
+
+
+def notify_bot_frozen(bot_id: str, dd: float, threshold: float, state: dict,
+                      vix: float = None, regime: str = None, engine: str = None,
+                      unfreeze_threshold: float = -0.08):
+    """Alerte enrichie quand un bot atteint son drawdown max."""
+    capital = state.get("capital", 0)
+    positions = state.get("positions", {}) or {}
+    pos_value = sum(p.get("entry", 0) * p.get("size", 0) for p in positions.values())
+    total = capital + pos_value
+    initial = state.get("original_capital", state.get("initial_capital", 1000))
+    loss_eur = total - initial
+    pos_str = _format_positions(state)
+
+    lines = [
+        f"⛔ <b>{_bot_label(bot_id)} — GELÉ</b>",
+        f"Drawdown: <b>{dd*100:.1f}%</b> (seuil: {threshold*100:.0f}%)",
+        f"Capital: <b>{total:.0f}€</b> ({loss_eur:+.0f}€ vs {initial:.0f}€)",
+        f"Positions conservées: <b>{len(positions)}</b> ({pos_str})",
+        f"Dégel auto à DD &gt; {unfreeze_threshold*100:.0f}%",
+    ]
+
+    if vix is not None or regime or engine:
+        ctx_parts = []
+        if vix is not None:
+            ctx_parts.append(f"VIX {vix:.1f}")
+        if regime:
+            ctx_parts.append(f"Régime {regime}")
+        if engine:
+            ctx_parts.append(f"Engine {engine}")
+        lines.append(f"Contexte: {' | '.join(ctx_parts)}")
+
+    lines.append("ℹ️ Les autres bots continuent de trader.")
+    notify("\n".join(lines))
+
+
+def notify_bot_unfrozen(bot_id: str, dd: float, unfreeze_threshold: float, state: dict):
+    """Alerte enrichie quand un bot est dégelé après reprise."""
+    capital = state.get("capital", 0)
+    positions = state.get("positions", {}) or {}
+    pos_value = sum(p.get("entry", 0) * p.get("size", 0) for p in positions.values())
+    total = capital + pos_value
+
+    lines = [
+        f"🔥 <b>{_bot_label(bot_id)} — DÉGELÉ</b>",
+        f"Drawdown: <b>{dd*100:.1f}%</b> (seuil dégel: {unfreeze_threshold*100:.0f}%)",
+        f"Capital: <b>{total:.0f}€</b> | Positions: {len(positions)}",
+        f"✅ Reprise des trades au prochain signal.",
+    ]
+    notify("\n".join(lines))
 
 
 def notify_token_warning(hours_remaining: float, refresh_ok: bool):
     """Alerte quand le token OAuth approche de l'expiration."""
     if refresh_ok:
         notify(
-            f"🔑 Token Claude — Rafraîchi avec succès\n"
+            f"🔑 <b>Token Claude — Rafraîchi</b>\n"
             f"(restait {hours_remaining:.1f}h avant expiration)"
         )
     else:
@@ -243,41 +376,77 @@ def notify_token_warning(hours_remaining: float, refresh_ok: bool):
             f"🚨 <b>Token Claude — Refresh échoué</b>\n"
             f"Expire dans <b>{hours_remaining:.1f}h</b>\n"
             f"⚠️ Le filtre Claude sera indisponible après expiration.\n"
-            f"Action requise : <code>ssh ubuntu@VPS 'claude auth login'</code>"
+            f"Action: <code>ssh ubuntu@VPS 'claude auth login'</code>"
         )
 
 
+# ── Rapport quotidien ────────────────────────────────────────────────────────
+
 def notify_daily_health(bots_status: list[dict], z_capital: float, engine: str, days_running: int):
-    """Rapport quotidien de santé — envoyé 1x/jour au cycle de 20h UTC.
+    """Rapport quotidien envoyé 1x/jour à 19h UTC.
     bots_status: [{id, name, capital, positions, trades, dd_frozen, pnl_pct}]
     """
+    engine_icons = {"BULL": "🟢", "BALANCED": "🔵", "PARITY": "🟡", "SHIELD": "🔴"}
+    icon = engine_icons.get(engine, "⚪")
+
+    # Stats agrégées
+    total_positions = sum(b.get("positions", 0) for b in bots_status)
+    total_trades = sum(b.get("trades", 0) for b in bots_status)
+    n_frozen = sum(1 for b in bots_status if b.get("dd_frozen"))
+    n_dead = sum(1 for b in bots_status if b.get("capital", 0) < 5 and b.get("positions", 0) == 0)
+    n_active = len(bots_status) - n_frozen - n_dead
+
+    # Top / bottom performers
+    perfs = [(b["id"].upper(), b.get("pnl_pct", 0)) for b in bots_status]
+    perfs.sort(key=lambda x: x[1], reverse=True)
+    best = perfs[0] if perfs else None
+    worst = perfs[-1] if perfs else None
+
     lines = [
         f"📊 <b>Rapport quotidien — Jour {days_running}</b>",
-        f"Bot Z: <b>{z_capital:.0f}€</b> | Engine: {engine}",
+        f"{icon} Bot Z: <b>{z_capital:,.0f}€</b> | Engine: <b>{engine}</b>".replace(",", " "),
+        f"État: {n_active} actifs | {n_frozen} gelés | {n_dead} morts",
+        f"Positions ouvertes: <b>{total_positions}</b> | Trades cumulés: {total_trades}",
         "",
     ]
 
     warnings = []
     for b in bots_status:
-        bid = b["id"].upper()
-        frozen = "🧊" if b.get("dd_frozen") else ""
+        bid = b["id"].lower()
+        name, emoji = BOT_INFO.get(bid, (b.get("name", bid.upper()), "•"))
         n_pos = b.get("positions", 0)
         n_trades = b.get("trades", 0)
         pnl = b.get("pnl_pct", 0)
         capital = b.get("capital", 0)
 
+        # Status icon
         if capital < 5 and n_pos == 0:
-            warnings.append(f"💀 Bot {bid} — capital épuisé ({capital:.0f}€)")
+            status = "💀"
+            warnings.append(f"💀 {_bot_label(bid)} — capital épuisé ({capital:.0f}€)")
         elif b.get("dd_frozen"):
-            warnings.append(f"🧊 Bot {bid} — gelé (drawdown)")
+            status = "🧊"
+            warnings.append(f"🧊 {_bot_label(bid)} — gelé (DD {pnl:+.1f}%)")
         elif n_trades == 0 and n_pos == 0:
-            warnings.append(f"😴 Bot {bid} — 0 trades depuis le début")
+            status = "😴"
+            warnings.append(f"😴 {_bot_label(bid)} — 0 trades depuis le début")
+        elif pnl >= 5:
+            status = "🚀"
+        elif pnl >= 0:
+            status = "✅"
+        elif pnl >= -5:
+            status = "🟡"
+        else:
+            status = "🔻"
 
         sign = "+" if pnl >= 0 else ""
         lines.append(
-            f"Bot {bid}: <b>{capital:.0f}€</b> {frozen} | "
-            f"{n_pos} pos | {n_trades} trades | {sign}{pnl:.1f}%"
+            f"{status} {emoji} {name} (Bot {bid.upper()}): "
+            f"<b>{capital:.0f}€</b> ({sign}{pnl:.1f}%) | {n_pos} pos | {n_trades} tr"
         )
+
+    if best and worst and best != worst:
+        lines.append("")
+        lines.append(f"🥇 Best: Bot {best[0]} ({best[1]:+.1f}%)  —  🔻 Worst: Bot {worst[0]} ({worst[1]:+.1f}%)")
 
     if warnings:
         lines.append("")
@@ -312,7 +481,7 @@ def resend_pending_alerts():
 
         ts = data.get("ts", "")[:16].replace("T", " ")
         notify(
-            f"🔁 <b>RAPPEL — {api.upper()} indisponible</b>\n\n"
+            f"🔁 <b>RAPPEL — {api.upper()} indisponible</b>\n"
             f"Signalé depuis : {ts}\n"
             f"<code>{data.get('message', '')[:200]}</code>"
         )

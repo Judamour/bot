@@ -361,7 +361,13 @@ def run():
                         )
                         if budget_changed:
                             from live.notifier import notify_z_dispatch
-                            notify_z_dispatch(z_budget_alloc, z_summary.get('z_capital_eur', 10000), z_summary.get('current_engine', '?'))
+                            notify_z_dispatch(
+                                z_budget_alloc,
+                                z_summary.get('z_capital_eur', 10000),
+                                z_summary.get('current_engine', '?'),
+                                prev_budget=_prev_budget,
+                                perf_pct=z_summary.get('perf_pct', 0),
+                            )
                     _prev_budget = dict(z_budget_alloc)
 
             except Exception as ez:
@@ -525,6 +531,12 @@ def run():
                             "blocked":      _z_engine in _blocked_engines,
                         },
                     }
+                    main_bots_info = {
+                        "a": {"positions": len(state_a.get("positions", {})), "dd_frozen": state_a.get("dd_frozen", False)},
+                        "b": {"positions": len(state_b.get("positions", {})), "dd_frozen": state_b.get("dd_frozen", False)},
+                        "c": {"positions": len(state_c.get("positions", {})), "dd_frozen": state_c.get("dd_frozen", False)},
+                        "g": {"positions": len(state_g.get("positions", {})), "dd_frozen": state_g.get("dd_frozen", False)},
+                    }
                     notify_cycle_summary(
                         engine    = _z_engine,
                         vix       = z_summary.get("last_regime_info", {}).get("vix", vix or 0),
@@ -533,6 +545,7 @@ def run():
                         perf_pct  = z_summary.get("perf_pct", 0),
                         budget    = z_summary.get("budget", {}),
                         obs_bots  = obs_bots_info,
+                        main_bots = main_bots_info,
                     )
                 except Exception as _e:
                     log(f"[notify_cycle_summary] erreur: {_e}", "WARN")
@@ -581,20 +594,26 @@ def run():
                 if dd <= config.MAX_DRAWDOWN and not was_frozen:
                     state["dd_frozen"] = True
                     log(f"⛔ Bot {name}: MAX DRAWDOWN {dd*100:.1f}% — bot gelé (positions conservées)", "WARN")
-                    from live.notifier import notify
-                    notify(
-                        f"⛔ <b>Bot {name} MAX DRAWDOWN</b> {dd*100:.1f}%\n"
-                        f"Seuil: {config.MAX_DRAWDOWN*100:.0f}%\n"
-                        f"⚠️ Bot gelé — les autres bots continuent"
+                    from live.notifier import notify_bot_frozen
+                    notify_bot_frozen(
+                        bot_id=name,
+                        dd=dd,
+                        threshold=config.MAX_DRAWDOWN,
+                        state=state,
+                        vix=(z_summary.get("last_regime_info", {}).get("vix", vix) if z_summary else vix),
+                        regime=(z_summary.get("regime") if z_summary else None),
+                        engine=(z_summary.get("current_engine") if z_summary else None),
+                        unfreeze_threshold=UNFREEZE_DD,
                     )
                 elif was_frozen and dd > UNFREEZE_DD:
                     state["dd_frozen"] = False
                     log(f"🔥 Bot {name}: dégelé (DD={dd*100:.1f}% > {UNFREEZE_DD*100:.0f}%)", "INFO")
-                    from live.notifier import notify
-                    notify(
-                        f"🔥 <b>Bot {name} dégelé</b>\n"
-                        f"DD={dd*100:.1f}% (seuil dégel: {UNFREEZE_DD*100:.0f}%)\n"
-                        f"✅ Reprise des trades"
+                    from live.notifier import notify_bot_unfrozen
+                    notify_bot_unfrozen(
+                        bot_id=name,
+                        dd=dd,
+                        unfreeze_threshold=UNFREEZE_DD,
+                        state=state,
                     )
 
             # ── 17. Snapshot journalier pour Bot A ────────────────────────────
