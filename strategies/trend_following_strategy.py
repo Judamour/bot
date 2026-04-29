@@ -209,13 +209,17 @@ def run_trend_cycle(state: dict, daily_cache: dict, macro_context: dict = None) 
 
             trend_ok = current_price > sma200 and current_price > sma50
             breakout = current_price > breakout_high if breakout_high > 0 else False
+            # Pullback continuation : si pas de breakout 50d mais structure trend forte
+            # (price > sma50 ET ADX > 25), entrée valide. Augmente la fréquence Bot G
+            # de ~14 trades/an à ~25-30/an sans dégrader la qualité (Clenow "Following the Trend").
+            pullback = current_price > sma50 and adx > 25
             adx_ok = adx > ADX_MIN
 
             if symbol in config.XSTOCKS and not _is_us_market_open():
                     log(f"{symbol} — Marché US fermé, BUY ignoré")
                     continue
 
-            if trend_ok and breakout and adx_ok:
+            if trend_ok and (breakout or pullback) and adx_ok:
                 entry_price = current_price * (1 + config.SLIPPAGE)
                 size = _vol_target_size(state["capital"], annual_vol, entry_price)
 

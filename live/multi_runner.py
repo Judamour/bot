@@ -277,28 +277,6 @@ def run():
         try:
             log(f"\n--- Cycle {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ---")
 
-            # ── 0. Pre-refresh Claude OAuth token ─────────────────────────────
-            # Le token expire toutes les ~7h. Le bot cycle toutes les 4h.
-            # Refresh proactif : vérifie le meilleur token, refresh si < 2h, alerte si échec.
-            try:
-                from live.claude_filter import _read_best_token, _refresh_token
-                _token, _remaining = _read_best_token()
-                _remaining_h = _remaining / 3600
-                if _token and _remaining_h < 2:
-                    log(f"Token Claude expire dans {_remaining_h:.1f}h — refresh proactif...", "WARN")
-                    _refresh_ok = _refresh_token()
-                    if _refresh_ok:
-                        _token2, _rem2 = _read_best_token()
-                        log(f"Token Claude refreshé (nouveau TTL: {_rem2/3600:.1f}h)", "INFO")
-                    else:
-                        log(f"Token Claude refresh ÉCHOUÉ — filtre Claude indisponible", "WARN")
-                        from live.notifier import notify_token_warning
-                        notify_token_warning(_remaining_h, False)
-                elif not _token:
-                    log("Aucun token OAuth Claude trouvé — filtre désactivé", "WARN")
-            except Exception as _e:
-                log(f"Token refresh check failed (non-bloquant): {_e}", "WARN")
-
             from live.notifier import resend_pending_alerts
             resend_pending_alerts()
 
@@ -586,13 +564,12 @@ def run():
                     log(f"[daily_health] erreur: {_e}", "WARN")
 
             # ── 16. Drawdown checks ───────────────────────────────────────────
-            # DD calculé sur initial_capital (baseline rescalée par Bot Z à chaque cycle)
-            # pour isoler la vraie perte du bot vs les réallocations Bot Z.
-            # Auto-unfreeze avec hystérésis quand le DD remonte au-dessus de UNFREEZE_DD.
+            # DD baseline = original_capital (figé), pas initial_capital (réécrit par
+            # _apply_z_budget à chaque cycle). Sinon le freeze ne se déclenche jamais.
             UNFREEZE_DD = -0.08  # -8% : marge de 7% depuis seuil -15%
             for name, state in [("A", state_a), ("B", state_b), ("C", state_c), ("G", state_g), ("H", state_h), ("I", state_i), ("J", state_j)]:
                 total = _portfolio_value(state, ohlcv_daily)
-                init = state.get("initial_capital", INITIAL_CAPITAL_PER_BOT)
+                init = state.get("original_capital", state.get("initial_capital", INITIAL_CAPITAL_PER_BOT))
                 dd = (total - init) / init if init > 0 else 0
                 was_frozen = state.get("dd_frozen", False)
                 if dd <= config.MAX_DRAWDOWN and not was_frozen:

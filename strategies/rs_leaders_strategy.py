@@ -29,6 +29,7 @@ from datetime import datetime, date
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
 from strategies.supertrend import compute_atr, compute_adx
+from strategies.trend_following_strategy import _is_us_market_open
 
 STATE_FILE = "logs/rs_leaders/state.json"
 INITIAL_CAPITAL = 1000.0
@@ -380,6 +381,9 @@ def run_rs_leaders_cycle(state: dict, daily_cache: dict, macro_context: dict = N
     for symbol in to_buy:
         df = daily_cache.get(symbol)
         if df is None:
+            continue
+        # Skip BUY xStocks hors heures US (slippage > 0.5% sur Kraken)
+        if symbol in config.XSTOCKS and not _is_us_market_open():
             continue
         ind = indicators_map.get(symbol, {})
         entry_price = float(df["close"].iloc[-1]) * (1 + config.SLIPPAGE)

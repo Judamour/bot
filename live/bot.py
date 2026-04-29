@@ -93,13 +93,19 @@ def log(msg: str, level: str = "INFO"):
 
 # ── Trailing Stop (ATR continu) ───────────────────────────────────────────────
 
-def apply_trailing_stop(position: dict, current_price: float, atr: float, symbol: str) -> dict:
+def apply_trailing_stop(position: dict, current_price: float, atr: float, symbol: str, df=None) -> dict:
     """
-    ATR trailing stop : monte continuellement le stop sous le prix.
-    new_stop = max(current_stop, price - ATR_MULTIPLIER × ATR)
-    Le stop ne descend jamais.
+    Chandelier Exit : trailing stop = max(high[-22:]) - ATR_MULTIPLIER × ATR.
+    Suit la structure du marché (plus haut récent) au lieu du prix instantané.
+    Évite les stops à -0.0R/-0.2R (entrées en plein bruit). QuantifiedStrategies, StockCharts.
+
+    Fallback ATR classique si df absent ou < 22 barres.
     """
-    new_stop = round(current_price - config.ATR_MULTIPLIER * atr, 4)
+    if df is not None and len(df) >= 22:
+        recent_high = float(df["high"].tail(22).max())
+        new_stop = round(recent_high - config.ATR_MULTIPLIER * atr, 4)
+    else:
+        new_stop = round(current_price - config.ATR_MULTIPLIER * atr, 4)
     if new_stop > position["stop"]:
         position["stop"] = new_stop
         log(f"{symbol} — Trailing stop → {new_stop:.4f}€", "INFO")
@@ -141,13 +147,17 @@ def process_symbol(
         log(f"{symbol} — Erreur récupération données: {e}", "WARN")
         return state
 
-    # ── Volatility targeting : exposure = clamp(TARGET_VOL / realized_vol, 0.2, MAX_LEVERAGE) ──
+    # ── Volatility targeting : exposure = clamp(TARGET_VOL / realized_vol, FLOOR, MAX_LEVERAGE) ──
+    # Floor 0.50 (0.60 crypto) : sinon NVDA σ=40%, CRWD σ=60%, BTC σ=32% écrasés
+    # à 0.25-0.46 → positions ridicules qui ratent les rallies (NVDA +25%, BTC +20%).
+    is_crypto = symbol in config.CRYPTO if hasattr(config, "CRYPTO") else False
+    vol_floor = 0.60 if is_crypto else 0.50
     try:
         daily_close = df["close"].resample("1D").last().dropna()
         if len(daily_close) >= 21:
             returns = daily_close.pct_change().dropna()
             realized_vol = float(returns.tail(20).std() * (252 ** 0.5))
-            vol_exposure = round(max(0.2, min(config.MAX_LEVERAGE, config.TARGET_VOL / realized_vol)), 2) if realized_vol > 0 else 1.0
+            vol_exposure = round(max(vol_floor, min(config.MAX_LEVERAGE, config.TARGET_VOL / realized_vol)), 2) if realized_vol > 0 else 1.0
         else:
             realized_vol = 0.0
             vol_exposure = 1.0
@@ -192,7 +202,7 @@ def process_symbol(
 
     # ── Trailing stop avant vérification de sortie ──
     if position:
-        position = apply_trailing_stop(position, current_price, atr, symbol)
+        position = apply_trailing_stop(position, current_price, atr, symbol, df=df)
         state["positions"][symbol] = position
 
     # ── Vérifier stop-loss / take-profit ──
@@ -279,6 +289,13 @@ def process_symbol(
             log_signal("BUY_SKIP_BTC_REGIME", symbol, {"btc_trend": "bear", "price": current_price})
             return state
 
+    # Funding rate gate (crypto only) : >0.05%/8h = marché surleveragé long, risque de liquidation cascade
+    # Source: QuantJourney "Funding Rates: Hidden Cost, Sentiment Signal" 2026
+    if signal == 1 and symbol in config.CRYPTO and funding_rate > 0.0005:
+        log(f"{symbol} — Signal ignoré (funding {funding_rate*100:.3f}%/8h > 0.05% — marché surleveragé)", "WARN")
+        log_signal("BUY_SKIP_FUNDING", symbol, {"funding_rate": funding_rate, "price": current_price})
+        return state
+
     if signal == 1 and symbol not in state["positions"]:
         # Portfolio exposure cap
         if state.get("_exposure_blocked"):
@@ -290,13 +307,13 @@ def process_symbol(
             log_signal("BUY_SKIP_MAX_POS", symbol, {"price": current_price, "open_positions": len(state["positions"])})
             return state
 
-        # Corrélation secteur — max 1 position par secteur
+        # Corrélation secteur — max MAX_PER_SECTOR positions par secteur
         sector = config.SECTORS.get(symbol)
         if sector:
             occupied = [s for s in state["positions"] if config.SECTORS.get(s) == sector]
-            if occupied:
-                log(f"{symbol} — Signal ignoré (secteur '{sector}' déjà occupé par {occupied[0]})", "INFO")
-                log_signal("BUY_SKIP_SECTOR", symbol, {"sector": sector, "occupied_by": occupied[0], "price": current_price})
+            if len(occupied) >= config.MAX_PER_SECTOR:
+                log(f"{symbol} — Signal ignoré (secteur '{sector}' saturé: {occupied})", "INFO")
+                log_signal("BUY_SKIP_SECTOR", symbol, {"sector": sector, "occupied_by": occupied, "price": current_price})
                 return state
 
         # Filtre earnings xStocks
@@ -485,27 +502,6 @@ def _is_us_market_open() -> bool:
     open_t  = config.XSTOCK_MARKET_OPEN_ET[0]  * 60 + config.XSTOCK_MARKET_OPEN_ET[1]
     close_t = config.XSTOCK_MARKET_CLOSE_ET[0] * 60 + config.XSTOCK_MARKET_CLOSE_ET[1]
     return open_t <= t <= close_t
-
-
-def _check_premarket(state: dict, btc_context: dict = None, vix: float = 0.0, fear_greed: dict = None):
-    """Déclenche l'analyse pré-marché Claude à 8h00 ET (= 14h CET hiver / 15h CEST été)."""
-    from zoneinfo import ZoneInfo
-    et = datetime.now(ZoneInfo("America/New_York"))
-    today = et.strftime("%Y-%m-%d")
-    if et.weekday() >= 5:
-        return
-    ph, pm = config.XSTOCK_PREMARKET_ET
-    if et.hour * 60 + et.minute < ph * 60 + pm:
-        return
-    if state.get("last_premarket_date", "") == today:
-        return
-    log("Lancement analyse pré-marché xStocks...", "INFO")
-    try:
-        from live.xstock_advisor import run_premarket_analysis
-        run_premarket_analysis(state, btc_context=btc_context, vix=vix, fear_greed=fear_greed)
-    except Exception as e:
-        log(f"Erreur analyse pré-marché: {e}", "WARN")
-    state["last_premarket_date"] = today
 
 
 def _check_max_drawdown(state: dict) -> bool:
@@ -861,7 +857,6 @@ def run():
                 save_state(state)
                 break
             _check_daily_snapshot(state)
-            _check_premarket(state, btc_context=btc_context, vix=vix, fear_greed=fear_greed)
 
             next_run = _next_cycle_utc()
             wait_sec = max(0, (next_run - datetime.utcnow()).total_seconds())

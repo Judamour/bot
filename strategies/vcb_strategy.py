@@ -32,6 +32,7 @@ from datetime import datetime
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
 from strategies.supertrend import compute_atr
+from strategies.trend_following_strategy import _is_us_market_open
 
 STATE_FILE = "logs/vcb/state.json"
 INITIAL_CAPITAL = 1000.0
@@ -213,6 +214,10 @@ def run_vcb_cycle(state: dict, ohlcv_4h: dict, macro_context: dict = None) -> di
             # Filtre engine Bot Z : bloquer nouveaux BUY en mode défensif
             if engine in ("SHIELD", "PRO"):
                 log(f"{symbol} — BUY bloqué (engine={engine})")
+                continue
+
+            # Skip BUY xStocks hors heures US (slippage > 0.5% sur Kraken)
+            if symbol in config.XSTOCKS and not _is_us_market_open():
                 continue
 
             trend_ok = current_price > sma200 and current_price > sma50

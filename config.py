@@ -33,7 +33,10 @@ XSTOCK_PREMARKET_ET    = (8,   0)   # Analyse pré-marché (8h00 ET = 14h CET = 
 # ── Gestion du risque portefeuille ──────────────────────────────────────────
 MAX_DRAWDOWN = -0.15    # Coupe-circuit si capital chute de -15% depuis le départ
 
-# ── Secteurs (corrélation positions — max 1 par secteur) ────────────────────
+# ── Secteurs (corrélation positions — max MAX_PER_SECTOR par secteur) ───────
+# 1 → 2 : on bloquait NVDA quand AAPL ouvert, BTC quand ETH ouvert. Rate les
+# rallies sectoriels groupés (NVDA +25%, BTC +20% avril 2026).
+MAX_PER_SECTOR = 2
 SECTORS = {
     "NVDAx/EUR": "tech",       "AAPLx/EUR": "tech",
     "MSFTx/EUR": "tech",       "METAx/EUR": "tech",

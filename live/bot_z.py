@@ -868,7 +868,9 @@ def run_bot_z_cycle(macro: dict, ohlcv: dict = None) -> dict:
         days_in_regime += 1
     else:
         days_in_regime = 0  # reset si changement de régime
-    regime_strength = min(1.0, days_in_regime / max(REGIME_PERSIST_DAYS, 1))
+    # Plancher 0.5 : sinon en début de régime (jour 1-3), strength=0.0-0.4 → BULL/BALANCED
+    # mathématiquement écrasés par SHIELD (regime_fit=1.0 en BEAR). Biais structurel.
+    regime_strength = max(0.5, min(1.0, days_in_regime / max(REGIME_PERSIST_DAYS, 1)))
 
     # Valeur actuelle de chaque sub-bot (capital libre + positions mark-to-market)
     # Si ohlcv disponible → prix live ; sinon → prix d'entrée (approximation)
