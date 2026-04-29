@@ -152,6 +152,9 @@ ENGINE_REGIME_FIT = {
     "SHIELD":      {"BULL": 0.3, "RANGE": 0.5, "HIGH_VOL": 0.8, "BEAR": 1.0},
 }
 META_ENGINE_HYSTERESIS = {"BULL": 7, "BALANCED": 5, "PARITY": 4, "SHIELD": 3}
+# En mode agressif, on raccourcit BULL/BALANCED à 1 cycle (le mode force déjà ces engines)
+# SHIELD/PARITY conservent leur hystérésis (anti-ping-pong en cas de désactivation du mode)
+AGGRESSIVE_HYSTERESIS = {"BULL": 1, "BALANCED": 1, "PARITY": 4, "SHIELD": 3}
 
 
 # ── Sélecteur d'engine Meta v2 ────────────────────────────────────────────────
@@ -997,11 +1000,13 @@ def run_bot_z_cycle(macro: dict, ohlcv: dict = None) -> dict:
         days_pending   = 0
     else:
         # Plafonner au seuil d'hystérésis pour éviter compteur infini
-        hyst_max = META_ENGINE_HYSTERESIS.get(pending_engine, 5)
+        _hyst_table = AGGRESSIVE_HYSTERESIS if AGGRESSIVE_MODE else META_ENGINE_HYSTERESIS
+        hyst_max = _hyst_table.get(pending_engine, 5)
         days_pending = min(days_pending + 1, hyst_max)
 
     engine_switched = False
-    if days_pending >= META_ENGINE_HYSTERESIS.get(pending_engine, 5):
+    _hyst_table = AGGRESSIVE_HYSTERESIS if AGGRESSIVE_MODE else META_ENGINE_HYSTERESIS
+    if days_pending >= _hyst_table.get(pending_engine, 5):
         engine_switched = (current_engine != pending_engine)
         if engine_switched:
             _engine_emojis = {"BULL": "🟢", "BALANCED": "🔵", "PARITY": "🟡", "SHIELD": "🔴"}
