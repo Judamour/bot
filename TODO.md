@@ -36,6 +36,9 @@
 - [x] **Fear & Greed Index** — alternative.me, injecté dans Claude + dashboard
 - [x] **Funding rates crypto** — Binance fapi publique, injecté dans Claude
 - [x] **Logs enrichis revue mensuelle** — vix, fear_greed, funding_rate, btc_trend dans SCAN
+- [ ] **Crash protection (airbag systémique)** — À ajouter quand le système sera éprouvé.
+      Si VIX > 35 OU Bot Z perd -8% en 1 jour → fermeture immédiate de toutes les positions.
+      Complète les stops par-trade (qui ne protègent pas des gaps overnight / weekend crypto / black swan multi-actifs).
 
 ## Bot Z — Pipeline complet
 
@@ -206,3 +209,15 @@ Point le plus solide : walk-forward OOS 2023-2026 valide l'edge hors-échantillo
 - [x] Contest 6 bots : A (Supertrend) + B (Momentum) + C (Breakout) + D (DeepSeek) + E (Sonnet) + F (Haiku)
 - [x] Bot Z lancé en paper trading 2026-03-06 (10 000€, revue 2026-04-30)
 - [x] Backtest complet multi_backtest.py (2020-2026) — Meta v2 CAGR +43.2%, Sharpe 1.70, MaxDD -9.6%
+
+## Content Factory — TODO
+
+- [x] YouTube Data API v3 : OAuth2 refresh token + upload auto Shorts (fait 2026-03-14)
+- [ ] TweetMCP : setup Twitter Developer account (free tier) → publication auto tweets/threads
+- [ ] Proton Mail MCP : plan Proton payant requis → installer Proton Bridge headless + protonmail-pro-mcp
+- [ ] Test pipeline end-to-end : trend → script → scenes (Pollinations) → assemble → preview → publish TikTok+YouTube
+- [ ] Test auto-video-maker : video 100% auto via short-video-maker Docker
+- [ ] Test OpenClaw Telegram : "tendances du jour", "analyse [URL]", "cree une serie sur [sujet]"
+- [ ] Premiere vraie publication TikTok sur compte domoo
+- [ ] Enrichir /claw Factory : onglets X Takes et Stats fonctionnels
+- [ ] Scheduler OpenClaw : briefing tendances automatique chaque matin 8h sur Telegram
