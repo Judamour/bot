@@ -81,11 +81,12 @@ TARGET_VOL          = 0.15   # volatilité cible (pour rolling score)
 
 # ── Mode agressif ────────────────────────────────────────────────────────────
 # AGGRESSIVE_MODE=True : force engine BULL en conditions normales
-#   → équivalent backtest "Régime pur" (CAGR +39.9% vs +26.9% Meta v2 sur 3 ans 2023-2026)
-#   → MaxDD ~-23% mais survient APRÈS doublement du capital (DD sur gains, pas sur principal)
-# Hard rules SHIELD préservées (VIX>32, DD<-12%, BTC+QQQ bearish ET VIX>26)
-# Si BULL bloqué (BTC ou QQQ bearish seul) → fallback BALANCED
-AGGRESSIVE_MODE = True
+#   → équivalent backtest "Régime pur" (CAGR +39.9% vs +26.9% Meta v2 sur 3 ans)
+#   → MaxDD ~-23% mais survient APRÈS doublement du capital
+#   → DESACTIVÉ en live 91€ : kill switch -10% se déclencherait avant que le DD agressif
+#     ait le temps d'amortir. Bot A solo est déjà agressif par nature, on évite double dose.
+#     Meta v2 normal a Sharpe 1.71 vs 1.04 agressif → meilleur risk-adjusted en small capital.
+AGGRESSIVE_MODE = False
 
 # ── Améliorations Meta v2+ ────────────────────────────────────────────────────
 SWITCH_PENALTY         = 0.05   # pénalité de score si changement d'engine (évite micro-switchs)
