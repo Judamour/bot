@@ -225,7 +225,42 @@ def check_balance() -> float:
         logger.error(f"[ORDER] check_balance ÉCHOUÉ: {e}")
         notify(f"⛔ <b>Kraken check_balance ÉCHOUÉ</b>\nErreur: {e}\n"
                f"Vérifier les clés API et la connexion réseau.")
+        return -1.0  # Sentinel : erreur de connexion (≠ 0 qui est valide si tout en positions)
+
+
+def check_total_value_eur() -> float:
+    """
+    Valeur totale du compte (EUR free + valeur des positions converties en EUR).
+    Permet de redémarrer le bot après crash même si tout le cash est alloué en positions.
+
+    Returns:
+        Valeur totale estimée, ou -1.0 si erreur de connexion.
+    """
+    if config.PAPER_TRADING:
         return 0.0
+
+    try:
+        exchange = get_exchange(use_auth=True)
+        balance = exchange.fetch_balance()
+        total = float(balance.get("EUR", {}).get("total", 0))
+
+        # Convertir chaque position en valeur EUR via ticker
+        for asset, info in balance.items():
+            if asset in ("EUR", "info", "free", "used", "total", "timestamp", "datetime"):
+                continue
+            qty = float(info.get("total", 0)) if isinstance(info, dict) else 0
+            if qty <= 0.0001:
+                continue
+            try:
+                ticker = exchange.fetch_ticker(f"{asset}/EUR")
+                last = float(ticker.get("last") or ticker.get("close") or 0)
+                total += qty * last
+            except Exception:
+                logger.warning(f"[ORDER] Impossible de valoriser {asset} en EUR")
+        return total
+    except Exception as e:
+        logger.error(f"[ORDER] check_total_value_eur ÉCHOUÉ: {e}")
+        return -1.0
 
 
 def reconcile_positions(state: dict, bot_id: str) -> dict:
@@ -292,12 +327,23 @@ def startup_check() -> bool:
     logger.info("[ORDER] === DÉMARRAGE EN MODE LIVE — vérifications ===")
     notify("🟡 <b>Bot Trading LIVE</b> — démarrage en cours...\nVérifications en cours...")
 
-    # 1. Vérifier la connexion et le solde
-    balance = check_balance()
-    if balance <= 0:
-        notify("⛔ <b>LIVE STARTUP ÉCHOUÉ</b>\nSolde EUR = 0 ou connexion impossible.\nBot arrêté.")
+    # 1. Vérifier la connexion (erreur réseau/auth → return -1, EUR=0 acceptable si positions)
+    balance_eur = check_balance()
+    if balance_eur < 0:
+        notify("⛔ <b>LIVE STARTUP ÉCHOUÉ</b>\nConnexion Kraken impossible.\nBot arrêté.")
         return False
 
-    logger.info(f"[ORDER] ✓ Solde Kraken: {balance:.2f}€")
-    notify(f"✅ <b>Connexion Kraken OK</b>\nSolde disponible: <b>{balance:.2f}€</b>")
+    # 2. Si EUR free = 0, vérifier qu'il y a des positions (cas redémarrage avec capital alloué)
+    if balance_eur == 0:
+        total = check_total_value_eur()
+        if total <= 0:
+            notify("⛔ <b>LIVE STARTUP ÉCHOUÉ</b>\nCompte vide (0 EUR + 0 positions).\nBot arrêté.")
+            return False
+        logger.info(f"[ORDER] EUR free=0 mais positions valorisées à {total:.2f}€ — démarrage OK")
+        notify(f"✅ <b>Connexion Kraken OK</b>\nEUR libre: 0€ | Total compte: <b>{total:.2f}€</b>\n"
+               f"(capital alloué en positions)")
+        return True
+
+    logger.info(f"[ORDER] ✓ Solde Kraken: {balance_eur:.2f}€")
+    notify(f"✅ <b>Connexion Kraken OK</b>\nSolde disponible: <b>{balance_eur:.2f}€</b>")
     return True
