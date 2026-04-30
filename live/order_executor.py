@@ -80,11 +80,13 @@ def validate_symbols(symbols: list) -> tuple:
         markets = exchange.load_markets()
 
         # Récupérer pairs xStocks via raw API. Kraken accepte l'altname (ex "NVDAxUSD")
-        # comme `pair` dans AddOrder à condition de fournir `aclass=tokenized_asset` au payload.
+        # comme `pair` dans AddOrder à condition de fournir `asset_class=tokenized_asset`
+        # au payload. NB : c'est `asset_class` (pas `aclass`) — l'endpoint public expose
+        # 1545 pairs avec asset_class= contre 256 avec aclass=.
         # On indexe par wsname (ex "NVDAx/USD") → altname pour le mapping config → API.
         xstocks_ws_to_altname: dict = {}
         try:
-            url = "https://api.kraken.com/0/public/AssetPairs?aclass=tokenized_asset"
+            url = "https://api.kraken.com/0/public/AssetPairs?asset_class=tokenized_asset"
             with urllib.request.urlopen(url, timeout=10) as r:
                 data = json.loads(r.read())
             for k, v in data.get("result", {}).items():
@@ -174,14 +176,15 @@ def _kraken_private_post(endpoint: str, params: dict) -> dict:
 def _execute_xstock_order(symbol: str, side: str, size: float, price_estimate: float) -> OrderResult:
     """Place un ordre xStock via raw Kraken API (bypass ccxt).
 
-    Kraken exige `aclass=tokenized_asset` au payload pour résoudre la pair xStock —
-    sans ça, AddOrder répond `EQuery:Unknown asset pair`.
+    Kraken exige `asset_class=tokenized_asset` au payload pour résoudre la pair xStock
+    (et nécessite la permission API "Trade tokenized assets" sur la clé). Sans le param,
+    AddOrder répond `EQuery:Unknown asset pair` ; sans la permission, `Permission denied`.
     """
     pair = _KRAKEN_PAIR_MAPPING.get(symbol, _kraken_pair(symbol))
     try:
         result = _kraken_private_post("AddOrder", {
             "pair": pair,
-            "aclass": "tokenized_asset",
+            "asset_class": "tokenized_asset",
             "type": side,
             "ordertype": "market",
             "volume": str(size),
@@ -203,8 +206,9 @@ def _execute_xstock_order(symbol: str, side: str, size: float, price_estimate: f
 
 _SILENT_ERROR_PATTERNS = (
     "does not have market symbol",   # ccxt local rejet (avant API)
-    "EQuery:Unknown asset pair",     # Kraken : xStocks gated, support contacté
+    "EQuery:Unknown asset pair",     # Kraken : pair non résolue (asset_class manquant)
     "EGeneral:Internal error",       # Kraken : erreur interne sporadique sur xStocks
+    "EGeneral:Permission denied",    # Kraken : clé API sans permission "Trade tokenized assets"
 )
 
 
