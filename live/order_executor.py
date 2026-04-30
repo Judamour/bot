@@ -82,13 +82,25 @@ def execute_buy(symbol: str, size: float, price_estimate: float,
 
     try:
         exchange = get_exchange(use_auth=True)
-        logger.info(f"[ORDER] BUY {symbol} size={size:.6f} @ ~{price_estimate:.4f}€ ({order_value:.2f}€)")
+        logger.info(f"[ORDER] BUY {symbol} size={size:.6f} @ ~{price_estimate:.4f}$ ({order_value:.2f}$)")
+
+        # xStocks (tokenized assets) nécessitent extra_params asset_class=tokenized_asset
+        # Aussi : ccxt ne reconnaît pas les pairs xStocks par défaut, on doit forcer le pair Kraken
+        is_xstock_sym = symbol in config.XSTOCKS
+        order_params = {}
+        if is_xstock_sym:
+            order_params = {
+                "asset_class": "tokenized_asset",
+                # Pair Kraken format : NVDAxUSD (sans slash)
+                "pair": symbol.replace("/", ""),
+            }
 
         order = exchange.create_order(
             symbol=symbol,
             type="market",
             side="buy",
             amount=size,
+            params=order_params,
         )
         order_id = order.get("id", "?")
         logger.info(f"[ORDER] Ordre BUY soumis: id={order_id}")
@@ -145,13 +157,22 @@ def execute_sell(symbol: str, size: float, price_estimate: float,
     # ── LIVE ──
     try:
         exchange = get_exchange(use_auth=True)
-        logger.info(f"[ORDER] SELL {symbol} size={size:.6f} @ ~{price_estimate:.4f}€ ({reason})")
+        logger.info(f"[ORDER] SELL {symbol} size={size:.6f} @ ~{price_estimate:.4f}$ ({reason})")
+
+        is_xstock_sym = symbol in config.XSTOCKS
+        order_params = {}
+        if is_xstock_sym:
+            order_params = {
+                "asset_class": "tokenized_asset",
+                "pair": symbol.replace("/", ""),
+            }
 
         order = exchange.create_order(
             symbol=symbol,
             type="market",
             side="sell",
             amount=size,
+            params=order_params,
         )
         order_id = order.get("id", "?")
 

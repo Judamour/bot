@@ -42,9 +42,14 @@ def _is_xstock(symbol: str) -> bool:
 
 
 def _xstock_ticker(symbol: str) -> str:
-    """Convertit 'NVDAx/EUR' → 'NVDA' (format yfinance/Alpaca, sans le suffixe x Kraken)."""
+    """Convertit 'NVDAx/USD' → 'NVDA' (format yfinance/Alpaca, sans le suffixe x Kraken).
+
+    Cas spécial GOOGL : Kraken utilise GOOGLx (Alphabet class A), yfinance ticker = GOOGL.
+    """
     base = symbol.split("/")[0]
-    return base[:-1] if base.endswith("x") else base
+    if base.endswith("x"):
+        base = base[:-1]
+    return base
 
 
 def get_exchange(use_auth: bool = False) -> ccxt.kraken:
@@ -77,16 +82,14 @@ def fetch_yfinance_ohlcv(
 ) -> pd.DataFrame:
     """
     OHLCV depuis yfinance pour les xStocks (NYSE/NASDAQ).
-    Prix USD convertis en EUR. Données 1h resamplées en 4h pour ≤60 jours,
-    sinon données journalières.
+    Prix gardés en USD (xStocks Kraken sont en /USD depuis migration 2026-04-30).
     """
     import yfinance as yf
 
-    ticker_sym = _xstock_ticker(symbol)  # "NVDAx/EUR" → "NVDA"
+    ticker_sym = _xstock_ticker(symbol)  # "NVDAx/USD" → "NVDA"
     end = datetime.utcnow()
     start = end - timedelta(days=days)
 
-    # yfinance : 1h max ~730j, sinon utiliser 1d
     interval = "1h" if days <= 60 else "1d"
     print(f"  Téléchargement {ticker_sym} [{interval}→{timeframe}] — {days} jours (via yfinance)...")
 
@@ -98,19 +101,14 @@ def fetch_yfinance_ohlcv(
     df.index = pd.to_datetime(df.index, utc=True)
     df = df[~df.index.duplicated(keep="last")].sort_index()
 
-    # Resample 1h → 4h si nécessaire
     if interval == "1h" and timeframe == "4h":
         df = df.resample("4h").agg({
             "open": "first", "high": "max", "low": "min",
             "close": "last", "volume": "sum"
         }).dropna()
 
-    # Conversion USD → EUR
-    eurusd = _get_eurusd_rate()
-    for col in ["open", "high", "low", "close"]:
-        df[col] = df[col] / eurusd
-
-    print(f"  ✓ {len(df)} bougies {ticker_sym} USD→EUR @{eurusd:.4f} ({df.index[0].date()} → {df.index[-1].date()})")
+    # Pas de conversion : on garde les prix en USD (xStocks Kraken = /USD)
+    print(f"  ✓ {len(df)} bougies {ticker_sym} en USD ({df.index[0].date()} → {df.index[-1].date()})")
 
     is_fresh, age_hours = _check_data_freshness(df, timeframe)
     if not is_fresh:
@@ -134,16 +132,16 @@ def fetch_ohlcv(
 ) -> pd.DataFrame:
     """
     Télécharge les données OHLCV.
-    - xStocks → yfinance NYSE/NASDAQ (USD converti en EUR)
-    - Crypto   → Binance (API publique, converti en USDT)
+    - xStocks → yfinance NYSE/NASDAQ (prix USD gardés tels quels)
+    - Crypto   → Binance USDT (≈ USD à 0.01% près, pas de conversion)
 
     Args:
-        symbol: Ex: "BTC/EUR" ou "NVDAx/EUR"
+        symbol: Ex: "BTC/USD" ou "NVDAx/USD"
         timeframe: Ex: "4h"
         days: Nombre de jours d'historique
 
     Returns:
-        DataFrame avec colonnes: open, high, low, close, volume
+        DataFrame avec colonnes: open, high, low, close, volume (tous en USD)
     """
     if _is_xstock(symbol):
         return fetch_yfinance_ohlcv(symbol, timeframe, days)

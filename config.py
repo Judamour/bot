@@ -9,19 +9,19 @@ API_KEY = os.getenv("KRAKEN_API_KEY", "")
 API_SECRET = os.getenv("KRAKEN_API_SECRET", "")
 
 # ── Paires tradées ──────────────────────────────────────────────────────────
-# Format Kraken : "BTC/EUR", "ETH/EUR", "SOL/EUR"
-CRYPTO = ["BTC/EUR", "ETH/EUR", "SOL/EUR", "BNB/EUR", "TON/EUR"]
-# Retirés : LINK/EUR (PF<1 sur 1 et 3 ans), AVAX/EUR (idem)
+# MIGRATION 2026-04-30 : EUR → USD pour pouvoir trader les xStocks via API Kraken.
+# xStocks Kraken n'existent QU'EN /USD via l'API spot (vérifié AssetPairs?aclass=tokenized_asset).
+# Cryptos : on passe aussi en /USD pour cohérence (Binance source = USDT ≈ USD).
+CRYPTO = ["BTC/USD", "ETH/USD", "SOL/USD", "BNB/USD", "TON/USD"]
 
-# xStocks : actions tokenisées sur Kraken, tradées en EUR 24/7
-# Symboles Kraken : suffixe "x" (ex: NVDAx/EUR)
+# xStocks Kraken : suffixe "x" minuscule, tradés 24/5 en USD
+# Sur Kraken API : NVDAxUSD (sans slash), wsname NVDAx/USD
 XSTOCKS = [
-    "NVDAx/EUR", "AAPLx/EUR", "MSFTx/EUR",
-    "METAx/EUR", "GOOGx/EUR",
-    "PLTRx/EUR", "AMDx/EUR", "AVGOx/EUR",
-    "GLDx/EUR", "NFLXx/EUR", "CRWDx/EUR",
+    "NVDAx/USD", "AAPLx/USD", "MSFTx/USD",
+    "METAx/USD", "GOOGLx/USD",
+    "PLTRx/USD", "AMDx/USD", "AVGOx/USD",
+    "GLDx/USD", "NFLXx/USD", "CRWDx/USD",
 ]
-# Retirés : TSLAx/EUR (WR=20%, Musk volatility), AMZNx/EUR (PF=0.07)
 
 SYMBOLS = CRYPTO + XSTOCKS
 
@@ -38,16 +38,16 @@ MAX_DRAWDOWN = -0.15    # Coupe-circuit si capital chute de -15% depuis le dépa
 # rallies sectoriels groupés (NVDA +25%, BTC +20% avril 2026).
 MAX_PER_SECTOR = 2
 SECTORS = {
-    "NVDAx/EUR": "tech",       "AAPLx/EUR": "tech",
-    "MSFTx/EUR": "tech",       "METAx/EUR": "tech",
-    "GOOGx/EUR": "tech",       # AMZNx et TSLAx retirés de XSTOCKS (BUG-36 : dead code supprimé)
-    "PLTRx/EUR": "ai_data",
-    "AMDx/EUR":  "semis",      "AVGOx/EUR": "semis",
-    "GLDx/EUR":  "gold",       "NFLXx/EUR": "media",
-    "CRWDx/EUR": "cybersec",
-    "BTC/EUR":   "crypto",     "ETH/EUR":   "crypto",
-    "SOL/EUR":   "crypto",     "BNB/EUR":   "crypto",
-    "TON/EUR":   "crypto",
+    "NVDAx/USD": "tech",       "AAPLx/USD": "tech",
+    "MSFTx/USD": "tech",       "METAx/USD": "tech",
+    "GOOGLx/USD": "tech",
+    "PLTRx/USD": "ai_data",
+    "AMDx/USD":  "semis",      "AVGOx/USD": "semis",
+    "GLDx/USD":  "gold",       "NFLXx/USD": "media",
+    "CRWDx/USD": "cybersec",
+    "BTC/USD":   "crypto",     "ETH/USD":   "crypto",
+    "SOL/USD":   "crypto",     "BNB/USD":   "crypto",
+    "TON/USD":   "crypto",
 }
 
 # ── Timeframe ───────────────────────────────────────────────────────────────
