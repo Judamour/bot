@@ -9,21 +9,34 @@ API_KEY = os.getenv("KRAKEN_API_KEY", "")
 API_SECRET = os.getenv("KRAKEN_API_SECRET", "")
 
 # ── Paires tradées ──────────────────────────────────────────────────────────
-# MIGRATION 2026-04-30 : EUR → USD pour pouvoir trader les xStocks via API Kraken.
-# xStocks Kraken n'existent QU'EN /USD via l'API spot (vérifié AssetPairs?aclass=tokenized_asset).
-# Cryptos : on passe aussi en /USD pour cohérence (Binance source = USDT ≈ USD).
-CRYPTO = ["BTC/USD", "ETH/USD", "SOL/USD", "BNB/USD", "TON/USD"]
+# UNIVERS 2026-04-30 v3 : profil agressif crypto-tilted + diversification 7 secteurs.
+# Objectif : capter bull (tech/crypto) + bear (gold/healthcare/staples) — Crisis Alpha.
+# Tous vérifiés disponibles sur Kraken API (AssetPairs avec aclass=tokenized_asset).
 
-# xStocks Kraken : suffixe "x" minuscule, tradés 24/5 en USD
-# Sur Kraken API : NVDAxUSD (sans slash), wsname NVDAx/USD
+# Cryptos (5) — top liquidité, trend persistence
+CRYPTO = ["BTC/USD", "ETH/USD", "SOL/USD", "AVAX/USD", "LINK/USD"]
+
+# xStocks (16) — diversifiés sur 7 secteurs pour résister bull ET bear
 XSTOCKS = [
-    "NVDAx/USD", "AAPLx/USD", "MSFTx/USD",
-    "METAx/USD", "GOOGLx/USD",
-    "PLTRx/USD", "AMDx/USD", "AVGOx/USD",
-    "GLDx/USD", "NFLXx/USD", "CRWDx/USD",
+    # Tech mega-cap (3) — moteur bull
+    "NVDAx/USD", "GOOGLx/USD", "METAx/USD",
+    # AI/Cloud high beta (2) — surperforme en momentum tech
+    "PLTRx/USD", "CRWDx/USD",
+    # Healthcare défensif (2) — résiste en bear
+    "LLYx/USD", "ABBVx/USD",
+    # Energy (2) — hedge inflation/crise pétrole
+    "XOMx/USD", "CVXx/USD",
+    # Financials (2) — cyclique, profite des hausses de taux
+    "JPMx/USD", "BACx/USD",
+    # Defensive consumer (2) — staples, résiste en récession
+    "KOx/USD", "PGx/USD",
+    # Index ETF (2) — exposition marché global
+    "SPYx/USD", "QQQx/USD",
+    # Gold (1) — vrai diversificateur, +20% en crash typiquement
+    "GLDx/USD",
 ]
 
-SYMBOLS = CRYPTO + XSTOCKS
+SYMBOLS = CRYPTO + XSTOCKS  # 21 actifs au total
 
 # ── Heures marché US (Eastern Time — gère automatiquement EST/EDT) ──────────
 XSTOCK_MARKET_OPEN_ET  = (9, 30)    # NYSE/NASDAQ ouverture (9h30 ET)
@@ -31,23 +44,34 @@ XSTOCK_MARKET_CLOSE_ET = (16,  0)   # Fermeture (16h00 ET)
 XSTOCK_PREMARKET_ET    = (8,   0)   # Analyse pré-marché (8h00 ET = 14h CET = 15h CEST)
 
 # ── Gestion du risque portefeuille ──────────────────────────────────────────
-MAX_DRAWDOWN = -0.15    # Coupe-circuit si capital chute de -15% depuis le départ
+# Profil A agressif (2026-04-30) : viser 25-40% CAGR, accepter MaxDD -40%.
+MAX_DRAWDOWN = -0.35    # Coupe-circuit si capital chute de -35% depuis le départ (vs -15% prudent)
 
 # ── Secteurs (corrélation positions — max MAX_PER_SECTOR par secteur) ───────
 # 1 → 2 : on bloquait NVDA quand AAPL ouvert, BTC quand ETH ouvert. Rate les
 # rallies sectoriels groupés (NVDA +25%, BTC +20% avril 2026).
 MAX_PER_SECTOR = 2
 SECTORS = {
-    "NVDAx/USD": "tech",       "AAPLx/USD": "tech",
-    "MSFTx/USD": "tech",       "METAx/USD": "tech",
-    "GOOGLx/USD": "tech",
-    "PLTRx/USD": "ai_data",
-    "AMDx/USD":  "semis",      "AVGOx/USD": "semis",
-    "GLDx/USD":  "gold",       "NFLXx/USD": "media",
-    "CRWDx/USD": "cybersec",
+    # Tech mega-cap
+    "NVDAx/USD": "tech",       "GOOGLx/USD": "tech",      "METAx/USD": "tech",
+    # AI/Cloud
+    "PLTRx/USD": "ai_data",    "CRWDx/USD": "cybersec",
+    # Healthcare
+    "LLYx/USD":  "healthcare", "ABBVx/USD": "healthcare",
+    # Energy
+    "XOMx/USD":  "energy",     "CVXx/USD":  "energy",
+    # Financials
+    "JPMx/USD":  "financials", "BACx/USD":  "financials",
+    # Consumer defensive
+    "KOx/USD":   "defensive",  "PGx/USD":   "defensive",
+    # Index ETF
+    "SPYx/USD":  "index",      "QQQx/USD":  "index",
+    # Gold
+    "GLDx/USD":  "gold",
+    # Crypto
     "BTC/USD":   "crypto",     "ETH/USD":   "crypto",
-    "SOL/USD":   "crypto",     "BNB/USD":   "crypto",
-    "TON/USD":   "crypto",
+    "SOL/USD":   "crypto",     "AVAX/USD":  "crypto",
+    "LINK/USD":  "crypto",
 }
 
 # ── Timeframe ───────────────────────────────────────────────────────────────
@@ -65,15 +89,14 @@ ADX_PERIOD = 14     # Période ADX
 ADX_THRESHOLD = 22  # ADX > 22 = tendance suffisante
 
 # ── Gestion du risque ───────────────────────────────────────────────────────
-POSITION_SIZE_PCT = 0.20  # 20% du total portfolio (cash + positions MTM) par position
-# Plancher position en % du capital (au lieu d'un montant € hardcodé)
-# Avec 91€ : floor = 4.5€ ; avec 10000€ : floor = 500€
+# Profil A agressif : sizing plus large, stops plus larges, vol cible plus haute.
+POSITION_SIZE_PCT = 0.25  # 25% du total portfolio par position (vs 20% prudent)
 POSITION_MIN_PCT  = 0.05  # 5% du capital initial = floor relatif
-ATR_MULTIPLIER = 3.0     # Stop-loss = 3x ATR (trend following)
+ATR_MULTIPLIER = 4.0     # Stop-loss = 4x ATR — laisse plus de room aux trends crypto/tech (vs 3x)
 TAKE_PROFIT_RATIO = 3.0  # (référence calcul, non utilisé en live — trailing stop)
-MAX_OPEN_TRADES = 10     # Maximum de trades ouverts simultanément (8 → 10 pour exploiter 16 symboles + sector=2)
-TARGET_VOL   = 0.15     # Volatilité annualisée cible (15%) pour le vol targeting
-MAX_LEVERAGE = 1.3      # Exposition max (×1.3 position de base)
+MAX_OPEN_TRADES = 6      # Max 6 positions simultanées (capital 109 USD → 18 USD/position)
+TARGET_VOL   = 0.25     # Volatilité annualisée cible 25% (vs 15% prudent)
+MAX_LEVERAGE = 1.3      # Exposition max ×1.3 (préservé)
 
 # ── Mean Reversion (RSI 2 — marché en range) ────────────────────────────────
 MR_RSI_ENTRY       = 10   # RSI(2) < 10 → signal d'achat mean reversion
@@ -95,8 +118,8 @@ INITIAL_CAPITAL = float(os.getenv("INITIAL_CAPITAL", "10000"))
 INITIAL_CAPITAL_PER_BOT = float(os.getenv("INITIAL_CAPITAL_PER_BOT", str(INITIAL_CAPITAL / 10)))
 
 # ── Kill switch global (sécurité absolue, ferme tout au-delà) ───────────────
-# -10% par défaut. Active une fermeture forcée + freeze quand DD ≤ ce seuil.
-KILL_SWITCH_PCT = float(os.getenv("KILL_SWITCH_PCT", "-0.10"))
+# Profil A agressif : -25% (accepte plus de DD pour viser 25-40% CAGR).
+KILL_SWITCH_PCT = float(os.getenv("KILL_SWITCH_PCT", "-0.25"))
 
 # ── Min order Kraken (skip tentative si budget < seuil) ─────────────────────
 # Évite "insufficient funds" loops sur small capital
