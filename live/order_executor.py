@@ -79,26 +79,34 @@ def validate_symbols(symbols: list) -> tuple:
         exchange = get_exchange(use_auth=False)
         markets = exchange.load_markets()
 
-        # Récupérer pairs xStocks via raw API
-        xstocks_pairs = set()
+        # Récupérer pairs xStocks via raw API : on indexe par wsname (ex "NVDAx/USD")
+        # pour récupérer la clé native Kraken (ex "NVDASPVUSD"), seule acceptée par AddOrder.
+        # NB : altname (ex "NVDAxUSD") apparaît aussi en clé mais est rejeté par AddOrder.
+        xstocks_ws_to_key: dict = {}
         try:
             url = "https://api.kraken.com/0/public/AssetPairs?aclass=tokenized_asset"
             with urllib.request.urlopen(url, timeout=10) as r:
                 data = json.loads(r.read())
-            xstocks_pairs = set(data.get("result", {}).keys())
+            for k, v in data.get("result", {}).items():
+                ws = v.get("wsname")
+                if not ws or v.get("status") != "online":
+                    continue
+                # Préfère la clé "SPV" (nom natif unique) à l'altname collision
+                if ws not in xstocks_ws_to_key or "SPV" in k:
+                    xstocks_ws_to_key[ws] = k
         except Exception as e:
             logger.warning(f"[validate] Fetch xStocks pairs failed: {e}")
 
         for sym in symbols:
-            kraken_native = _kraken_pair(sym)
             # Try ccxt first
             if sym in markets:
                 valid.append(sym)
-                _KRAKEN_PAIR_MAPPING[sym] = kraken_native
-            elif kraken_native in xstocks_pairs:
+                _KRAKEN_PAIR_MAPPING[sym] = _kraken_pair(sym)
+            elif sym in xstocks_ws_to_key:
+                native_key = xstocks_ws_to_key[sym]
                 valid.append(sym)
-                _KRAKEN_PAIR_MAPPING[sym] = kraken_native
-                logger.info(f"[validate] {sym} → bypass ccxt (xStock natif Kraken)")
+                _KRAKEN_PAIR_MAPPING[sym] = native_key
+                logger.info(f"[validate] {sym} → bypass ccxt (xStock Kraken native: {native_key})")
             else:
                 invalid.append(sym)
                 logger.warning(f"[validate] {sym} INTROUVABLE sur Kraken — exclu")
