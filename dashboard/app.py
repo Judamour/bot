@@ -31,7 +31,7 @@ _BOT_PATHS = {
     "j": os.path.join(BASE_DIR, "logs", "mean_reversion", "state.json"),
 }
 _BOT_NAMES  = {"a": "Supertrend+MR", "b": "Momentum", "c": "Breakout", "g": "Trend Multi-Asset", "h": "VCB Breakout", "i": "RS Leaders", "j": "Mean Reversion"}
-_BOT_COLORS = {"a": "#58a6ff", "b": "#3fb950", "c": "#ffa657", "g": "#39d353", "h": "#e06c75", "i": "#79c0ff", "j": "#b3d9ff", "k": "#f0883e"}
+_BOT_COLORS = {"a": "#58a6ff", "b": "#3fb950", "c": "#ffa657", "g": "#39d353", "h": "#e06c75", "i": "#79c0ff", "j": "#b3d9ff"}
 _BOT_Z_FILE = os.path.join(BASE_DIR, "logs", "bot_z", "state.json")
 MULTI_LOG   = os.path.join(BASE_DIR, "logs", "multi_runner.log")
 MULTI_INITIAL_CAPITAL = config.INITIAL_CAPITAL_PER_BOT
@@ -619,15 +619,15 @@ def api_bot(bot_id):
 
 @app.route("/api/contest")
 def api_contest():
-    """Vue d'ensemble des 3 bots — classement et courbes d'équité."""
+    """Vue d'ensemble des bots actifs — classement et courbes d'équité."""
     bots_data = []
-    for bot_id in ["a", "b", "c", "d", "e", "f", "g", "h", "i", "k"]:
+    for bot_id in ["a", "b", "c", "g", "h", "i", "j"]:
         state = load_bot_state(bot_id)
         metrics = compute_metrics(state, _live_prices)
         bots_data.append({
             "id": bot_id,
-            "name": _BOT_NAMES[bot_id],
-            "color": _BOT_COLORS[bot_id],
+            "name": _BOT_NAMES.get(bot_id, bot_id),
+            "color": _BOT_COLORS.get(bot_id, "#58a6ff"),
             "capital": metrics["capital"],
             "total_value": metrics["total_value"],
             "initial_capital": metrics["initial_capital"],
