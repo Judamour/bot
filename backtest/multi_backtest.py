@@ -947,12 +947,23 @@ def _get_regime_at_dt(dt, vix_s, qqq_df) -> str:
 
 
 def _resample_weekly(dates, equity):
-    """Resample a daily equity curve to weekly (last day of each week).
-    Eliminates daily mark-to-market noise from open crypto positions.
+    """Resample equity curve to weekly (last day of each week).
+
+    Fix 2026-04-30 :
+    1. Normalise tz=None pour permettre intersection cross-bot (BTC en UTC vs xStocks naive)
+    2. Forward-fill : si bot peu actif (Bot G = 103 trades sur 3 ans), pas de dropna —
+       on propage la dernière valeur connue pour avoir des points hebdomadaires complets.
+       Sinon intersection vide entre bot actif (Bot A = 171 trades) et peu actif.
     """
     if not dates or not equity:
         return dates, equity
     s = pd.Series(equity, index=pd.DatetimeIndex(dates))
+    if s.index.tz is not None:
+        s.index = s.index.tz_localize(None)
+    # Forward-fill quotidien d'abord, puis resample weekly
+    s = s.sort_index()
+    s = s[~s.index.duplicated(keep="last")]
+    s = s.asfreq("D").ffill()
     ws = s.resample("W").last().dropna()
     return list(ws.index), list(ws.values)
 
@@ -990,7 +1001,7 @@ def backtest_bot_z_portfolio(results: dict, vix_s: pd.Series, qqq_df: pd.DataFra
     log("Bot Z — 3 structures portfolio (equal / régime / hybride 70-30)...")
 
     # Equity curves des bots valides uniquement
-    valid = {k: results[k] for k in VALID_BOTS_Z if k in results and results[k]["equity"]}
+    valid = {k: results[k] for k in VALID_BOTS_Z if k in results and results[k]["equity"] and results[k].get("dates")}
     if len(valid) < 2:
         log("Bot Z: pas assez de bots valides.", Fore.YELLOW)
         return {}
@@ -1120,7 +1131,7 @@ def backtest_bot_z_enhanced(results: dict, vix_s: pd.Series, qqq_df: pd.DataFram
     """
     log("Bot Z Enhanced — Momentum Overlay + Circuit Breaker...")
 
-    valid = {k: results[k] for k in VALID_BOTS_Z if k in results and results[k]["equity"]}
+    valid = {k: results[k] for k in VALID_BOTS_Z if k in results and results[k]["equity"] and results[k].get("dates")}
     if len(valid) < 2:
         return {}
 
@@ -1243,7 +1254,7 @@ def backtest_bot_z_pro(results: dict, vix_s: pd.Series, qqq_df: pd.DataFrame,
     """
     log("Bot Z Pro — Vol Targeting + Adaptive Score + Corr Spike + Multi-tier CB...")
 
-    valid = {k: results[k] for k in VALID_BOTS_Z if k in results and results[k]["equity"]}
+    valid = {k: results[k] for k in VALID_BOTS_Z if k in results and results[k]["equity"] and results[k].get("dates")}
     if len(valid) < 2:
         return {}
 
@@ -1467,7 +1478,7 @@ def backtest_bot_z_adaptive(results: dict, vix_s: pd.Series, qqq_df: pd.DataFram
     """
     log("Bot Z Adaptive — Meta Regime Switch (Enhanced / Balanced / Pro)...")
 
-    valid = {k: results[k] for k in VALID_BOTS_Z if k in results and results[k]["equity"]}
+    valid = {k: results[k] for k in VALID_BOTS_Z if k in results and results[k]["equity"] and results[k].get("dates")}
     if len(valid) < 2:
         return {}
 
@@ -1659,7 +1670,7 @@ def backtest_bot_z_omega(results: dict, vix_s: pd.Series, qqq_df: pd.DataFrame,
     """
     log("Bot Z Omega — Expected Return Engine + Risk Engine + Corr Penalty...")
 
-    valid = {k: results[k] for k in VALID_BOTS_Z if k in results and results[k]["equity"]}
+    valid = {k: results[k] for k in VALID_BOTS_Z if k in results and results[k]["equity"] and results[k].get("dates")}
     if len(valid) < 2:
         return {}
 
@@ -1884,7 +1895,7 @@ def backtest_bot_z_omega_v2(results: dict, vix_s: pd.Series, qqq_df: pd.DataFram
     """
     log("Bot Z Omega v2 — Risk Parity + Meta-Learning...")
 
-    valid = {k: results[k] for k in VALID_BOTS_Z if k in results and results[k]["equity"]}
+    valid = {k: results[k] for k in VALID_BOTS_Z if k in results and results[k]["equity"] and results[k].get("dates")}
     # Inclure Bot J s'il est disponible (diversification factor)
     if "j" in results and results["j"]["equity"]:
         valid["j"] = results["j"]
@@ -2151,7 +2162,7 @@ def backtest_bot_z_meta(results: dict, vix_s: pd.Series, qqq_df: pd.DataFrame,
     """
     log("Bot Z Meta — Méta-sélecteur BULL/BALANCED/PARITY/SHIELD...")
 
-    valid = {k: results[k] for k in VALID_BOTS_Z if k in results and results[k]["equity"]}
+    valid = {k: results[k] for k in VALID_BOTS_Z if k in results and results[k]["equity"] and results[k].get("dates")}
     if "j" in results and results["j"]["equity"]:
         valid["j"] = results["j"]
     if len(valid) < 2:
@@ -2479,7 +2490,7 @@ def backtest_bot_z_meta_v2(results: dict, vix_s: pd.Series, qqq_df: pd.DataFrame
     """
     log("Bot Z Meta v2 — Engine Scoring data-driven...")
 
-    valid = {k: results[k] for k in VALID_BOTS_Z if k in results and results[k]["equity"]}
+    valid = {k: results[k] for k in VALID_BOTS_Z if k in results and results[k]["equity"] and results[k].get("dates")}
     if "j" in results and results["j"]["equity"]:
         valid["j"] = results["j"]
     if len(valid) < 2:
@@ -2884,7 +2895,7 @@ def walk_forward_test(results: dict, vix_s: pd.Series, qqq_df: pd.DataFrame,
     """
     log(f"Walk-Forward Test — In-Sample <{split_year} / Out-of-Sample >={split_year}...")
 
-    valid = {k: results[k] for k in VALID_BOTS_Z if k in results and results[k]["equity"]}
+    valid = {k: results[k] for k in VALID_BOTS_Z if k in results and results[k]["equity"] and results[k].get("dates")}
     if len(valid) < 2:
         return {}
 
