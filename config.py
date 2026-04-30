@@ -122,8 +122,10 @@ INITIAL_CAPITAL_PER_BOT = float(os.getenv("INITIAL_CAPITAL_PER_BOT", str(INITIAL
 KILL_SWITCH_PCT = float(os.getenv("KILL_SWITCH_PCT", "-0.25"))
 
 # ── Min order Kraken (skip tentative si budget < seuil) ─────────────────────
-# Évite "insufficient funds" loops sur small capital
-MIN_ORDER_EUR = float(os.getenv("MIN_ORDER_EUR", "5.0"))
+# Kraken min cost réel BTC = 0.5 USD, xStocks ~0.5 USD
+# Avec 4 bots × 27 USD × 25% sizing = 6.75 USD typique, descendre à 1.0 pour
+# permettre aux petits trades de passer (small capital live).
+MIN_ORDER_EUR = float(os.getenv("MIN_ORDER_EUR", "1.0"))
 
 # ── Bots actifs (autres = désactivés, ne tradent pas) ───────────────────────
 # Audit 55 jours paper : Bot A 33 trades, B 4, C/G/H/I/J 0 trades.

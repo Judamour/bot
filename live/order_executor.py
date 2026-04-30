@@ -21,6 +21,9 @@ import time
 import logging
 import sys
 import os
+import urllib.request
+import urllib.parse
+import json
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
@@ -29,6 +32,11 @@ from live.notifier import notify
 
 logger = logging.getLogger(__name__)
 
+
+# ── Cache des symbols valides Kraken (rempli au démarrage par validate_symbols) ──
+_VALID_SYMBOLS_CACHE: set = set()
+_KRAKEN_PAIR_MAPPING: dict = {}  # "NVDAx/USD" → "NVDAxUSD" (format Kraken native)
+_NOTIF_DEDUP_CYCLE: dict = {}    # {symbol_reason: cycle_id} pour throttle Telegram
 
 # ── Résultat d'un ordre ──────────────────────────────────────────────────────
 
@@ -45,6 +53,154 @@ class OrderResult:
         if self.success:
             return f"OrderResult(OK id={self.order_id} size={self.filled_size:.6f} @ {self.filled_price:.4f})"
         return f"OrderResult(FAILED: {self.error})"
+
+
+# ── Helpers : validation symbols + bypass ccxt xStocks ──────────────────────
+
+def _kraken_pair(symbol: str) -> str:
+    """Convert ccxt format (NVDAx/USD) to Kraken native (NVDAxUSD)."""
+    return symbol.replace("/", "")
+
+
+def validate_symbols(symbols: list) -> tuple:
+    """
+    Au démarrage : vérifie que chaque symbole est tradable via Kraken API.
+
+    Pour cryptos : check ccxt markets[].
+    Pour xStocks : check raw API AssetPairs?aclass=tokenized_asset.
+
+    Returns:
+        (valid_symbols, invalid_symbols) — listes filtrées
+    """
+    global _VALID_SYMBOLS_CACHE, _KRAKEN_PAIR_MAPPING
+
+    valid, invalid = [], []
+    try:
+        exchange = get_exchange(use_auth=False)
+        markets = exchange.load_markets()
+
+        # Récupérer pairs xStocks via raw API
+        xstocks_pairs = set()
+        try:
+            url = "https://api.kraken.com/0/public/AssetPairs?aclass=tokenized_asset"
+            with urllib.request.urlopen(url, timeout=10) as r:
+                data = json.loads(r.read())
+            xstocks_pairs = set(data.get("result", {}).keys())
+        except Exception as e:
+            logger.warning(f"[validate] Fetch xStocks pairs failed: {e}")
+
+        for sym in symbols:
+            kraken_native = _kraken_pair(sym)
+            # Try ccxt first
+            if sym in markets:
+                valid.append(sym)
+                _KRAKEN_PAIR_MAPPING[sym] = kraken_native
+            elif kraken_native in xstocks_pairs:
+                valid.append(sym)
+                _KRAKEN_PAIR_MAPPING[sym] = kraken_native
+                logger.info(f"[validate] {sym} → bypass ccxt (xStock natif Kraken)")
+            else:
+                invalid.append(sym)
+                logger.warning(f"[validate] {sym} INTROUVABLE sur Kraken — exclu")
+
+        _VALID_SYMBOLS_CACHE = set(valid)
+    except Exception as e:
+        logger.error(f"[validate] ERREUR globale: {e}")
+        # Fallback : tout accepter pour ne pas bloquer le bot
+        valid = list(symbols)
+        _VALID_SYMBOLS_CACHE = set(symbols)
+
+    return valid, invalid
+
+
+def _is_xstock(symbol: str) -> bool:
+    """True si symbole est un xStock (non listé dans ccxt markets)."""
+    return symbol in config.XSTOCKS
+
+
+def _kraken_sign(path: str, data: dict, secret: str) -> str:
+    """Sign Kraken private API request."""
+    import hashlib, hmac, base64
+    postdata = urllib.parse.urlencode(data)
+    encoded = (str(data.get("nonce", "")) + postdata).encode()
+    message = path.encode() + hashlib.sha256(encoded).digest()
+    sig = hmac.new(base64.b64decode(secret), message, hashlib.sha512)
+    return base64.b64encode(sig.digest()).decode()
+
+
+def _kraken_private_post(endpoint: str, params: dict) -> dict:
+    """
+    Direct Kraken private API call (bypass ccxt).
+    Utilisé pour xStocks que ccxt ne reconnaît pas.
+    """
+    api_key = config.API_KEY
+    api_secret = config.API_SECRET
+    if not api_key or not api_secret:
+        raise ValueError("API_KEY/SECRET manquants")
+
+    path = f"/0/private/{endpoint}"
+    url = "https://api.kraken.com" + path
+
+    nonce = str(int(time.time() * 1000))
+    data = dict(params)
+    data["nonce"] = nonce
+
+    signature = _kraken_sign(path, data, api_secret)
+    headers = {
+        "API-Key": api_key,
+        "API-Sign": signature,
+        "Content-Type": "application/x-www-form-urlencoded",
+        "User-Agent": "bot-trading/1.0",
+    }
+
+    body = urllib.parse.urlencode(data).encode()
+    req = urllib.request.Request(url, data=body, headers=headers, method="POST")
+    with urllib.request.urlopen(req, timeout=30) as r:
+        resp = json.loads(r.read())
+
+    if resp.get("error"):
+        raise RuntimeError(f"Kraken API: {resp['error']}")
+    return resp.get("result", {})
+
+
+def _execute_xstock_order(symbol: str, side: str, size: float, price_estimate: float) -> OrderResult:
+    """Place un ordre xStock via raw Kraken API (bypass ccxt)."""
+    pair = _KRAKEN_PAIR_MAPPING.get(symbol, _kraken_pair(symbol))
+    try:
+        result = _kraken_private_post("AddOrder", {
+            "pair": pair,
+            "type": side,
+            "ordertype": "market",
+            "volume": str(size),
+        })
+        order_id = (result.get("txid") or ["?"])[0]
+        logger.info(f"[ORDER-RAW] {side.upper()} {symbol} ({pair}) submitted: {order_id}")
+        # Estimer le fill (on n'a pas le polling raw pour l'instant — return success direct)
+        # TODO: implémenter polling QueryOrders raw si besoin du prix réel
+        return OrderResult(
+            success=True,
+            order_id=order_id,
+            filled_size=size,
+            filled_price=price_estimate,
+        )
+    except Exception as e:
+        logger.error(f"[ORDER-RAW] {side.upper()} {symbol} FAIL: {e}")
+        return OrderResult(success=False, error=str(e))
+
+
+def _should_notify(symbol: str, reason: str, cycle_id: int = None) -> bool:
+    """Throttle Telegram : 1 notif par symbol+reason par cycle."""
+    key = f"{symbol}:{reason}"
+    cur = _NOTIF_DEDUP_CYCLE.get(key)
+    if cur == cycle_id:
+        return False
+    _NOTIF_DEDUP_CYCLE[key] = cycle_id
+    return True
+
+
+def reset_notif_dedup():
+    """À appeler en début de cycle pour reset le dedup."""
+    _NOTIF_DEDUP_CYCLE.clear()
 
 
 # ── Exécution d'ordres ───────────────────────────────────────────────────────
@@ -74,33 +230,34 @@ def execute_buy(symbol: str, size: float, price_estimate: float,
                            filled_price=effective_price)
 
     # ── LIVE ──
-    # Pré-check : montant total < MIN_ORDER_EUR → skip (évite "insufficient funds" loop)
+    # Pré-check : symbole validé au démarrage ?
+    if _VALID_SYMBOLS_CACHE and symbol not in _VALID_SYMBOLS_CACHE:
+        logger.warning(f"[ORDER] BUY {symbol} skip — symbole non validé Kraken (silent)")
+        return OrderResult(success=False, error="symbol_not_supported")
+
+    # Pré-check : montant total < MIN_ORDER_EUR → skip
     order_value = size * price_estimate
     if order_value < config.MIN_ORDER_EUR:
-        logger.warning(f"[ORDER] BUY {symbol} skip — montant {order_value:.2f}€ < min {config.MIN_ORDER_EUR}€")
-        return OrderResult(success=False, error=f"min_order_size: {order_value:.2f}€ < {config.MIN_ORDER_EUR}€")
+        logger.warning(f"[ORDER] BUY {symbol} skip — montant {order_value:.2f}$ < min {config.MIN_ORDER_EUR}$")
+        return OrderResult(success=False, error=f"min_order_size: {order_value:.2f}$ < {config.MIN_ORDER_EUR}$")
+
+    # ── xStocks : bypass ccxt via raw Kraken API ──
+    if _is_xstock(symbol):
+        logger.info(f"[ORDER] BUY {symbol} (xStock raw) size={size:.6f} @ ~{price_estimate:.4f}$ ({order_value:.2f}$)")
+        result = _execute_xstock_order(symbol, "buy", size, price_estimate)
+        if result.success:
+            notify(f"✅ <b>LIVE BUY</b> {symbol}\nTaille: {size:.6f} @ ~{price_estimate:.4f}$\nOrdre: {result.order_id}")
+        return result
 
     try:
         exchange = get_exchange(use_auth=True)
         logger.info(f"[ORDER] BUY {symbol} size={size:.6f} @ ~{price_estimate:.4f}$ ({order_value:.2f}$)")
-
-        # xStocks (tokenized assets) nécessitent extra_params asset_class=tokenized_asset
-        # Aussi : ccxt ne reconnaît pas les pairs xStocks par défaut, on doit forcer le pair Kraken
-        is_xstock_sym = symbol in config.XSTOCKS
-        order_params = {}
-        if is_xstock_sym:
-            order_params = {
-                "asset_class": "tokenized_asset",
-                # Pair Kraken format : NVDAxUSD (sans slash)
-                "pair": symbol.replace("/", ""),
-            }
 
         order = exchange.create_order(
             symbol=symbol,
             type="market",
             side="buy",
             amount=size,
-            params=order_params,
         )
         order_id = order.get("id", "?")
         logger.info(f"[ORDER] Ordre BUY soumis: id={order_id}")
@@ -129,9 +286,12 @@ def execute_buy(symbol: str, size: float, price_estimate: float,
         )
 
     except Exception as e:
-        logger.error(f"[ORDER] BUY {symbol} ÉCHOUÉ: {e}")
-        notify(f"⛔ <b>LIVE BUY ÉCHOUÉ</b> {symbol}\nErreur: {e}")
-        return OrderResult(success=False, error=str(e))
+        err_msg = str(e)
+        logger.error(f"[ORDER] BUY {symbol} ÉCHOUÉ: {err_msg}")
+        # Throttle Telegram : ne notifie que si pair vraiment dispo (sinon spam)
+        if "does not have market symbol" not in err_msg:
+            notify(f"⛔ <b>LIVE BUY ÉCHOUÉ</b> {symbol}\nErreur: {err_msg[:200]}")
+        return OrderResult(success=False, error=err_msg)
 
 
 def execute_sell(symbol: str, size: float, price_estimate: float,
@@ -155,24 +315,28 @@ def execute_sell(symbol: str, size: float, price_estimate: float,
                            filled_price=effective_price)
 
     # ── LIVE ──
+    if _VALID_SYMBOLS_CACHE and symbol not in _VALID_SYMBOLS_CACHE:
+        logger.warning(f"[ORDER] SELL {symbol} skip — symbole non validé")
+        return OrderResult(success=False, error="symbol_not_supported")
+
+    # ── xStocks : bypass ccxt ──
+    if _is_xstock(symbol):
+        logger.info(f"[ORDER] SELL {symbol} (xStock raw) size={size:.6f} @ ~{price_estimate:.4f}$ ({reason})")
+        result = _execute_xstock_order(symbol, "sell", size, price_estimate)
+        if result.success:
+            icon = "🔴" if "stop" in reason else "⏹"
+            notify(f"{icon} <b>LIVE SELL</b> {symbol} [{reason}]\nTaille: {size:.6f} @ ~{price_estimate:.4f}$")
+        return result
+
     try:
         exchange = get_exchange(use_auth=True)
         logger.info(f"[ORDER] SELL {symbol} size={size:.6f} @ ~{price_estimate:.4f}$ ({reason})")
-
-        is_xstock_sym = symbol in config.XSTOCKS
-        order_params = {}
-        if is_xstock_sym:
-            order_params = {
-                "asset_class": "tokenized_asset",
-                "pair": symbol.replace("/", ""),
-            }
 
         order = exchange.create_order(
             symbol=symbol,
             type="market",
             side="sell",
             amount=size,
-            params=order_params,
         )
         order_id = order.get("id", "?")
 
@@ -367,6 +531,13 @@ def startup_check() -> bool:
 
     logger.info("[ORDER] === DÉMARRAGE EN MODE LIVE — vérifications ===")
     notify("🟡 <b>Bot Trading LIVE</b> — démarrage en cours...\nVérifications en cours...")
+
+    # 0. Validate symbols (filter config.SYMBOLS to only tradable ones)
+    valid_syms, invalid_syms = validate_symbols(config.SYMBOLS)
+    logger.info(f"[ORDER] Symbols validés: {len(valid_syms)}/{len(config.SYMBOLS)}")
+    if invalid_syms:
+        logger.warning(f"[ORDER] Symbols invalides exclus: {invalid_syms}")
+        notify(f"⚠️ <b>{len(invalid_syms)} symbols exclus</b>\n{', '.join(invalid_syms)}")
 
     # Détecte devise de quote
     quote_ccy = "USD"
