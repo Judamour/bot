@@ -36,7 +36,8 @@ XSTOCKS = [
     "GLDx/USD",
 ]
 
-SYMBOLS = CRYPTO + XSTOCKS  # 21 actifs au total
+XSTOCKS_ENABLED = os.getenv("XSTOCKS_ENABLED", "true").lower() == "true"
+SYMBOLS = CRYPTO + (XSTOCKS if XSTOCKS_ENABLED else [])  # 21 actifs si xStocks ON, sinon 5 cryptos
 
 # ── Heures marché US (Eastern Time — gère automatiquement EST/EDT) ──────────
 XSTOCK_MARKET_OPEN_ET  = (9, 30)    # NYSE/NASDAQ ouverture (9h30 ET)

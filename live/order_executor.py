@@ -201,6 +201,18 @@ def _execute_xstock_order(symbol: str, side: str, size: float, price_estimate: f
         return OrderResult(success=False, error=str(e))
 
 
+_SILENT_ERROR_PATTERNS = (
+    "does not have market symbol",   # ccxt local rejet (avant API)
+    "EQuery:Unknown asset pair",     # Kraken : xStocks gated, support contacté
+    "EGeneral:Internal error",       # Kraken : erreur interne sporadique sur xStocks
+)
+
+
+def _is_silent_kraken_error(err_msg: str) -> bool:
+    """Erreurs connues à ne pas notifier sur Telegram (sinon spam à chaque cycle)."""
+    return any(p in err_msg for p in _SILENT_ERROR_PATTERNS)
+
+
 def _should_notify(symbol: str, reason: str, cycle_id: int = None) -> bool:
     """Throttle Telegram : 1 notif par symbol+reason par cycle."""
     key = f"{symbol}:{reason}"
@@ -301,8 +313,7 @@ def execute_buy(symbol: str, size: float, price_estimate: float,
     except Exception as e:
         err_msg = str(e)
         logger.error(f"[ORDER] BUY {symbol} ÉCHOUÉ: {err_msg}")
-        # Throttle Telegram : ne notifie que si pair vraiment dispo (sinon spam)
-        if "does not have market symbol" not in err_msg:
+        if not _is_silent_kraken_error(err_msg):
             notify(f"⛔ <b>LIVE BUY ÉCHOUÉ</b> {symbol}\nErreur: {err_msg[:200]}")
         return OrderResult(success=False, error=err_msg)
 
@@ -376,10 +387,12 @@ def execute_sell(symbol: str, size: float, price_estimate: float,
         )
 
     except Exception as e:
-        logger.error(f"[ORDER] SELL {symbol} ÉCHOUÉ: {e}")
-        notify(f"🚨 <b>LIVE SELL ÉCHOUÉ</b> {symbol} [{reason}]\n"
-               f"Erreur: {e}\n⚠️ Position ouverte — intervention manuelle requise")
-        return OrderResult(success=False, error=str(e))
+        err_msg = str(e)
+        logger.error(f"[ORDER] SELL {symbol} ÉCHOUÉ: {err_msg}")
+        if not _is_silent_kraken_error(err_msg):
+            notify(f"🚨 <b>LIVE SELL ÉCHOUÉ</b> {symbol} [{reason}]\n"
+                   f"Erreur: {err_msg}\n⚠️ Position ouverte — intervention manuelle requise")
+        return OrderResult(success=False, error=err_msg)
 
 
 # ── Utilitaires internes ─────────────────────────────────────────────────────
