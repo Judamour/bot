@@ -319,7 +319,7 @@ def run():
 
             # ── 3. Pre-fetch daily OHLCV for Bots B & C (220 days) ───────────
             log(f"Pre-fetching daily OHLCV ({len(config.SYMBOLS)} symbols, 220 days)...")
-            ohlcv_daily = fetch_ohlcv_cache(config.SYMBOLS, timeframe="1d", days=220)
+            ohlcv_daily = fetch_ohlcv_cache(config.SYMBOLS, timeframe="1d", days=400)
             log(f"Daily cache: {len(ohlcv_daily)}/{len(config.SYMBOLS)} symbols ready")
 
             # Breadth indicator (régime continu, recycle ohlcv_daily)

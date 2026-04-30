@@ -79,12 +79,18 @@ MAX_BOTS_SAME_ASSET = 2      # max 2 bots simultanés long sur le même actif
 CASH_VIX_THRESHOLD  = 35.0   # VIX > 35 → forcer cash 30%
 TARGET_VOL          = 0.15   # volatilité cible (pour rolling score)
 
-# ── Mode agressif ────────────────────────────────────────────────────────────
-# AGGRESSIVE_MODE=True : force engine BULL en conditions normales
-#   → équivalent backtest "Régime pur" (CAGR +39.7% vs +26.9% Meta v2 sur 3 ans)
-#   → MaxDD ~-23% (DD survient typiquement APRÈS gains accumulés)
-#   → Profil A agressif (2026-04-30) : kill switch -25% laisse de la marge.
-#   → Hard rules SHIELD préservées (VIX>32, BTC+QQQ bearish + VIX>26).
+# ── Mode Omega (le plus puissant — port de backtest_bot_z_omega) ────────────
+# OMEGA_MODE=True : remplace allocation Meta v2 par algo Expected Return Engine
+#   + Risk Engine + Correlation Penalty + Softmax weights.
+#   Backtest 3y nouvel univers USD : CAGR +44.6% / Sharpe 1.55 / MaxDD -17.4%
+#   → bat NASDAQ-100 sur les 3 axes.
+# Warmup : 18 cycles hebdo (~4 mois). Avant warmup = equal-weight (= +33% CAGR backtest).
+# Hard rules SHIELD toujours préservées (VIX>32, BTC+QQQ bearish, DD<-12%).
+OMEGA_MODE = True
+
+# ── Mode agressif (legacy, supplanted par OMEGA_MODE si activé) ─────────────
+# AGGRESSIVE_MODE=True : force engine BULL en conditions normales (régime pur)
+# Si OMEGA_MODE=True, ce flag est ignoré (Omega prime).
 AGGRESSIVE_MODE = True
 
 # ── Améliorations Meta v2+ ────────────────────────────────────────────────────
@@ -1096,6 +1102,26 @@ def run_bot_z_cycle(macro: dict, ohlcv: dict = None) -> dict:
     total_b = sum(blended.values())
     if total_b > 0:
         blended = {b: v / total_b for b, v in blended.items()}
+
+    # ── OMEGA MODE : remplace les weights Meta v2 par algo Omega softmax ─────
+    # Si OMEGA_MODE=True ET au moins 2 bots actifs ET historique suffisant,
+    # remplace `blended` par les weights Omega (Expected Return + Risk + Corr Penalty).
+    # Avant warmup ou si 1 seul bot, fallback sur weights Meta v2 (= comportement actuel).
+    if OMEGA_MODE and len(VALID_BOTS) >= 2:
+        try:
+            from live.bot_z_omega import compute_omega_allocation, update_omega_history
+            # Update history avec valeurs actuelles bots
+            bot_capitals = {b: float(s.get("original_capital", s.get("initial_capital", INITIAL_CAP / max(len(VALID_BOTS), 1))))
+                            for b, s in all_states.items() if b in VALID_BOTS}
+            update_omega_history(state, {b: bot_values.get(b, 0) for b in VALID_BOTS}, bot_capitals)
+            # Compute weights Omega
+            omega_weights = compute_omega_allocation(state, VALID_BOTS, regime, macro, cb_factor_final)
+            if omega_weights and abs(sum(omega_weights.values()) - 1.0) < 0.01:
+                blended = omega_weights  # override
+                print(f"[BOT Z] Omega weights actifs : {omega_weights}")
+        except Exception as _ome:
+            import logging
+            logging.warning(f"[BOT Z] Omega allocation failed ({_ome}) — fallback Meta v2")
 
     # 6a. Weight caps — évite sur-concentration (ex: Bot C à 64% en SHIELD)
     blended = _apply_weight_caps(blended)
