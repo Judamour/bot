@@ -50,14 +50,17 @@ STATE_FILE  = "logs/bot_z/state.json"
 SHADOW_LOG  = "logs/bot_z/shadow.jsonl"
 
 # ── Paper Trading — configuration production ──────────────────────────────────
-INITIAL_CAP       = 10000.0  # 10 000€ total (4 bots validés × 2 500€)
+# Capital-agnostic : lu depuis config (env var INITIAL_CAPITAL).
+# Paper par défaut : 10000€. Live : matche solde Kraken (ex: 91€).
+INITIAL_CAP       = config.INITIAL_CAPITAL
 PAPER_START_DATE  = "2026-03-06"
 PAPER_REVIEW_DATE = "2026-04-30"
 
 # ── Calibration BEAR v2 (validée backtest 2020-2026) ─────────────────────────
-# Bots valides pour Bot Z Enhanced : A, B, C, G uniquement
-# H=0 trades en daily | I=churn excessif
-VALID_BOTS = ["a", "b", "c", "g"]
+# Bot Z dispatche budget aux bots ACTIFS uniquement (config.ACTIVE_BOTS).
+# Audit 2026-04-30 (55 jours paper) : seuls Bot A (33 trades) et J (défensif) traders fiables.
+# B/C/G/H/I = 0-4 trades en 55j → désactivés par défaut.
+VALID_BOTS = [b for b in ["a", "b", "c", "g"] if b in config.ACTIVE_BOTS] or ["a"]
 
 REGIME_WEIGHTS = {
     "BULL":     {"a": 0.8, "b": 1.0, "c": 0.5, "g": 1.2},

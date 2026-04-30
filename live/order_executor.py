@@ -74,9 +74,15 @@ def execute_buy(symbol: str, size: float, price_estimate: float,
                            filled_price=effective_price)
 
     # ── LIVE ──
+    # Pré-check : montant total < MIN_ORDER_EUR → skip (évite "insufficient funds" loop)
+    order_value = size * price_estimate
+    if order_value < config.MIN_ORDER_EUR:
+        logger.warning(f"[ORDER] BUY {symbol} skip — montant {order_value:.2f}€ < min {config.MIN_ORDER_EUR}€")
+        return OrderResult(success=False, error=f"min_order_size: {order_value:.2f}€ < {config.MIN_ORDER_EUR}€")
+
     try:
         exchange = get_exchange(use_auth=True)
-        logger.info(f"[ORDER] BUY {symbol} size={size:.6f} @ ~{price_estimate:.4f}€")
+        logger.info(f"[ORDER] BUY {symbol} size={size:.6f} @ ~{price_estimate:.4f}€ ({order_value:.2f}€)")
 
         order = exchange.create_order(
             symbol=symbol,

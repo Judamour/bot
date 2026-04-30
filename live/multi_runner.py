@@ -52,7 +52,7 @@ init(autoreset=True)
 
 STATE_A_FILE = "logs/supertrend/state.json"
 CYCLE_HOURS_UTC = [3, 7, 11, 15, 19, 23]
-INITIAL_CAPITAL_PER_BOT = 1000.0
+INITIAL_CAPITAL_PER_BOT = config.INITIAL_CAPITAL_PER_BOT
 Z_BUDGET_FILE = "logs/bot_z/budget.json"
 
 
@@ -94,9 +94,19 @@ def _apply_z_budget(state: dict, z_budget_eur: float) -> dict:
     prev = state.get("z_budget_eur", state.get("initial_capital", INITIAL_CAPITAL_PER_BOT))
     if prev <= 0:
         prev = INITIAL_CAPITAL_PER_BOT
-    # Toujours appliquer le scale (même < 2%) pour rester cohérent avec
-    # last_bot_values stocké dans bot_z state. Un écart non appliqué crée
-    # un phantom P&L au cycle suivant (bot_values ≠ prev_bot_values sans trade).
+    # CAP : ne jamais scale en-dessous de min_order × 2 (5€) sinon les sub-bots
+    # ne peuvent rien faire. Si le budget est trop petit, on injecte le budget
+    # comme nouveau capital initial (pas de scale), reset baseline.
+    if z_budget_eur < config.MIN_ORDER_EUR * 2:
+        # Budget Bot Z < 10€ pour ce sub-bot : pas viable, on garde minimum
+        # mais on flagge dispo=False pour skip ce bot ce cycle
+        state["capital"] = round(z_budget_eur, 2)
+        state["initial_capital"] = round(z_budget_eur, 2)
+        state["z_budget_eur"] = round(z_budget_eur, 2)
+        state["_below_min_order"] = True  # flag pour skip
+        return state
+    state["_below_min_order"] = False
+    # Scale standard : préserver le ratio cash/positions du bot
     scale = z_budget_eur / prev
     state["capital"] = round(state["capital"] * scale, 2)
     state["initial_capital"] = round(z_budget_eur, 2)
@@ -337,6 +347,30 @@ def run():
                     state_b["_bot_id"] = "B"
                     state_c["_bot_id"] = "C"
                     state_g["_bot_id"] = "G"
+                    # ── KILL SWITCH GLOBAL (live uniquement) ──
+                    # Si Bot Z portfolio chute ≤ KILL_SWITCH_PCT (-10% par défaut), gèle tous
+                    # les bots pour bloquer les nouvelles entrées. Positions ouvertes conservées
+                    # — tu dois décider manuellement de les fermer ou pas.
+                    z_perf = z_summary.get("perf_pct", 0) / 100.0
+                    kill_switch_active = (
+                        not config.PAPER_TRADING
+                        and z_perf <= config.KILL_SWITCH_PCT
+                        and not state.get("kill_switch_triggered", False)
+                    )
+                    if kill_switch_active:
+                        log(f"⛔ KILL SWITCH GLOBAL : Bot Z {z_perf*100:+.2f}% ≤ {config.KILL_SWITCH_PCT*100:+.0f}%", "WARN")
+                        for s in (state_a, state_b, state_c, state_g, state_h, state_i, state_j):
+                            if isinstance(s, dict):
+                                s["dd_frozen"] = True
+                        state["kill_switch_triggered"] = True
+                        try:
+                            from live.notifier import notify
+                            notify(f"🚨 <b>KILL SWITCH GLOBAL ACTIVÉ</b>\n"
+                                   f"Bot Z perf : <b>{z_perf*100:+.2f}%</b> (seuil {config.KILL_SWITCH_PCT*100:+.0f}%)\n"
+                                   f"Tous les bots gelés — intervention manuelle requise.")
+                        except Exception:
+                            pass
+
                     state_a = _apply_z_budget(state_a, z_budget_alloc.get("a", INITIAL_CAPITAL_PER_BOT))
                     state_b = _apply_z_budget(state_b, z_budget_alloc.get("b", INITIAL_CAPITAL_PER_BOT))
                     state_c = _apply_z_budget(state_c, z_budget_alloc.get("c", INITIAL_CAPITAL_PER_BOT))
@@ -445,65 +479,59 @@ def run():
             )
 
             # ── 6. Bot B: Momentum Rotation ───────────────────────────────────
-            log(f"\n{Fore.GREEN}--- Bot B: Momentum Rotation ---{Style.RESET_ALL}")
-            state_b = run_momentum_cycle(state_b, ohlcv_daily, macro)
-            save_mom(state_b)
-            log(
-                f"[B] Capital: {state_b['capital']:.2f}€ | "
-                f"Holdings: {list(state_b['positions'].keys())} | "
-                f"Trades: {len(state_b['trades'])}"
-            )
+            if "b" in config.ACTIVE_BOTS:
+                log(f"\n{Fore.GREEN}--- Bot B: Momentum Rotation ---{Style.RESET_ALL}")
+                state_b = run_momentum_cycle(state_b, ohlcv_daily, macro)
+                save_mom(state_b)
+                log(f"[B] Capital: {state_b['capital']:.2f}€ | Holdings: {list(state_b['positions'].keys())} | Trades: {len(state_b['trades'])}")
+            else:
+                log(f"\n{Fore.GREEN}--- Bot B: désactivé (ACTIVE_BOTS) ---{Style.RESET_ALL}")
 
             # ── 7. Bot C: Donchian Breakout ───────────────────────────────────
-            log(f"\n{Fore.YELLOW}--- Bot C: Donchian Breakout ---{Style.RESET_ALL}")
-            brk_cache = {s: ohlcv_daily.get(s) for s in BREAKOUT_SYMBOLS if s in ohlcv_daily}
-            state_c = run_breakout_cycle(state_c, brk_cache, macro)
-            save_brk(state_c)
-            log(
-                f"[C] Capital: {state_c['capital']:.2f}€ | "
-                f"Positions: {list(state_c['positions'].keys())} | "
-                f"Trades: {len(state_c['trades'])}"
-            )
+            if "c" in config.ACTIVE_BOTS:
+                log(f"\n{Fore.YELLOW}--- Bot C: Donchian Breakout ---{Style.RESET_ALL}")
+                brk_cache = {s: ohlcv_daily.get(s) for s in BREAKOUT_SYMBOLS if s in ohlcv_daily}
+                state_c = run_breakout_cycle(state_c, brk_cache, macro)
+                save_brk(state_c)
+                log(f"[C] Capital: {state_c['capital']:.2f}€ | Positions: {list(state_c['positions'].keys())} | Trades: {len(state_c['trades'])}")
+            else:
+                log(f"\n{Fore.YELLOW}--- Bot C: désactivé (ACTIVE_BOTS) ---{Style.RESET_ALL}")
 
             # ── 8. Bot G: Trend Following Multi-Asset ─────────────────────────
-            log(f"\n{Fore.CYAN}--- Bot G: Trend Following Multi-Asset ---{Style.RESET_ALL}")
-            state_g = run_trend_cycle(state_g, ohlcv_daily, macro)
-            save_trd(state_g)
-            log(
-                f"[G] Capital: {state_g['capital']:.2f}€ | "
-                f"Positions: {list(state_g['positions'].keys())} | "
-                f"Trades: {len(state_g['trades'])}"
-            )
+            if "g" in config.ACTIVE_BOTS:
+                log(f"\n{Fore.CYAN}--- Bot G: Trend Following Multi-Asset ---{Style.RESET_ALL}")
+                state_g = run_trend_cycle(state_g, ohlcv_daily, macro)
+                save_trd(state_g)
+                log(f"[G] Capital: {state_g['capital']:.2f}€ | Positions: {list(state_g['positions'].keys())} | Trades: {len(state_g['trades'])}")
+            else:
+                log(f"\n{Fore.CYAN}--- Bot G: désactivé (ACTIVE_BOTS) ---{Style.RESET_ALL}")
 
             # ── 12. Bot H: VCB Breakout ───────────────────────────────────────
-            log(f"\n{Fore.RED}--- Bot H: VCB Breakout ---{Style.RESET_ALL}")
-            state_h = run_vcb_cycle(state_h, ohlcv_4h, macro)
-            save_vcb(state_h)
-            log(
-                f"[H] Capital: {state_h['capital']:.2f}€ | "
-                f"Positions: {list(state_h['positions'].keys())} | "
-                f"Trades: {len(state_h['trades'])}"
-            )
+            if "h" in config.ACTIVE_BOTS:
+                log(f"\n{Fore.RED}--- Bot H: VCB Breakout ---{Style.RESET_ALL}")
+                state_h = run_vcb_cycle(state_h, ohlcv_4h, macro)
+                save_vcb(state_h)
+                log(f"[H] Capital: {state_h['capital']:.2f}€ | Positions: {list(state_h['positions'].keys())} | Trades: {len(state_h['trades'])}")
+            else:
+                log(f"\n{Fore.RED}--- Bot H: désactivé (ACTIVE_BOTS) ---{Style.RESET_ALL}")
 
             # ── 13. Bot I: RS Leaders ─────────────────────────────────────────
-            log(f"\n{Fore.CYAN}--- Bot I: RS Leaders ---{Style.RESET_ALL}")
-            state_i = run_rs_leaders_cycle(state_i, ohlcv_daily, macro)
-            save_rsl(state_i)
-            log(
-                f"[I] Capital: {state_i['capital']:.2f}€ | "
-                f"Positions: {list(state_i['positions'].keys())} | "
-                f"Trades: {len(state_i['trades'])}"
-            )
+            if "i" in config.ACTIVE_BOTS:
+                log(f"\n{Fore.CYAN}--- Bot I: RS Leaders ---{Style.RESET_ALL}")
+                state_i = run_rs_leaders_cycle(state_i, ohlcv_daily, macro)
+                save_rsl(state_i)
+                log(f"[I] Capital: {state_i['capital']:.2f}€ | Positions: {list(state_i['positions'].keys())} | Trades: {len(state_i['trades'])}")
+            else:
+                log(f"\n{Fore.CYAN}--- Bot I: désactivé (ACTIVE_BOTS) ---{Style.RESET_ALL}")
 
             # ── 14. Bot J: Mean Reversion ─────────────────────────────────────
-            log(f"\n{Fore.WHITE}--- Bot J: Mean Reversion ---{Style.RESET_ALL}")
-            state_j = run_mr_cycle(state_j, ohlcv_daily, macro)
-            save_mr(state_j)
-            log(
-                f"[J] Capital: {state_j['capital']:.2f}€ | "
-                f"Positions: {list(state_j['positions'].keys())} | "
-                f"Trades: {len(state_j['trades'])}"
-            )
+            if "j" in config.ACTIVE_BOTS:
+                log(f"\n{Fore.WHITE}--- Bot J: Mean Reversion ---{Style.RESET_ALL}")
+                state_j = run_mr_cycle(state_j, ohlcv_daily, macro)
+                save_mr(state_j)
+                log(f"[J] Capital: {state_j['capital']:.2f}€ | Positions: {list(state_j['positions'].keys())} | Trades: {len(state_j['trades'])}")
+            else:
+                log(f"\n{Fore.WHITE}--- Bot J: désactivé (ACTIVE_BOTS) ---{Style.RESET_ALL}")
 
             # ── 15. Contest summary ───────────────────────────────────────────
             print_contest_status(state_a, state_b, state_c, state_g, state_h, state_i, state_j, ohlcv_daily)

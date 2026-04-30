@@ -77,7 +77,9 @@ def run_backtest(symbol: str, timeframe: str = config.TIMEFRAME, days: int = con
 
         # ── Ouverture position ───────────────────────────────────────────────
         if position is None and capital > 0:
-            position_eur = max(config.POSITION_MIN_EUR, capital * config.POSITION_SIZE_PCT)
+            # Floor en % du capital initial (capital-agnostic)
+            floor_eur = config.INITIAL_CAPITAL_PER_BOT * config.POSITION_MIN_PCT
+            position_eur = max(floor_eur, capital * config.POSITION_SIZE_PCT)
 
             # Trend signal (prioritaire)
             if row["signal"] == 1:

@@ -439,7 +439,8 @@ def run_rs_leaders_cycle(state: dict, daily_cache: dict, macro_context: dict = N
     state["last_rebalance_date"] = str(date.today())
 
     total = _portfolio_value(state, daily_cache)
-    perf = (total - state["initial_capital"]) / state["initial_capital"] * 100
+    init_cap = state.get("initial_capital", 0) or 0
+    perf = ((total - init_cap) / init_cap * 100) if init_cap > 0 else 0.0
     log(
         f"Rebalancement terminé | Positions: {list(state['positions'].keys())} | "
         f"Capital libre: {state['capital']:.2f}€ | Perf: {perf:+.2f}%"

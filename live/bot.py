@@ -397,7 +397,10 @@ def process_symbol(
         else:
             positions_mtm = sum(p.get("entry", 0) * p.get("size", 0) for p in state.get("positions", {}).values())
         total_value = state["capital"] + positions_mtm
-        base_eur = max(config.POSITION_MIN_EUR, total_value * config.POSITION_SIZE_PCT)
+        # Floor en % du capital initial (capital-agnostic) plutôt qu'en € hardcodé
+        init_cap_for_floor = state.get("original_capital", state.get("initial_capital", config.INITIAL_CAPITAL_PER_BOT))
+        floor_eur = init_cap_for_floor * config.POSITION_MIN_PCT
+        base_eur = max(floor_eur, total_value * config.POSITION_SIZE_PCT)
         # Dynamic sizing : réduire les positions en drawdown (protection anti-ruin)
         init_cap = state.get("original_capital", state.get("initial_capital", config.PAPER_CAPITAL))
         if init_cap > 0:
@@ -493,7 +496,8 @@ def print_status(state: dict):
     total_value = state["capital"] + sum(
         p["entry"] * p["size"] for p in state["positions"].values()
     )
-    perf = (total_value - state["initial_capital"]) / state["initial_capital"] * 100
+    init_cap = state.get("initial_capital", 0) or 0
+    perf = ((total_value - init_cap) / init_cap * 100) if init_cap > 0 else 0.0
 
     if trades:
         log(
@@ -520,7 +524,8 @@ def _check_daily_snapshot(state: dict):
         p["entry"] * p["size"] for p in state["positions"].values()
     )
     win_rate = round(len(wins) / len(trades) * 100, 1) if trades else 0
-    pnl_pct = round((total_value - state["initial_capital"]) / state["initial_capital"] * 100, 2)
+    init_cap_snap = state.get("initial_capital", 0) or 0
+    pnl_pct = round((total_value - init_cap_snap) / init_cap_snap * 100, 2) if init_cap_snap > 0 else 0.0
 
     log_signal("DAILY_SNAPSHOT", "ALL", {
         "capital": round(state["capital"], 2),
@@ -571,7 +576,8 @@ def _check_max_drawdown(state: dict) -> bool:
     total_value = state["capital"] + sum(
         p["entry"] * p["size"] for p in state["positions"].values()
     )
-    drawdown = (total_value - state["initial_capital"]) / state["initial_capital"]
+    init_cap_dd = state.get("initial_capital", 0) or 0
+    drawdown = ((total_value - init_cap_dd) / init_cap_dd) if init_cap_dd > 0 else 0.0
     if drawdown <= config.MAX_DRAWDOWN:
         msg = f"MAX DRAWDOWN {drawdown*100:.1f}% — Bot arrêté (seuil {config.MAX_DRAWDOWN*100:.0f}%)"
         log(f"⛔ {msg}", "WARN")

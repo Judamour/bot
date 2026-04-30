@@ -66,7 +66,9 @@ ADX_THRESHOLD = 22  # ADX > 22 = tendance suffisante
 
 # ── Gestion du risque ───────────────────────────────────────────────────────
 POSITION_SIZE_PCT = 0.20  # 20% du total portfolio (cash + positions MTM) par position
-POSITION_MIN_EUR  = 20    # Plancher absolu (évite des positions ridicules)
+# Plancher position en % du capital (au lieu d'un montant € hardcodé)
+# Avec 91€ : floor = 4.5€ ; avec 10000€ : floor = 500€
+POSITION_MIN_PCT  = 0.05  # 5% du capital initial = floor relatif
 ATR_MULTIPLIER = 3.0     # Stop-loss = 3x ATR (trend following)
 TAKE_PROFIT_RATIO = 3.0  # (référence calcul, non utilisé en live — trailing stop)
 MAX_OPEN_TRADES = 10     # Maximum de trades ouverts simultanément (8 → 10 pour exploiter 16 symboles + sector=2)
@@ -85,6 +87,27 @@ SLIPPAGE     = 0.001    # 0.10% slippage moyen estimé
 # ── Paper trading ───────────────────────────────────────────────────────────
 PAPER_TRADING = os.getenv("PAPER_TRADING", "true").lower() == "true"
 PAPER_CAPITAL = float(os.getenv("PAPER_CAPITAL", "1000"))
+
+# ── Capital total bot (capital-agnostic) ────────────────────────────────────
+# Bot Z dispatche INITIAL_CAPITAL aux 4 sub-bots (A/B/C/G) selon engine actif.
+# En paper : 10000€ par défaut. En live : matche ton solde Kraken (.env).
+INITIAL_CAPITAL = float(os.getenv("INITIAL_CAPITAL", "10000"))
+INITIAL_CAPITAL_PER_BOT = float(os.getenv("INITIAL_CAPITAL_PER_BOT", str(INITIAL_CAPITAL / 10)))
+
+# ── Kill switch global (sécurité absolue, ferme tout au-delà) ───────────────
+# -10% par défaut. Active une fermeture forcée + freeze quand DD ≤ ce seuil.
+KILL_SWITCH_PCT = float(os.getenv("KILL_SWITCH_PCT", "-0.10"))
+
+# ── Min order Kraken (skip tentative si budget < seuil) ─────────────────────
+# Évite "insufficient funds" loops sur small capital
+MIN_ORDER_EUR = float(os.getenv("MIN_ORDER_EUR", "5.0"))
+
+# ── Bots actifs (autres = désactivés, ne tradent pas) ───────────────────────
+# Audit 55 jours paper : Bot A 33 trades, B 4, C/G/H/I/J 0 trades.
+# On garde les bots avec preuve d'activité ou utilité défensive (J = mean rev).
+# Bot G désactivé temporairement (à investiguer — backtest 70+ trades, live 0).
+# Override via env : ACTIVE_BOTS="a,j" ou "a,b,c,g,h,i,j" pour tous.
+ACTIVE_BOTS = [b.strip().lower() for b in os.getenv("ACTIVE_BOTS", "a,j").split(",") if b.strip()]
 
 # ── Données historiques pour backtest ──────────────────────────────────────
 BACKTEST_DAYS = 1095  # 3 ans d'historique pour une validation statistique solide

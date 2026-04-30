@@ -276,7 +276,8 @@ def run_mr_cycle(state: dict, daily_cache: dict, macro_context: dict = None) -> 
         if s in daily_cache and not daily_cache[s].empty
     )
     total = state["capital"] + total_pos_val
-    perf  = (total - state["initial_capital"]) / state["initial_capital"] * 100
+    init_cap = state.get("initial_capital", 0) or 0
+    perf  = ((total - init_cap) / init_cap * 100) if init_cap > 0 else 0.0
 
     _log(
         f"Positions: {list(state['positions'].keys()) or '—'} | "
