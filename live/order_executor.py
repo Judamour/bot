@@ -79,21 +79,21 @@ def validate_symbols(symbols: list) -> tuple:
         exchange = get_exchange(use_auth=False)
         markets = exchange.load_markets()
 
-        # Récupérer pairs xStocks via raw API : on indexe par wsname (ex "NVDAx/USD")
-        # pour récupérer la clé native Kraken (ex "NVDASPVUSD"), seule acceptée par AddOrder.
-        # NB : altname (ex "NVDAxUSD") apparaît aussi en clé mais est rejeté par AddOrder.
-        xstocks_ws_to_key: dict = {}
+        # Récupérer pairs xStocks via raw API. Kraken accepte l'altname (ex "NVDAxUSD")
+        # comme `pair` dans AddOrder à condition de fournir `aclass=tokenized_asset` au payload.
+        # On indexe par wsname (ex "NVDAx/USD") → altname pour le mapping config → API.
+        xstocks_ws_to_altname: dict = {}
         try:
             url = "https://api.kraken.com/0/public/AssetPairs?aclass=tokenized_asset"
             with urllib.request.urlopen(url, timeout=10) as r:
                 data = json.loads(r.read())
             for k, v in data.get("result", {}).items():
                 ws = v.get("wsname")
-                if not ws or v.get("status") != "online":
+                alt = v.get("altname")
+                if not ws or not alt or v.get("status") != "online":
                     continue
-                # Préfère la clé "SPV" (nom natif unique) à l'altname collision
-                if ws not in xstocks_ws_to_key or "SPV" in k:
-                    xstocks_ws_to_key[ws] = k
+                # L'altname est unique par wsname (ex NVDAxUSD pour NVDAx/USD).
+                xstocks_ws_to_altname[ws] = alt
         except Exception as e:
             logger.warning(f"[validate] Fetch xStocks pairs failed: {e}")
 
@@ -102,11 +102,11 @@ def validate_symbols(symbols: list) -> tuple:
             if sym in markets:
                 valid.append(sym)
                 _KRAKEN_PAIR_MAPPING[sym] = _kraken_pair(sym)
-            elif sym in xstocks_ws_to_key:
-                native_key = xstocks_ws_to_key[sym]
+            elif sym in xstocks_ws_to_altname:
+                alt = xstocks_ws_to_altname[sym]
                 valid.append(sym)
-                _KRAKEN_PAIR_MAPPING[sym] = native_key
-                logger.info(f"[validate] {sym} → bypass ccxt (xStock Kraken native: {native_key})")
+                _KRAKEN_PAIR_MAPPING[sym] = alt
+                logger.info(f"[validate] {sym} → bypass ccxt (xStock altname: {alt}, aclass=tokenized_asset)")
             else:
                 invalid.append(sym)
                 logger.warning(f"[validate] {sym} INTROUVABLE sur Kraken — exclu")
@@ -172,11 +172,16 @@ def _kraken_private_post(endpoint: str, params: dict) -> dict:
 
 
 def _execute_xstock_order(symbol: str, side: str, size: float, price_estimate: float) -> OrderResult:
-    """Place un ordre xStock via raw Kraken API (bypass ccxt)."""
+    """Place un ordre xStock via raw Kraken API (bypass ccxt).
+
+    Kraken exige `aclass=tokenized_asset` au payload pour résoudre la pair xStock —
+    sans ça, AddOrder répond `EQuery:Unknown asset pair`.
+    """
     pair = _KRAKEN_PAIR_MAPPING.get(symbol, _kraken_pair(symbol))
     try:
         result = _kraken_private_post("AddOrder", {
             "pair": pair,
+            "aclass": "tokenized_asset",
             "type": side,
             "ordertype": "market",
             "volume": str(size),
