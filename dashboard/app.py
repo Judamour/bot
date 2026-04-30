@@ -30,35 +30,14 @@ _BOT_PATHS = {
     "i": os.path.join(BASE_DIR, "logs", "rs_leaders", "state.json"),
     "j": os.path.join(BASE_DIR, "logs", "mean_reversion", "state.json"),
 }
-_BOT_NAMES  = {"a": "Supertrend+MR", "b": "Momentum", "c": "Breakout", "g": "Trend Multi-Asset", "h": "VCB Breakout", "i": "RS Leaders", "j": "Mean Reversion", "k": "GPT-5.4 (bot-claw)"}
+_BOT_NAMES  = {"a": "Supertrend+MR", "b": "Momentum", "c": "Breakout", "g": "Trend Multi-Asset", "h": "VCB Breakout", "i": "RS Leaders", "j": "Mean Reversion"}
 _BOT_COLORS = {"a": "#58a6ff", "b": "#3fb950", "c": "#ffa657", "g": "#39d353", "h": "#e06c75", "i": "#79c0ff", "j": "#b3d9ff", "k": "#f0883e"}
-BOT_CLAW_API = "http://127.0.0.1:5001/api/status"
 _BOT_Z_FILE = os.path.join(BASE_DIR, "logs", "bot_z", "state.json")
 MULTI_LOG   = os.path.join(BASE_DIR, "logs", "multi_runner.log")
-MULTI_INITIAL_CAPITAL = 1000.0
-CLAW_DISPLAY_FILE = os.path.join(BASE_DIR, "logs", "claw_display.json")
-CLAW_CANVAS_FILE  = os.path.join(BASE_DIR, "logs", "claw_canvas.html")
-CLAW_PUBLISH_TOKEN = os.getenv("CLAW_PUBLISH_TOKEN", "claw-token-change-me")
+MULTI_INITIAL_CAPITAL = config.INITIAL_CAPITAL_PER_BOT
 
 
 def load_bot_state(bot_id: str) -> dict:
-    # Bot K = bot-claw, état via API locale port 5001
-    if bot_id == "k":
-        try:
-            import urllib.request
-            with urllib.request.urlopen(BOT_CLAW_API, timeout=2) as r:
-                data = json.loads(r.read())
-            return {
-                "capital":         data.get("capital", 10000.0),
-                "positions":       data.get("positions", {}),
-                "trades":          data.get("trades", []),
-                "initial_capital": 10000.0,
-                "last_run_at":     data.get("last_run_at", ""),
-            }
-        except Exception:
-            pass
-        return {"capital": 10000.0, "positions": {}, "trades": [], "initial_capital": 10000.0}
-
     path = _BOT_PATHS.get(bot_id)
     # Fallback to legacy path for Bot A
     if bot_id == "a" and (not path or not os.path.exists(path)):
@@ -594,196 +573,6 @@ def api_trades():
     })
 
 
-@app.route("/api/openclaw")
-def api_openclaw():
-    """Résumé compact pour OpenClaw — lecture seule, toutes données clés."""
-    # Bot Z
-    z_state = {}
-    if os.path.exists(_BOT_Z_FILE):
-        try:
-            with open(_BOT_Z_FILE) as f:
-                z_state = json.load(f)
-        except Exception:
-            pass
-
-    budget_file = os.path.join(BASE_DIR, "logs", "bot_z", "budget.json")
-    budget = {}
-    if os.path.exists(budget_file):
-        try:
-            with open(budget_file) as f:
-                budget = json.load(f).get("budget", {})
-        except Exception:
-            pass
-
-    z_capital = z_state.get("z_capital", 10000.0)
-    initial   = z_state.get("initial_capital", 10000.0)
-    engine    = z_state.get("current_engine", "UNKNOWN")
-    perf_pct  = round((z_capital - initial) / initial * 100, 2) if initial else 0
-
-    # Sub-bots A/B/C/G
-    bots_summary = []
-    for bot_id in ["a", "b", "c", "g", "h", "i", "k"]:
-        state   = load_bot_state(bot_id)
-        metrics = compute_metrics(state, _live_prices)
-        positions = []
-        for pos in metrics["positions"]:
-            positions.append(f"{pos['symbol']} {pos['pnl_pct']:+.1f}%")
-        bots_summary.append({
-            "id":           bot_id.upper(),
-            "name":         _BOT_NAMES.get(bot_id, bot_id),
-            "capital_eur":  metrics["capital"],
-            "total_eur":    metrics["total_value"],
-            "pnl_pct":      metrics["pnl_pct"],
-            "pnl_eur":      metrics["pnl_eur"],
-            "open_trades":  metrics["open_trades"],
-            "total_trades": metrics["total_trades"],
-            "win_rate":     metrics["win_rate"],
-            "positions":    positions,
-            "budget_eur":   budget.get(bot_id, 0),
-        })
-
-    return jsonify({
-        "timestamp":    datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC"),
-        "paper_mode":   config.PAPER_TRADING,
-        "bot_z": {
-            "capital_eur": round(z_capital, 2),
-            "initial_eur": round(initial, 2),
-            "pnl_pct":     perf_pct,
-            "pnl_eur":     round(z_capital - initial, 2),
-            "engine":      engine,
-            "drawdown_pct": z_state.get("port_dd", 0),
-            "cb_factor":   z_state.get("cb_factor", 1.0),
-            "days_running": z_state.get("days_running", 0),
-            "vix":         z_state.get("last_regime_info", {}).get("vix", _vix_cache),
-            "regime":      z_state.get("last_regime", "RANGE"),
-            "warnings":    z_state.get("last_warnings", []),
-        },
-        "bots":          bots_summary,
-        "fear_greed":    _fear_greed_cache,
-    })
-
-
-@app.route("/api/claw/content")
-def api_claw_content():
-    """Retourne le contenu publié par OpenClaw (whiteboard)."""
-    if os.path.exists(CLAW_DISPLAY_FILE):
-        try:
-            with open(CLAW_DISPLAY_FILE) as f:
-                return jsonify(json.load(f))
-        except Exception:
-            pass
-    return jsonify({"blocks": [], "last_updated": None})
-
-
-@app.route("/api/claw/publish", methods=["POST"])
-def api_claw_publish():
-    """OpenClaw publie du contenu à afficher dans l'onglet Claw.
-
-    Auth : header X-Claw-Token
-    Body JSON :
-    {
-        "title": "Analyse marché",
-        "blocks": [
-            {"type": "markdown", "content": "## BTC\n..."},
-            {"type": "table",    "headers": ["Bot","PnL"], "rows": [["A","+3%"]]},
-            {"type": "alert",    "level": "warning", "content": "VIX élevé"},
-            {"type": "metric",   "label": "Capital Z", "value": "10 042€", "delta": "+0.4%"}
-        ]
-    }
-    """
-    token = request.headers.get("X-Claw-Token", "")
-    if token != CLAW_PUBLISH_TOKEN:
-        return jsonify({"error": "unauthorized"}), 401
-
-    data = request.get_json(silent=True) or {}
-    payload = {
-        "title":        data.get("title", "Claw Analysis"),
-        "blocks":       data.get("blocks", []),
-        "last_updated": datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC"),
-        "author":       data.get("author", "OpenClaw"),
-    }
-
-    tmp = CLAW_DISPLAY_FILE + ".tmp"
-    with open(tmp, "w") as f:
-        json.dump(payload, f, indent=2, ensure_ascii=False)
-    os.replace(tmp, CLAW_DISPLAY_FILE)
-
-    socketio.emit("claw_update", payload)
-    return jsonify({"status": "ok", "blocks": len(payload["blocks"])})
-
-
-@app.route("/claw/canvas")
-def claw_canvas():
-    """Sert la page HTML publiée par OpenClaw (canvas libre)."""
-    from flask import Response
-    if os.path.exists(CLAW_CANVAS_FILE):
-        with open(CLAW_CANVAS_FILE, encoding="utf-8") as f:
-            return Response(f.read(), mimetype="text/html")
-    return Response("""<!DOCTYPE html><html><head>
-<meta charset="utf-8">
-<style>
-  body{margin:0;background:#0d1117;color:#8b949e;font-family:system-ui,sans-serif;
-       display:flex;align-items:center;justify-content:center;height:100vh;text-align:center}
-  h2{color:#58a6ff;margin-bottom:12px}
-  code{background:#161b22;padding:4px 10px;border-radius:6px;font-size:13px}
-</style></head><body>
-<div>
-  <h2>🦞 Canvas vide</h2>
-  <p>Demandez à OpenClaw de construire une interface ici.</p>
-  <p><code>POST /api/claw/canvas</code></p>
-</div>
-</body></html>""", mimetype="text/html")
-
-
-@app.route("/api/claw/canvas/status")
-def api_claw_canvas_status():
-    exists = os.path.exists(CLAW_CANVAS_FILE)
-    updated = ""
-    if exists:
-        mtime = os.path.getmtime(CLAW_CANVAS_FILE)
-        updated = datetime.utcfromtimestamp(mtime).strftime("%Y-%m-%d %H:%M UTC")
-    return jsonify({"has_content": exists, "updated": updated})
-
-
-@app.route("/api/claw/canvas", methods=["HEAD", "POST"])
-def api_claw_canvas():
-    """OpenClaw publie une page HTML complète dans le canvas.
-
-    Auth : header X-Claw-Token
-    Body : HTML brut (Content-Type: text/html)
-        OU JSON : {"html": "...", "title": "..."}
-    """
-    if request.method == "HEAD":
-        from flask import Response as _Resp
-        exists = os.path.exists(CLAW_CANVAS_FILE)
-        headers = {"X-Canvas-Empty": "false" if exists else "true"}
-        if exists:
-            mtime = os.path.getmtime(CLAW_CANVAS_FILE)
-            headers["X-Canvas-Updated"] = datetime.utcfromtimestamp(mtime).strftime("%Y-%m-%d %H:%M UTC")
-        return _Resp("", status=200, headers=headers)
-
-    token = request.headers.get("X-Claw-Token", "")
-    if token != CLAW_PUBLISH_TOKEN:
-        return jsonify({"error": "unauthorized"}), 401
-
-    content_type = request.content_type or ""
-    if "application/json" in content_type:
-        data = request.get_json(silent=True) or {}
-        html = data.get("html", "")
-    else:
-        html = request.get_data(as_text=True)
-
-    if not html.strip():
-        return jsonify({"error": "empty html"}), 400
-
-    tmp = CLAW_CANVAS_FILE + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        f.write(html)
-    os.replace(tmp, CLAW_CANVAS_FILE)
-
-    socketio.emit("canvas_update", {"ts": datetime.utcnow().isoformat()})
-    return jsonify({"status": "ok", "size": len(html)})
-
 
 @app.route("/api/alerts")
 def api_alerts():
@@ -982,7 +771,7 @@ def background_thread():
 @app.route("/api/exposure")
 def api_exposure():
     """Exposition agrégée par secteur à travers tous les bots."""
-    ALL_BOTS = list(_BOT_PATHS.keys()) + ["k"]
+    ALL_BOTS = list(_BOT_PATHS.keys())
     sectors = {}
     total_exposure = 0.0
     total_initial = 0.0
@@ -991,8 +780,6 @@ def api_exposure():
         try:
             state = load_bot_state(bot_id)
             initial = state.get("initial_capital", MULTI_INITIAL_CAPITAL)
-            if bot_id == "k":
-                initial = 10000.0
             total_initial += initial
             positions = state.get("positions", {})
             for symbol, pos in positions.items():
