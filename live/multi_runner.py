@@ -371,10 +371,17 @@ def run():
                         except Exception:
                             pass
 
-                    state_a = _apply_z_budget(state_a, z_budget_alloc.get("a", INITIAL_CAPITAL_PER_BOT))
-                    state_b = _apply_z_budget(state_b, z_budget_alloc.get("b", INITIAL_CAPITAL_PER_BOT))
-                    state_c = _apply_z_budget(state_c, z_budget_alloc.get("c", INITIAL_CAPITAL_PER_BOT))
-                    state_g = _apply_z_budget(state_g, z_budget_alloc.get("g", INITIAL_CAPITAL_PER_BOT))
+                    # Default 0 (pas INITIAL_CAPITAL_PER_BOT) : si bot pas dans VALID_BOTS,
+                    # il ne reçoit pas le capital initial par défaut → pas de capital fantôme.
+                    # _apply_z_budget skip si budget=0 (via flag _below_min_order).
+                    if "a" in config.ACTIVE_BOTS:
+                        state_a = _apply_z_budget(state_a, z_budget_alloc.get("a", 0))
+                    if "b" in config.ACTIVE_BOTS:
+                        state_b = _apply_z_budget(state_b, z_budget_alloc.get("b", 0))
+                    if "c" in config.ACTIVE_BOTS:
+                        state_c = _apply_z_budget(state_c, z_budget_alloc.get("c", 0))
+                    if "g" in config.ACTIVE_BOTS:
+                        state_g = _apply_z_budget(state_g, z_budget_alloc.get("g", 0))
 
                     # Sauvegarder immédiatement : persistance même si un bot crashe ensuite
                     save_state_a(state_a)
