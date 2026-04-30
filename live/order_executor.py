@@ -233,61 +233,75 @@ def _wait_for_fill(exchange, symbol: str, order_id: str, max_wait_sec: int) -> d
 
 def check_balance() -> float:
     """
-    Récupère le solde EUR réel du compte Kraken.
-    Utile au démarrage en mode live pour vérifier la connexion et le capital disponible.
+    Récupère le solde de la devise de référence (USD ou EUR) du compte Kraken.
+    Auto-détecte la devise selon config.SYMBOLS (premier pair).
 
     Returns:
-        Solde EUR disponible, ou 0.0 si erreur.
-    """
-    if config.PAPER_TRADING:
-        return 0.0  # Non pertinent en paper
-
-    try:
-        exchange = get_exchange(use_auth=True)
-        balance = exchange.fetch_balance()
-        eur = float(balance.get("EUR", {}).get("free", 0))
-        logger.info(f"[ORDER] Solde Kraken : {eur:.2f}€ disponibles")
-        return eur
-    except Exception as e:
-        logger.error(f"[ORDER] check_balance ÉCHOUÉ: {e}")
-        notify(f"⛔ <b>Kraken check_balance ÉCHOUÉ</b>\nErreur: {e}\n"
-               f"Vérifier les clés API et la connexion réseau.")
-        return -1.0  # Sentinel : erreur de connexion (≠ 0 qui est valide si tout en positions)
-
-
-def check_total_value_eur() -> float:
-    """
-    Valeur totale du compte (EUR free + valeur des positions converties en EUR).
-    Permet de redémarrer le bot après crash même si tout le cash est alloué en positions.
-
-    Returns:
-        Valeur totale estimée, ou -1.0 si erreur de connexion.
+        Solde disponible dans la devise de quote, -1.0 si erreur connexion.
     """
     if config.PAPER_TRADING:
         return 0.0
 
+    # Détecte devise de quote depuis le 1er symbole de config
+    quote_ccy = "USD"
+    if config.SYMBOLS:
+        first = config.SYMBOLS[0]
+        if "/" in first:
+            quote_ccy = first.split("/")[1]
+
     try:
         exchange = get_exchange(use_auth=True)
         balance = exchange.fetch_balance()
-        total = float(balance.get("EUR", {}).get("total", 0))
+        amount = float(balance.get(quote_ccy, {}).get("free", 0))
+        logger.info(f"[ORDER] Solde Kraken : {amount:.2f} {quote_ccy} disponibles")
+        return amount
+    except Exception as e:
+        logger.error(f"[ORDER] check_balance ÉCHOUÉ: {e}")
+        notify(f"⛔ <b>Kraken check_balance ÉCHOUÉ</b>\nErreur: {e}\n"
+               f"Vérifier les clés API et la connexion réseau.")
+        return -1.0
 
-        # Convertir chaque position en valeur EUR via ticker
+
+def check_total_value() -> float:
+    """
+    Valeur totale du compte (cash + positions converties dans la devise de référence).
+    Permet de redémarrer après crash même si tout est alloué en positions.
+
+    Returns:
+        Valeur totale, -1.0 si erreur connexion.
+    """
+    if config.PAPER_TRADING:
+        return 0.0
+
+    quote_ccy = "USD"
+    if config.SYMBOLS and "/" in config.SYMBOLS[0]:
+        quote_ccy = config.SYMBOLS[0].split("/")[1]
+
+    try:
+        exchange = get_exchange(use_auth=True)
+        balance = exchange.fetch_balance()
+        total = float(balance.get(quote_ccy, {}).get("total", 0))
+
         for asset, info in balance.items():
-            if asset in ("EUR", "info", "free", "used", "total", "timestamp", "datetime"):
+            if asset in (quote_ccy, "info", "free", "used", "total", "timestamp", "datetime"):
                 continue
             qty = float(info.get("total", 0)) if isinstance(info, dict) else 0
             if qty <= 0.0001:
                 continue
             try:
-                ticker = exchange.fetch_ticker(f"{asset}/EUR")
+                ticker = exchange.fetch_ticker(f"{asset}/{quote_ccy}")
                 last = float(ticker.get("last") or ticker.get("close") or 0)
                 total += qty * last
             except Exception:
-                logger.warning(f"[ORDER] Impossible de valoriser {asset} en EUR")
+                logger.warning(f"[ORDER] Impossible de valoriser {asset} en {quote_ccy}")
         return total
     except Exception as e:
-        logger.error(f"[ORDER] check_total_value_eur ÉCHOUÉ: {e}")
+        logger.error(f"[ORDER] check_total_value ÉCHOUÉ: {e}")
         return -1.0
+
+
+# Aliases pour rétrocompat
+check_total_value_eur = check_total_value
 
 
 def reconcile_positions(state: dict, bot_id: str) -> dict:
@@ -354,23 +368,28 @@ def startup_check() -> bool:
     logger.info("[ORDER] === DÉMARRAGE EN MODE LIVE — vérifications ===")
     notify("🟡 <b>Bot Trading LIVE</b> — démarrage en cours...\nVérifications en cours...")
 
-    # 1. Vérifier la connexion (erreur réseau/auth → return -1, EUR=0 acceptable si positions)
-    balance_eur = check_balance()
-    if balance_eur < 0:
+    # Détecte devise de quote
+    quote_ccy = "USD"
+    if config.SYMBOLS and "/" in config.SYMBOLS[0]:
+        quote_ccy = config.SYMBOLS[0].split("/")[1]
+
+    # 1. Connexion + balance cash
+    cash = check_balance()
+    if cash < 0:
         notify("⛔ <b>LIVE STARTUP ÉCHOUÉ</b>\nConnexion Kraken impossible.\nBot arrêté.")
         return False
 
-    # 2. Si EUR free = 0, vérifier qu'il y a des positions (cas redémarrage avec capital alloué)
-    if balance_eur == 0:
-        total = check_total_value_eur()
+    # 2. Si cash = 0, vérifier positions
+    if cash == 0:
+        total = check_total_value()
         if total <= 0:
-            notify("⛔ <b>LIVE STARTUP ÉCHOUÉ</b>\nCompte vide (0 EUR + 0 positions).\nBot arrêté.")
+            notify(f"⛔ <b>LIVE STARTUP ÉCHOUÉ</b>\nCompte vide (0 {quote_ccy} + 0 positions).\nBot arrêté.")
             return False
-        logger.info(f"[ORDER] EUR free=0 mais positions valorisées à {total:.2f}€ — démarrage OK")
-        notify(f"✅ <b>Connexion Kraken OK</b>\nEUR libre: 0€ | Total compte: <b>{total:.2f}€</b>\n"
+        logger.info(f"[ORDER] {quote_ccy} free=0 mais positions valorisées à {total:.2f} {quote_ccy} — démarrage OK")
+        notify(f"✅ <b>Connexion Kraken OK</b>\n{quote_ccy} libre: 0 | Total compte: <b>{total:.2f} {quote_ccy}</b>\n"
                f"(capital alloué en positions)")
         return True
 
-    logger.info(f"[ORDER] ✓ Solde Kraken: {balance_eur:.2f}€")
-    notify(f"✅ <b>Connexion Kraken OK</b>\nSolde disponible: <b>{balance_eur:.2f}€</b>")
+    logger.info(f"[ORDER] ✓ Solde Kraken: {cash:.2f} {quote_ccy}")
+    notify(f"✅ <b>Connexion Kraken OK</b>\nSolde disponible: <b>{cash:.2f} {quote_ccy}</b>")
     return True
