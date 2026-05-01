@@ -267,17 +267,18 @@ def execute_buy(symbol: str, size: float, price_estimate: float,
     Returns:
         OrderResult avec filled_size et filled_price réels (live) ou simulés (paper)
     """
-    if config.PAPER_TRADING:
-        # Simulation : slippage appliqué sur le prix estimé
-        effective_price = price_estimate * (1 + config.SLIPPAGE)
-        return OrderResult(success=True, order_id="PAPER", filled_size=size,
-                           filled_price=effective_price)
-
-    # ── Routing : stocks Alpaca ─────────────────────────────────────────────
-    # Stocks (NVDA, GOOGL, ...) → Alpaca. Cryptos (BTC/USD, ...) → Kraken.
+    # ── Routing : stocks Alpaca (avant le check PAPER_TRADING global) ───────
+    # Stocks (NVDA, GOOGL, ...) → Alpaca (paper/live selon APCA_API_BASE_URL,
+    # indépendant de config.PAPER_TRADING). Cryptos (BTC/USD, ...) → Kraken.
     from live import alpaca_executor
     if alpaca_executor.is_alpaca_stock(symbol):
         return alpaca_executor.execute_buy(symbol, size, price_estimate, max_wait_sec)
+
+    if config.PAPER_TRADING:
+        # Kraken paper : simulation sans appel API
+        effective_price = price_estimate * (1 + config.SLIPPAGE)
+        return OrderResult(success=True, order_id="PAPER", filled_size=size,
+                           filled_price=effective_price)
 
     # ── LIVE Kraken ──
     # Pré-check : symbole validé au démarrage ?
@@ -358,15 +359,15 @@ def execute_sell(symbol: str, size: float, price_estimate: float,
         reason: Raison de l'exit (stop_loss, signal_exit, trailing_stop...)
         max_wait_sec: Délai maximum d'attente
     """
+    # ── Routing : stocks Alpaca (avant PAPER_TRADING global) ───────────────
+    from live import alpaca_executor
+    if alpaca_executor.is_alpaca_stock(symbol):
+        return alpaca_executor.execute_sell(symbol, size, price_estimate, reason, max_wait_sec)
+
     if config.PAPER_TRADING:
         effective_price = price_estimate * (1 - config.SLIPPAGE)
         return OrderResult(success=True, order_id="PAPER", filled_size=size,
                            filled_price=effective_price)
-
-    # ── Routing : stocks Alpaca ─────────────────────────────────────────────
-    from live import alpaca_executor
-    if alpaca_executor.is_alpaca_stock(symbol):
-        return alpaca_executor.execute_sell(symbol, size, price_estimate, reason, max_wait_sec)
 
     # ── LIVE Kraken ──
     if _VALID_SYMBOLS_CACHE and symbol not in _VALID_SYMBOLS_CACHE:

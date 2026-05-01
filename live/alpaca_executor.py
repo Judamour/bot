@@ -107,10 +107,9 @@ def _request(method: str, path: str, body: dict = None, timeout: int = 30) -> di
 def check_balance() -> float:
     """
     Cash USD disponible sur le compte Alpaca (paper ou live selon APCA_API_BASE_URL).
+    Indépendant de config.PAPER_TRADING : Alpaca a son propre paper via URL.
     Returns -1.0 si erreur connexion.
     """
-    if config.PAPER_TRADING:
-        return 0.0
     try:
         acct = _request("GET", "/v2/account")
         cash = float(acct.get("cash", 0))
@@ -176,14 +175,11 @@ def execute_buy(symbol: str, size: float, price_estimate: float,
                 max_wait_sec: int = 30) -> OrderResult:
     """
     Place un ordre BUY market sur Alpaca.
-    En PAPER_TRADING (config) : no-op simulé. Pour utiliser le paper Alpaca, mettre
-    PAPER_TRADING=false et APCA_API_BASE_URL=https://paper-api.alpaca.markets.
-    """
-    if config.PAPER_TRADING:
-        effective_price = price_estimate * (1 + config.SLIPPAGE)
-        return OrderResult(success=True, order_id="PAPER", filled_size=size,
-                           filled_price=effective_price)
 
+    Note : Alpaca a son propre mode paper/live via APCA_API_BASE_URL — on ignore
+    config.PAPER_TRADING (qui ne concerne que Kraken). Si l'URL pointe sur
+    paper-api.alpaca.markets, c'est de l'argent virtuel ; sinon c'est du live.
+    """
     if _VALID_ALPACA_SYMBOLS and symbol not in _VALID_ALPACA_SYMBOLS:
         logger.warning(f"[ALPACA] BUY {symbol} skip — symbole non validé")
         return OrderResult(success=False, error="symbol_not_supported")
@@ -226,12 +222,7 @@ def execute_buy(symbol: str, size: float, price_estimate: float,
 
 def execute_sell(symbol: str, size: float, price_estimate: float,
                  reason: str = "exit", max_wait_sec: int = 30) -> OrderResult:
-    """Place un ordre SELL market sur Alpaca."""
-    if config.PAPER_TRADING:
-        effective_price = price_estimate * (1 - config.SLIPPAGE)
-        return OrderResult(success=True, order_id="PAPER", filled_size=size,
-                           filled_price=effective_price)
-
+    """Place un ordre SELL market sur Alpaca. Voir execute_buy pour le mode paper/live."""
     if _VALID_ALPACA_SYMBOLS and symbol not in _VALID_ALPACA_SYMBOLS:
         logger.warning(f"[ALPACA] SELL {symbol} skip — symbole non validé")
         return OrderResult(success=False, error="symbol_not_supported")
@@ -275,9 +266,7 @@ def execute_sell(symbol: str, size: float, price_estimate: float,
 # ── Startup check ────────────────────────────────────────────────────────────
 
 def startup_check() -> bool:
-    """Sanity check au démarrage : connexion + status compte."""
-    if config.PAPER_TRADING:
-        return True
+    """Sanity check au démarrage : connexion + status compte. Indépendant de PAPER_TRADING."""
     try:
         acct = _request("GET", "/v2/account")
         if acct.get("trading_blocked") or acct.get("account_blocked"):
