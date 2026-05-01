@@ -861,14 +861,16 @@ def _notify_position_changes(all_states: dict, prev_positions: dict, engine: str
 
 # ── Cycle principal ──────────────────────────────────────────────────────────
 
-def run_bot_z_cycle(macro: dict, ohlcv: dict = None) -> dict:
+def run_bot_z_cycle(macro: dict, ohlcv: dict = None, broker_equity: float = None) -> dict:
     """
     Exécute un cycle Bot Z Meta v2 (paper trading production).
 
     Args:
-        macro  : données macro (vix, qqq_regime_ok, btc_context, ...)
-        ohlcv  : dict {symbol: DataFrame} pour mark-to-market réel des positions.
-                 Si None, fallback au prix d'entrée (conservatif mais inexact).
+        macro          : données macro (vix, qqq_regime_ok, btc_context, ...)
+        ohlcv          : dict {symbol: DataFrame} pour mark-to-market réel des positions.
+                         Si None, fallback au prix d'entrée (conservatif mais inexact).
+        broker_equity  : equity broker live (Alpaca). Si fourni et drift z_capital > 30%,
+                         z_capital est resync (anti-drift cumulatif).
 
     Retourne le résumé du cycle pour logging et dashboard.
     """
@@ -970,6 +972,20 @@ def run_bot_z_cycle(macro: dict, ohlcv: dict = None) -> dict:
             weighted_return = sum_curr / sum_prev - 1  # retour réel sur la période manquée
 
     new_z_capital   = max(0.0, z_capital * (1 + weighted_return))
+
+    # ── Anti-drift broker : si broker_equity fourni et drift > 30%, force resync ──
+    # Évite la dérive cumulée des bot_values mark-to-market (ex : Bot C à 39M$
+    # sans avoir tradé). Source de vérité = compte broker live.
+    if broker_equity is not None and broker_equity > 0 and new_z_capital > 0:
+        drift_z = abs(new_z_capital / broker_equity - 1)
+        if drift_z > 0.30:
+            print(
+                f"[BOT Z] DRIFT BROKER: z_capital={new_z_capital:.0f}$ vs broker={broker_equity:.0f}$ "
+                f"({(new_z_capital/broker_equity-1)*100:+.0f}%) → resync sur broker"
+            )
+            new_z_capital = broker_equity
+            # Reset cb_peak au broker pour ne pas garder un peak fantôme
+            state["cb_peak"] = broker_equity
 
     cb_peak   = max(state.get("cb_peak", INITIAL_CAP), new_z_capital)
     cb_factor = state.get("cb_factor", 1.0)

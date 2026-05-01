@@ -212,6 +212,134 @@ def print_contest_status(state_a: dict, state_b: dict, state_c: dict,
     print(f"{Fore.CYAN}{'='*72}{Style.RESET_ALL}\n")
 
 
+# ── Broker capital sync (boot + chaque cycle) ────────────────────────────────
+
+DRIFT_REALIGN_THRESHOLD = 0.30  # 30% : au-delà, hard-realign capital sub-bots
+
+
+def _fetch_broker_equity() -> float | None:
+    """Fetch equity Alpaca (paper ou live). Retourne None si Alpaca off ou échec."""
+    try:
+        if getattr(config, "ALPACA_ENABLED", False):
+            from live import alpaca_executor as _ax
+            acct = _ax._request("GET", "/v2/account")
+            return float(acct.get("equity") or acct.get("cash") or 0)
+    except Exception as e:
+        log(f"⚠ Fetch broker equity échec: {e}", "WARN")
+    return None
+
+
+def _states_total_value(states: list[dict], ohlcv_cache: dict | None = None) -> float:
+    """Somme cash + positions (mark-to-market si OHLCV dispo, sinon entry price)."""
+    total = 0.0
+    for s in states:
+        if not isinstance(s, dict):
+            continue
+        total += float(s.get("capital", 0) or 0)
+        for sym, p in s.get("positions", {}).items():
+            entry = float(p.get("entry", 0) or 0)
+            size  = float(p.get("size", 0) or 0)
+            price = entry
+            if ohlcv_cache and sym in ohlcv_cache:
+                try:
+                    df = ohlcv_cache[sym]
+                    if df is not None and not df.empty:
+                        live = float(df["close"].iloc[-1])
+                        import math
+                        if not math.isnan(live) and live > 0:
+                            price = live
+                except Exception:
+                    pass
+            total += price * size
+    return total
+
+
+def _sync_broker_capital_periodic(active_states: list[tuple[str, dict]],
+                                  ohlcv_cache: dict | None = None) -> tuple[float | None, bool]:
+    """
+    Re-fetch broker equity, log drift vs sum(states). Si drift > seuil, hard-realign.
+    Retourne (broker_equity, realigned).
+    """
+    global INITIAL_CAPITAL_PER_BOT
+    broker_equity = _fetch_broker_equity()
+    if not broker_equity or broker_equity <= 0:
+        return None, False
+
+    states = [s for _, s in active_states]
+    sum_states = _states_total_value(states, ohlcv_cache)
+    if sum_states <= 0:
+        return broker_equity, False
+
+    drift_ratio = sum_states / broker_equity - 1
+    drift_pct   = abs(drift_ratio) * 100
+    log(f"[CAPITAL_SYNC] broker={broker_equity:.0f}$ states_sum={sum_states:.0f}$ "
+        f"drift={drift_ratio*100:+.1f}%", "INFO")
+
+    if drift_pct <= DRIFT_REALIGN_THRESHOLD * 100:
+        # Drift acceptable : on garde les capitals des bots (contest dynamique préservé)
+        # mais on met à jour la cible per-bot pour les fresh states / nouveaux trades
+        active_count = max(len(active_states), 1)
+        config.INITIAL_CAPITAL = broker_equity
+        config.INITIAL_CAPITAL_PER_BOT = round(broker_equity / active_count, 2)
+        INITIAL_CAPITAL_PER_BOT = config.INITIAL_CAPITAL_PER_BOT
+        return broker_equity, False
+
+    # ── DRIFT > seuil : hard realign ──
+    # En LIVE, on n'écrase JAMAIS les capitals automatiquement (un drift peut être
+    # un dépôt/retrait broker légitime, ou positions fantômes alarmantes).
+    if not config.PAPER_TRADING:
+        log(f"⚠️ DRIFT {drift_pct:.0f}% détecté en LIVE — réalignement automatique DÉSACTIVÉ", "WARN")
+        try:
+            from live.notifier import notify
+            notify(f"🚨 <b>DRIFT CAPITAL DÉTECTÉ (LIVE)</b>\n"
+                   f"Broker : {broker_equity:.0f}$\n"
+                   f"States : {sum_states:.0f}$ ({drift_ratio*100:+.1f}%)\n"
+                   f"Réalignement manuel requis.")
+        except Exception:
+            pass
+        return broker_equity, False
+
+    # Paper : hard-realign. Capital dispo = broker_equity / N - valeur positions ouvertes.
+    active_count = max(len(active_states), 1)
+    per_bot = broker_equity / active_count
+    log(f"⚠️ DRIFT {drift_pct:.0f}% > {DRIFT_REALIGN_THRESHOLD*100:.0f}% → HARD REALIGN "
+        f"chaque bot à {per_bot:.0f}$", "WARN")
+    for label, st in active_states:
+        positions_value = 0.0
+        for sym, p in st.get("positions", {}).items():
+            price = float(p.get("entry", 0) or 0)
+            if ohlcv_cache and sym in ohlcv_cache:
+                try:
+                    df = ohlcv_cache[sym]
+                    if df is not None and not df.empty:
+                        live = float(df["close"].iloc[-1])
+                        import math
+                        if not math.isnan(live) and live > 0:
+                            price = live
+                except Exception:
+                    pass
+            positions_value += price * float(p.get("size", 0) or 0)
+        new_cash = max(0.0, per_bot - positions_value)
+        old_cap  = st.get("capital", 0)
+        st["capital"]         = round(new_cash, 2)
+        st["initial_capital"] = round(per_bot, 2)
+        log(f"[REALIGN] Bot {label} : capital {old_cap:.0f}$ → {new_cash:.0f}$ "
+            f"(positions {positions_value:.0f}$)")
+    config.INITIAL_CAPITAL = broker_equity
+    config.INITIAL_CAPITAL_PER_BOT = round(per_bot, 2)
+    INITIAL_CAPITAL_PER_BOT = config.INITIAL_CAPITAL_PER_BOT
+
+    try:
+        from live.notifier import notify
+        notify(f"⚠️ <b>DRIFT CAPITAL CORRIGÉ (paper)</b>\n"
+               f"Broker : {broker_equity:.0f}$\n"
+               f"States avant : {sum_states:.0f}$ ({drift_ratio*100:+.1f}%)\n"
+               f"Bots réalignés à {per_bot:.0f}$ chacun.")
+    except Exception:
+        pass
+    return broker_equity, True
+
+
 # ── Timing ───────────────────────────────────────────────────────────────────
 
 def _next_cycle_utc() -> datetime:
@@ -373,10 +501,26 @@ def run():
             macro["breadth"] = breadth_data["breadth"]
             log(f"Breadth: {breadth_data['breadth']*100:.0f}% ({breadth_data['symbols_above']}/{breadth_data['symbols_total']} > SMA200)")
 
+            # ── 3b. Re-sync capital broker à chaque cycle (anti-drift) ────────
+            _active_for_sync = []
+            if "a" in config.ACTIVE_BOTS: _active_for_sync.append(("A", state_a))
+            if "b" in config.ACTIVE_BOTS: _active_for_sync.append(("B", state_b))
+            if "c" in config.ACTIVE_BOTS: _active_for_sync.append(("C", state_c))
+            if "g" in config.ACTIVE_BOTS: _active_for_sync.append(("G", state_g))
+            if "h" in config.ACTIVE_BOTS: _active_for_sync.append(("H", state_h))
+            if "i" in config.ACTIVE_BOTS: _active_for_sync.append(("I", state_i))
+            if "j" in config.ACTIVE_BOTS: _active_for_sync.append(("J", state_j))
+            broker_equity_now, realigned = _sync_broker_capital_periodic(_active_for_sync, ohlcv_daily)
+            if realigned:
+                # Persist états réalignés avant Bot Z (sinon Bot Z lit l'ancien capital)
+                save_state_a(state_a); save_mom(state_b); save_brk(state_c); save_trd(state_g)
+                save_vcb(state_h); save_rsl(state_i); save_mr(state_j)
+
             # ── 4. Bot Z — Pilot (allocation dispatch AVANT les sub-bots) ────────
             try:
                 # Passe ohlcv_daily pour mark-to-market réel des positions
-                z_summary = run_bot_z_cycle(macro, ohlcv=ohlcv_daily)
+                # broker_equity_now : anti-drift cumulé sur z_capital
+                z_summary = run_bot_z_cycle(macro, ohlcv=ohlcv_daily, broker_equity=broker_equity_now)
                 print_bot_z_summary(z_summary)
                 log(f"[Z] Engine: {z_summary.get('current_engine','?')} | "
                     f"Capital: {z_summary.get('z_capital_eur', z_summary.get('total_simulated_eur',0)):.2f}€ | "
