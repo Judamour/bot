@@ -214,7 +214,7 @@ def print_contest_status(state_a: dict, state_b: dict, state_c: dict,
 
 # ── Broker capital sync (boot + chaque cycle) ────────────────────────────────
 
-DRIFT_REALIGN_THRESHOLD = 0.30  # 30% : au-delà, hard-realign capital sub-bots
+DRIFT_REALIGN_THRESHOLD = 0.15  # 15% : au-delà, hard-realign capital sub-bots
 
 
 def _fetch_broker_equity() -> float | None:
