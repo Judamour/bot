@@ -162,15 +162,12 @@ def run_breakout_cycle(state: dict, daily_cache: dict, macro_context: dict = Non
                 exit_price = dc_lower_exit
 
             if exit_reason:
-                if not config.PAPER_TRADING:
-                    from live.order_executor import execute_sell as _exec_sell
-                    _order = _exec_sell(symbol, position["size"], exit_price, reason=exit_reason)
-                    if not _order.success:
-                        log(f"⛔ SELL {symbol} échoué en live: {_order.error} — position maintenue", "WARN")
-                        continue
-                    exit_price_eff = _order.filled_price * (1 - config.EXCHANGE_FEE)
-                else:
-                    exit_price_eff = exit_price * (1 - config.SLIPPAGE)
+                from live.order_executor import execute_sell as _exec_sell
+                _order = _exec_sell(symbol, position["size"], exit_price, reason=exit_reason)
+                if not _order.success:
+                    log(f"⛔ SELL {symbol} échoué: {_order.error} — position maintenue", "WARN")
+                    continue
+                exit_price_eff = _order.filled_price * (1 - config.EXCHANGE_FEE)
                 fee_exit = exit_price_eff * position["size"] * config.EXCHANGE_FEE
                 proceeds = exit_price_eff * position["size"] - fee_exit
                 pnl = proceeds - position["cost"]
@@ -224,16 +221,15 @@ def run_breakout_cycle(state: dict, daily_cache: dict, macro_context: dict = Non
                     log(f"{symbol} — Insufficient capital ({state['capital']:.2f}€ < {total_cost:.2f}€)", "WARN")
                     continue
 
-                if not config.PAPER_TRADING:
-                    from live.order_executor import execute_buy as _exec_buy
-                    _order = _exec_buy(symbol, size, current_price)
-                    if not _order.success:
-                        log(f"⛔ BUY {symbol} échoué en live: {_order.error}", "WARN")
-                        continue
-                    entry_price = _order.filled_price
-                    size = _order.filled_size
-                    fee_entry = entry_price * size * config.EXCHANGE_FEE
-                    total_cost = size * entry_price + fee_entry
+                from live.order_executor import execute_buy as _exec_buy
+                _order = _exec_buy(symbol, size, current_price)
+                if not _order.success:
+                    log(f"⛔ BUY {symbol} échoué: {_order.error}", "WARN")
+                    continue
+                entry_price = _order.filled_price
+                size = _order.filled_size
+                fee_entry = entry_price * size * config.EXCHANGE_FEE
+                total_cost = size * entry_price + fee_entry
 
                 state["capital"] -= total_cost
                 state["positions"][symbol] = {

@@ -144,15 +144,12 @@ def run_momentum_cycle(state: dict, daily_cache: dict, macro_context: dict = Non
         entry = pos.get("entry", current_price)
         loss_pct = (current_price - entry) / entry if entry > 0 else 0
         if loss_pct <= -STOP_LOSS_PCT:
-            if not config.PAPER_TRADING:
-                from live.order_executor import execute_sell as _exec_sell
-                _order = _exec_sell(symbol, pos["size"], current_price, reason="stop_loss")
-                if not _order.success:
-                    log(f"⛔ SELL {symbol} échoué en live: {_order.error} — position maintenue", "WARN")
-                    continue
-                exit_price = _order.filled_price * (1 - config.EXCHANGE_FEE)
-            else:
-                exit_price = current_price * (1 - config.SLIPPAGE)
+            from live.order_executor import execute_sell as _exec_sell
+            _order = _exec_sell(symbol, pos["size"], current_price, reason="stop_loss")
+            if not _order.success:
+                log(f"⛔ SELL {symbol} échoué: {_order.error} — position maintenue", "WARN")
+                continue
+            exit_price = _order.filled_price * (1 - config.EXCHANGE_FEE)
             fee_exit = exit_price * pos["size"] * config.EXCHANGE_FEE
             proceeds = exit_price * pos["size"] - fee_exit
             pnl = proceeds - pos["cost"]
@@ -227,15 +224,12 @@ def run_momentum_cycle(state: dict, daily_cache: dict, macro_context: dict = Non
                 continue
 
             _raw_exit = float(df["close"].iloc[-1])
-            if not config.PAPER_TRADING:
-                from live.order_executor import execute_sell as _exec_sell
-                _order = _exec_sell(symbol, pos["size"], _raw_exit, reason="momentum_rotation")
-                if not _order.success:
-                    log(f"⛔ SELL {symbol} échoué en live: {_order.error} — position maintenue", "WARN")
-                    continue
-                exit_price = _order.filled_price * (1 - config.EXCHANGE_FEE)
-            else:
-                exit_price = _raw_exit * (1 - config.SLIPPAGE)
+            from live.order_executor import execute_sell as _exec_sell
+            _order = _exec_sell(symbol, pos["size"], _raw_exit, reason="momentum_rotation")
+            if not _order.success:
+                log(f"⛔ SELL {symbol} échoué: {_order.error} — position maintenue", "WARN")
+                continue
+            exit_price = _order.filled_price * (1 - config.EXCHANGE_FEE)
             fee_exit = exit_price * pos["size"] * config.EXCHANGE_FEE
             proceeds = exit_price * pos["size"] - fee_exit
             pnl = proceeds - pos["cost"]
@@ -297,16 +291,15 @@ def run_momentum_cycle(state: dict, daily_cache: dict, macro_context: dict = Non
             log(f"{symbol} — Insufficient capital ({state['capital']:.2f}€)", "WARN")
             continue
 
-        if not config.PAPER_TRADING:
-            from live.order_executor import execute_buy as _exec_buy
-            _order = _exec_buy(symbol, size, entry_price)
-            if not _order.success:
-                log(f"⛔ BUY {symbol} échoué en live: {_order.error}", "WARN")
-                continue
-            entry_price = _order.filled_price
-            size = _order.filled_size
-            fee_entry = entry_price * size * config.EXCHANGE_FEE
-            total_cost = size * entry_price + fee_entry
+        from live.order_executor import execute_buy as _exec_buy
+        _order = _exec_buy(symbol, size, entry_price)
+        if not _order.success:
+            log(f"⛔ BUY {symbol} échoué: {_order.error}", "WARN")
+            continue
+        entry_price = _order.filled_price
+        size = _order.filled_size
+        fee_entry = entry_price * size * config.EXCHANGE_FEE
+        total_cost = size * entry_price + fee_entry
 
         state["capital"] -= total_cost
         state["positions"][symbol] = {

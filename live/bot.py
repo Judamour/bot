@@ -255,15 +255,12 @@ def process_symbol(
                 pass
 
         if reason:
-            if not config.PAPER_TRADING:
-                from live.order_executor import execute_sell as _exec_sell
-                _order = _exec_sell(symbol, position["size"], exit_price, reason=reason)
-                if not _order.success:
-                    log(f"⛔ SELL {symbol} échoué en live: {_order.error} — position maintenue", "WARN")
-                    return state
-                exit_price_eff = _order.filled_price * (1 - config.EXCHANGE_FEE)
-            else:
-                exit_price_eff = exit_price * (1 - config.SLIPPAGE)
+            from live.order_executor import execute_sell as _exec_sell
+            _order = _exec_sell(symbol, position["size"], exit_price, reason=reason)
+            if not _order.success:
+                log(f"⛔ SELL {symbol} échoué: {_order.error} — position maintenue", "WARN")
+                return state
+            exit_price_eff = _order.filled_price * (1 - config.EXCHANGE_FEE)
             fee_exit = exit_price_eff * position["size"] * config.EXCHANGE_FEE
             proceeds = exit_price_eff * position["size"] - fee_exit
             state["capital"] += proceeds
@@ -436,16 +433,15 @@ def process_symbol(
             log(f"{symbol} — Capital insuffisant ({state['capital']:.2f}€)", "WARN")
             return state
 
-        if not config.PAPER_TRADING:
-            from live.order_executor import execute_buy as _exec_buy
-            _order = _exec_buy(symbol, pos["size"], current_price)
-            if not _order.success:
-                log(f"⛔ BUY {symbol} échoué en live: {_order.error}", "WARN")
-                return state
-            effective_buy = _order.filled_price
-            pos["size"] = _order.filled_size
-            fee_entry = effective_buy * pos["size"] * config.EXCHANGE_FEE
-            total_cost = pos["size"] * effective_buy + fee_entry
+        from live.order_executor import execute_buy as _exec_buy
+        _order = _exec_buy(symbol, pos["size"], current_price)
+        if not _order.success:
+            log(f"⛔ BUY {symbol} échoué: {_order.error}", "WARN")
+            return state
+        effective_buy = _order.filled_price
+        pos["size"] = _order.filled_size
+        fee_entry = effective_buy * pos["size"] * config.EXCHANGE_FEE
+        total_cost = pos["size"] * effective_buy + fee_entry
 
         state["capital"] -= total_cost
         position_data = {
