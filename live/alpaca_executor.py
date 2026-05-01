@@ -124,6 +124,83 @@ def _request(method: str, path: str, body: dict = None, timeout: int = 30) -> di
         raise RuntimeError(f"Alpaca {e.code}: {msg}") from None
 
 
+# ── Market data API (data.alpaca.markets) ────────────────────────────────────
+
+_DATA_BASE = "https://data.alpaca.markets"
+
+# Mapping timeframe interne → Alpaca bars timeframe
+_ALPACA_TF = {
+    "1m": "1Min", "5m": "5Min", "15m": "15Min", "30m": "30Min",
+    "1h": "1Hour", "4h": "4Hour", "1d": "1Day",
+}
+
+
+def _data_request(path: str, params: dict, timeout: int = 30) -> dict:
+    """GET sur data.alpaca.markets avec auth standard."""
+    qs = urllib.parse.urlencode(params)
+    url = f"{_DATA_BASE}{path}?{qs}"
+    headers = {
+        "APCA-API-KEY-ID": _api_key(),
+        "APCA-API-SECRET-KEY": _api_secret(),
+    }
+    req = urllib.request.Request(url, headers=headers, method="GET")
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return json.loads(r.read())
+
+
+def fetch_alpaca_ohlcv(symbol: str, timeframe: str = "4h", days: int = 55):
+    """Fetch OHLCV stocks via Alpaca data API (cohérence prix data ↔ exec).
+
+    Retourne pd.DataFrame indexé UTC avec colonnes open/high/low/close/volume.
+    Lève RuntimeError sur erreur — caller fallback yfinance si voulu.
+    """
+    import pandas as pd
+    from datetime import datetime, timedelta, timezone
+
+    tf = _ALPACA_TF.get(timeframe.lower())
+    if tf is None:
+        raise ValueError(f"Timeframe non supporté Alpaca data: {timeframe}")
+
+    end = datetime.now(timezone.utc)
+    start = end - timedelta(days=days)
+    # Alpaca free tier (IEX) interdit fenêtres incluant les 15 dernières minutes
+    end_safe = end - timedelta(minutes=20)
+
+    params = {
+        "timeframe": tf,
+        "start": start.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "end":   end_safe.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "limit": 10000,
+        "adjustment": "split",  # price-adjusted pour splits, pas dividends
+        "feed": os.getenv("ALPACA_DATA_FEED", "iex"),  # iex (free) ou sip (paid)
+    }
+
+    bars = []
+    page_token = None
+    print(f"  Téléchargement {symbol} [{tf}] — {days} jours (via Alpaca data)...")
+    for _ in range(20):  # cap 20 pages = 200k bars max
+        if page_token:
+            params["page_token"] = page_token
+        resp = _data_request(f"/v2/stocks/{symbol}/bars", params)
+        bars.extend(resp.get("bars") or [])
+        page_token = resp.get("next_page_token")
+        if not page_token:
+            break
+
+    if not bars:
+        raise RuntimeError(f"Aucune donnée Alpaca pour {symbol}")
+
+    df = pd.DataFrame(bars)
+    df = df.rename(columns={"t": "ts", "o": "open", "h": "high", "l": "low",
+                            "c": "close", "v": "volume"})
+    df["ts"] = pd.to_datetime(df["ts"], utc=True)
+    df = df.set_index("ts").sort_index()
+    df = df[["open", "high", "low", "close", "volume"]]
+    df = df[~df.index.duplicated(keep="last")]
+    print(f"  ✓ {len(df)} bougies {symbol} en USD ({df.index[0].date()} → {df.index[-1].date()})")
+    return df
+
+
 # ── Account / balance ────────────────────────────────────────────────────────
 
 def check_balance() -> float:

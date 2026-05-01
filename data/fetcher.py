@@ -144,11 +144,12 @@ def fetch_ohlcv(
 ) -> pd.DataFrame:
     """
     Télécharge les données OHLCV.
-    - xStocks → yfinance NYSE/NASDAQ (prix USD gardés tels quels)
-    - Crypto   → Binance USDT (≈ USD à 0.01% près, pas de conversion)
+    - Stocks → Alpaca data API en primary (cohérence prix data ↔ broker exec)
+              fallback yfinance si Alpaca indispo / hors univers
+    - Crypto → Binance USDT (≈ USD à 0.01% près, pas de conversion)
 
     Args:
-        symbol: Ex: "BTC/USD" ou "NVDAx/USD"
+        symbol: Ex: "BTC/USD" ou "NVDA"
         timeframe: Ex: "4h"
         days: Nombre de jours d'historique
 
@@ -156,6 +157,22 @@ def fetch_ohlcv(
         DataFrame avec colonnes: open, high, low, close, volume (tous en USD)
     """
     if _is_xstock(symbol):
+        # Tentative Alpaca data API en primary (free tier IEX)
+        if getattr(config, "ALPACA_ENABLED", False):
+            try:
+                from live.alpaca_executor import fetch_alpaca_ohlcv, is_alpaca_stock
+                ticker = _xstock_ticker(symbol)
+                if is_alpaca_stock(ticker):
+                    df = fetch_alpaca_ohlcv(ticker, timeframe, days)
+                    is_fresh, age_hours = _check_data_freshness(df, timeframe)
+                    if not is_fresh:
+                        logger.warning(f"[fetcher] STALE Alpaca: {symbol} {age_hours}h old")
+                    df.attrs["is_fresh"] = is_fresh
+                    df.attrs["age_hours"] = age_hours
+                    df.attrs["source"] = "alpaca"
+                    return df
+            except Exception as e:
+                logger.warning(f"[fetcher] Alpaca data échec pour {symbol}: {e} — fallback yfinance")
         return fetch_yfinance_ohlcv(symbol, timeframe, days)
 
     # Binance pour les cryptos (API publique, pas de clé nécessaire)
