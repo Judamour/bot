@@ -9,35 +9,46 @@ API_KEY = os.getenv("KRAKEN_API_KEY", "")
 API_SECRET = os.getenv("KRAKEN_API_SECRET", "")
 
 # ── Paires tradées ──────────────────────────────────────────────────────────
-# UNIVERS 2026-04-30 v3 : profil agressif crypto-tilted + diversification 7 secteurs.
-# Objectif : capter bull (tech/crypto) + bear (gold/healthcare/staples) — Crisis Alpha.
-# Tous vérifiés disponibles sur Kraken API (AssetPairs avec aclass=tokenized_asset).
+# UNIVERS 2026-05-01 v4 : profil agressif crypto-tilted + stocks via Alpaca.
+# Crypto live → Kraken (déjà fonctionnel, frais 0.26%).
+# Stocks US (vrais, pas tokenisés) → Alpaca (paper/live, frais $0).
+# xStocks Kraken abandonnés (réponse support 2026-04-30 : EEA = Convert only,
+# pas d'order book API).
 
-# Cryptos (5) — top liquidité, trend persistence
+# Cryptos (5) — top liquidité, trend persistence — routés Kraken
 CRYPTO = ["BTC/USD", "ETH/USD", "SOL/USD", "AVAX/USD", "LINK/USD"]
 
-# xStocks (16) — diversifiés sur 7 secteurs pour résister bull ET bear
-XSTOCKS = [
+# Stocks US (16) — diversifiés sur 7 secteurs — routés Alpaca, fractionnables
+STOCKS = [
     # Tech mega-cap (3) — moteur bull
-    "NVDAx/USD", "GOOGLx/USD", "METAx/USD",
-    # AI/Cloud high beta (2) — surperforme en momentum tech
-    "PLTRx/USD", "CRWDx/USD",
-    # Healthcare défensif (2) — résiste en bear
-    "LLYx/USD", "ABBVx/USD",
-    # Energy (2) — hedge inflation/crise pétrole
-    "XOMx/USD", "CVXx/USD",
-    # Financials (2) — cyclique, profite des hausses de taux
-    "JPMx/USD", "BACx/USD",
-    # Defensive consumer (2) — staples, résiste en récession
-    "KOx/USD", "PGx/USD",
-    # Index ETF (2) — exposition marché global
-    "SPYx/USD", "QQQx/USD",
-    # Gold (1) — vrai diversificateur, +20% en crash typiquement
-    "GLDx/USD",
+    "NVDA", "GOOGL", "META",
+    # AI/Cloud high beta (2)
+    "PLTR", "CRWD",
+    # Healthcare défensif (2)
+    "LLY", "ABBV",
+    # Energy (2)
+    "XOM", "CVX",
+    # Financials (2)
+    "JPM", "BAC",
+    # Defensive consumer (2)
+    "KO", "PG",
+    # Index ETF (2)
+    "SPY", "QQQ",
+    # Gold ETF (1)
+    "GLD",
 ]
 
-XSTOCKS_ENABLED = os.getenv("XSTOCKS_ENABLED", "true").lower() == "true"
-SYMBOLS = CRYPTO + (XSTOCKS if XSTOCKS_ENABLED else [])  # 21 actifs si xStocks ON, sinon 5 cryptos
+# xStocks Kraken : conservé pour rétro-compat / référence — non utilisé.
+# Le support Kraken (2026-04-30) confirme : pas de trading xStocks via REST API
+# pour clients EEA (uniquement via la feature Convert dans Kraken Pro UI).
+XSTOCKS = []
+XSTOCKS_ENABLED = False
+
+# Flag activation Alpaca (default: True dès qu'on a les clés)
+ALPACA_ENABLED = os.getenv("ALPACA_ENABLED", "true").lower() == "true" \
+                 and bool(os.getenv("ALPACA_API_KEY"))
+
+SYMBOLS = CRYPTO + (STOCKS if ALPACA_ENABLED else [])  # 21 actifs si Alpaca ON, sinon 5 cryptos
 
 # ── Heures marché US (Eastern Time — gère automatiquement EST/EDT) ──────────
 XSTOCK_MARKET_OPEN_ET  = (9, 30)    # NYSE/NASDAQ ouverture (9h30 ET)
@@ -53,23 +64,23 @@ MAX_DRAWDOWN = -0.35    # Coupe-circuit si capital chute de -35% depuis le dépa
 # rallies sectoriels groupés (NVDA +25%, BTC +20% avril 2026).
 MAX_PER_SECTOR = 2
 SECTORS = {
-    # Tech mega-cap
-    "NVDAx/USD": "tech",       "GOOGLx/USD": "tech",      "METAx/USD": "tech",
-    # AI/Cloud
-    "PLTRx/USD": "ai_data",    "CRWDx/USD": "cybersec",
-    # Healthcare
-    "LLYx/USD":  "healthcare", "ABBVx/USD": "healthcare",
-    # Energy
-    "XOMx/USD":  "energy",     "CVXx/USD":  "energy",
-    # Financials
-    "JPMx/USD":  "financials", "BACx/USD":  "financials",
-    # Consumer defensive
-    "KOx/USD":   "defensive",  "PGx/USD":   "defensive",
-    # Index ETF
-    "SPYx/USD":  "index",      "QQQx/USD":  "index",
-    # Gold
-    "GLDx/USD":  "gold",
-    # Crypto
+    # Tech mega-cap (Alpaca)
+    "NVDA": "tech",       "GOOGL": "tech",      "META": "tech",
+    # AI/Cloud (Alpaca)
+    "PLTR": "ai_data",    "CRWD": "cybersec",
+    # Healthcare (Alpaca)
+    "LLY":  "healthcare", "ABBV": "healthcare",
+    # Energy (Alpaca)
+    "XOM":  "energy",     "CVX":  "energy",
+    # Financials (Alpaca)
+    "JPM":  "financials", "BAC":  "financials",
+    # Consumer defensive (Alpaca)
+    "KO":   "defensive",  "PG":   "defensive",
+    # Index ETF (Alpaca)
+    "SPY":  "index",      "QQQ":  "index",
+    # Gold ETF (Alpaca)
+    "GLD":  "gold",
+    # Crypto (Kraken)
     "BTC/USD":   "crypto",     "ETH/USD":   "crypto",
     "SOL/USD":   "crypto",     "AVAX/USD":  "crypto",
     "LINK/USD":  "crypto",

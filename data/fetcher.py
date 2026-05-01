@@ -37,15 +37,27 @@ def _check_data_freshness(df: pd.DataFrame, timeframe: str) -> tuple:
 
 
 def _is_xstock(symbol: str) -> bool:
-    """True si le symbole est une action US (données via yfinance)."""
-    return symbol in config.XSTOCKS
+    """True si le symbole est une action US (données via yfinance).
+
+    Couvre :
+      - xStocks Kraken legacy (ex 'NVDAx/USD') — conservé pour rétro-compat
+      - Stocks Alpaca (ex 'NVDA') — bare ticker sans slash
+    """
+    if symbol in config.XSTOCKS:
+        return True
+    if "/" in symbol or not symbol:
+        return False
+    # Bare ticker upper-case alphanumeric (gère "BRK.B" aussi)
+    return symbol.replace(".", "").isalnum() and symbol == symbol.upper()
 
 
 def _xstock_ticker(symbol: str) -> str:
-    """Convertit 'NVDAx/USD' → 'NVDA' (format yfinance/Alpaca, sans le suffixe x Kraken).
+    """Convertit 'NVDAx/USD' → 'NVDA' (legacy xStocks). 'NVDA' reste 'NVDA' (Alpaca).
 
     Cas spécial GOOGL : Kraken utilise GOOGLx (Alphabet class A), yfinance ticker = GOOGL.
     """
+    if "/" not in symbol:
+        return symbol  # Alpaca : ticker bare
     base = symbol.split("/")[0]
     if base.endswith("x"):
         base = base[:-1]

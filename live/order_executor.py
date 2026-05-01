@@ -75,6 +75,21 @@ def validate_symbols(symbols: list) -> tuple:
     global _VALID_SYMBOLS_CACHE, _KRAKEN_PAIR_MAPPING
 
     valid, invalid = [], []
+
+    # Sépare stocks Alpaca et symboles Kraken (cryptos + xStocks legacy)
+    from live import alpaca_executor
+    alpaca_syms = [s for s in symbols if alpaca_executor.is_alpaca_stock(s)]
+    kraken_syms = [s for s in symbols if not alpaca_executor.is_alpaca_stock(s)]
+
+    if alpaca_syms:
+        a_valid, a_invalid = alpaca_executor.validate_symbols(alpaca_syms)
+        valid += a_valid
+        invalid += a_invalid
+
+    if not kraken_syms:
+        _VALID_SYMBOLS_CACHE = set(valid)
+        return valid, invalid
+
     try:
         exchange = get_exchange(use_auth=False)
         markets = exchange.load_markets()
@@ -99,7 +114,7 @@ def validate_symbols(symbols: list) -> tuple:
         except Exception as e:
             logger.warning(f"[validate] Fetch xStocks pairs failed: {e}")
 
-        for sym in symbols:
+        for sym in kraken_syms:
             # Try ccxt first
             if sym in markets:
                 valid.append(sym)
@@ -258,7 +273,13 @@ def execute_buy(symbol: str, size: float, price_estimate: float,
         return OrderResult(success=True, order_id="PAPER", filled_size=size,
                            filled_price=effective_price)
 
-    # ── LIVE ──
+    # ── Routing : stocks Alpaca ─────────────────────────────────────────────
+    # Stocks (NVDA, GOOGL, ...) → Alpaca. Cryptos (BTC/USD, ...) → Kraken.
+    from live import alpaca_executor
+    if alpaca_executor.is_alpaca_stock(symbol):
+        return alpaca_executor.execute_buy(symbol, size, price_estimate, max_wait_sec)
+
+    # ── LIVE Kraken ──
     # Pré-check : symbole validé au démarrage ?
     if _VALID_SYMBOLS_CACHE and symbol not in _VALID_SYMBOLS_CACHE:
         logger.warning(f"[ORDER] BUY {symbol} skip — symbole non validé Kraken (silent)")
@@ -342,7 +363,12 @@ def execute_sell(symbol: str, size: float, price_estimate: float,
         return OrderResult(success=True, order_id="PAPER", filled_size=size,
                            filled_price=effective_price)
 
-    # ── LIVE ──
+    # ── Routing : stocks Alpaca ─────────────────────────────────────────────
+    from live import alpaca_executor
+    if alpaca_executor.is_alpaca_stock(symbol):
+        return alpaca_executor.execute_sell(symbol, size, price_estimate, reason, max_wait_sec)
+
+    # ── LIVE Kraken ──
     if _VALID_SYMBOLS_CACHE and symbol not in _VALID_SYMBOLS_CACHE:
         logger.warning(f"[ORDER] SELL {symbol} skip — symbole non validé")
         return OrderResult(success=False, error="symbol_not_supported")
