@@ -238,6 +238,30 @@ def run():
     os.makedirs("logs/mean_reversion",  exist_ok=True)
     os.makedirs("logs/bot_z",           exist_ok=True)
 
+    # ── Auto-sync capital depuis le broker (Alpaca > Kraken fallback) ──────
+    # Plus de drift state vs broker : on prend la balance live à chaque boot
+    # comme source de vérité, divisée entre les sub-bots actifs. Si states
+    # n'existent pas (1er boot après reset), ils seront créés avec ce capital.
+    global INITIAL_CAPITAL_PER_BOT
+    broker_equity = None
+    try:
+        if getattr(config, "ALPACA_ENABLED", False):
+            from live import alpaca_executor as _ax
+            acct = _ax._request("GET", "/v2/account")
+            broker_equity = float(acct.get("equity") or acct.get("cash") or 0)
+            endpoint = "paper" if _ax._is_paper_endpoint() else "LIVE"
+            log(f"💰 Broker equity (Alpaca {endpoint}): {broker_equity:.2f}$", "INFO")
+    except Exception as e:
+        log(f"⚠ Fetch broker equity échec: {e}", "WARN")
+
+    if broker_equity and broker_equity > 0:
+        active_count = max(len(config.ACTIVE_BOTS), 1)
+        new_per_bot = round(broker_equity / active_count, 2)
+        log(f"💰 Allocation dynamique : {broker_equity:.2f}$ / {active_count} bots actifs = {new_per_bot:.2f}$/bot", "INFO")
+        config.INITIAL_CAPITAL = broker_equity
+        config.INITIAL_CAPITAL_PER_BOT = new_per_bot
+        INITIAL_CAPITAL_PER_BOT = new_per_bot
+
     log(f"{'='*60}", "INFO")
     log("  MULTI-BOT CONTEST STARTED", "INFO")
     log(f"  Bot A: Supertrend+MR      → logs/supertrend/state.json", "INFO")
@@ -247,7 +271,7 @@ def run():
     log(f"  Bot H: VCB Breakout       → logs/vcb/state.json", "INFO")
     log(f"  Bot I: RS Leaders         → logs/rs_leaders/state.json", "INFO")
     log(f"  Bot J: Mean Reversion     → logs/mean_reversion/state.json", "INFO")
-    log(f"  Capital initial: {INITIAL_CAPITAL_PER_BOT:.0f}€ × 7 = {INITIAL_CAPITAL_PER_BOT*7:.0f}€", "INFO")
+    log(f"  Capital initial: {INITIAL_CAPITAL_PER_BOT:.0f}$ × {len(config.ACTIVE_BOTS)} actifs = {INITIAL_CAPITAL_PER_BOT*len(config.ACTIVE_BOTS):.0f}$", "INFO")
     log(f"{'='*60}", "INFO")
 
     state_a = load_state_a()
