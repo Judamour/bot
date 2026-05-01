@@ -76,10 +76,10 @@ def validate_symbols(symbols: list) -> tuple:
 
     valid, invalid = [], []
 
-    # Sépare stocks Alpaca et symboles Kraken (cryptos + xStocks legacy)
+    # Sépare symboles routés Alpaca (stocks + crypto si flag) et restants Kraken
     from live import alpaca_executor
-    alpaca_syms = [s for s in symbols if alpaca_executor.is_alpaca_stock(s)]
-    kraken_syms = [s for s in symbols if not alpaca_executor.is_alpaca_stock(s)]
+    alpaca_syms = [s for s in symbols if alpaca_executor.is_alpaca_routed(s)]
+    kraken_syms = [s for s in symbols if not alpaca_executor.is_alpaca_routed(s)]
 
     if alpaca_syms:
         a_valid, a_invalid = alpaca_executor.validate_symbols(alpaca_syms)
@@ -271,7 +271,7 @@ def execute_buy(symbol: str, size: float, price_estimate: float,
     # Stocks (NVDA, GOOGL, ...) → Alpaca (paper/live selon APCA_API_BASE_URL,
     # indépendant de config.PAPER_TRADING). Cryptos (BTC/USD, ...) → Kraken.
     from live import alpaca_executor
-    if alpaca_executor.is_alpaca_stock(symbol):
+    if alpaca_executor.is_alpaca_routed(symbol):
         return alpaca_executor.execute_buy(symbol, size, price_estimate, max_wait_sec)
 
     if config.PAPER_TRADING:
@@ -361,7 +361,7 @@ def execute_sell(symbol: str, size: float, price_estimate: float,
     """
     # ── Routing : stocks Alpaca (avant PAPER_TRADING global) ───────────────
     from live import alpaca_executor
-    if alpaca_executor.is_alpaca_stock(symbol):
+    if alpaca_executor.is_alpaca_routed(symbol):
         return alpaca_executor.execute_sell(symbol, size, price_estimate, reason, max_wait_sec)
 
     if config.PAPER_TRADING:

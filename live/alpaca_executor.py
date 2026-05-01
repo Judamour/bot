@@ -59,13 +59,35 @@ def _is_paper_endpoint() -> bool:
 
 
 def is_alpaca_stock(symbol: str) -> bool:
-    """True si le symbole doit être routé vers Alpaca (stocks US : pas de slash, alphanumérique).
+    """True si le symbole est un stock US (pas de slash, alphanumérique).
 
     Exemples : "NVDA"→True, "GOOGL"→True, "BRK.B"→True, "BTC/USD"→False, "NVDAx/USD"→False.
     """
     if "/" in symbol or not symbol:
         return False
     return symbol.replace(".", "").isalnum() and symbol == symbol.upper()
+
+
+def is_alpaca_crypto(symbol: str) -> bool:
+    """True si le symbole est routé vers Alpaca pour le crypto.
+
+    Activé quand ALPACA_CRYPTO=true (default true si URL est paper-api ; en live
+    Alpaca crypto reste US-only, donc à mettre false pour les non-US).
+    """
+    if "/" not in symbol:
+        return False
+    flag = os.getenv("ALPACA_CRYPTO", "auto").lower()
+    if flag == "true":
+        return True
+    if flag == "false":
+        return False
+    # auto : true si endpoint paper, false sinon
+    return _is_paper_endpoint()
+
+
+def is_alpaca_routed(symbol: str) -> bool:
+    """True si le symbole doit être routé vers Alpaca (stocks toujours, crypto sous flag)."""
+    return is_alpaca_stock(symbol) or is_alpaca_crypto(symbol)
 
 
 # ── HTTP helpers ─────────────────────────────────────────────────────────────
@@ -184,15 +206,24 @@ def execute_buy(symbol: str, size: float, price_estimate: float,
         logger.warning(f"[ALPACA] BUY {symbol} skip — symbole non validé")
         return OrderResult(success=False, error="symbol_not_supported")
 
+    # Crypto Alpaca → time_in_force=gtc + min cost basis 10$
+    # Stocks Alpaca → time_in_force=day
+    is_crypto = "/" in symbol
+    tif = "gtc" if is_crypto else "day"
+    order_value = size * price_estimate
+    if is_crypto and order_value < 10.0:
+        logger.warning(f"[ALPACA] BUY {symbol} skip — crypto min 10$ Alpaca, ordre {order_value:.2f}$")
+        return OrderResult(success=False, error=f"alpaca_crypto_min: {order_value:.2f}$ < 10$")
+
     payload = {
         "symbol": symbol,
         "qty": str(size),
         "side": "buy",
         "type": "market",
-        "time_in_force": "day",
+        "time_in_force": tif,
     }
     try:
-        logger.info(f"[ALPACA] BUY {symbol} qty={size:.6f} @ ~{price_estimate:.4f}$ ({size*price_estimate:.2f}$)")
+        logger.info(f"[ALPACA] BUY {symbol} qty={size:.6f} @ ~{price_estimate:.4f}$ ({order_value:.2f}$)")
         order = _request("POST", "/v2/orders", body=payload)
         order_id = order.get("id", "?")
 
@@ -227,12 +258,14 @@ def execute_sell(symbol: str, size: float, price_estimate: float,
         logger.warning(f"[ALPACA] SELL {symbol} skip — symbole non validé")
         return OrderResult(success=False, error="symbol_not_supported")
 
+    is_crypto = "/" in symbol
+    tif = "gtc" if is_crypto else "day"
     payload = {
         "symbol": symbol,
         "qty": str(size),
         "side": "sell",
         "type": "market",
-        "time_in_force": "day",
+        "time_in_force": tif,
     }
     try:
         logger.info(f"[ALPACA] SELL {symbol} qty={size:.6f} @ ~{price_estimate:.4f}$ ({reason})")
