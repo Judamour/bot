@@ -973,18 +973,22 @@ def run_bot_z_cycle(macro: dict, ohlcv: dict = None, broker_equity: float = None
 
     new_z_capital   = max(0.0, z_capital * (1 + weighted_return))
 
-    # ── Anti-drift broker : si broker_equity fourni et drift > 30%, force resync ──
-    # Évite la dérive cumulée des bot_values mark-to-market (ex : Bot C à 39M$
-    # sans avoir tradé). Source de vérité = compte broker live.
+    # ── Anti-drift broker : si broker_equity fourni, broker = source de vérité ──
+    # Bot Z dispatch les BUDGETS aux sub-bots sur la base de z_capital. Si z_capital
+    # diverge même de 5% du broker, les budgets dispatchés ne sont plus réalisables
+    # → over-allocation, ordres rejetés "insufficient funds", drift cumulatif.
+    # On force donc z_capital = broker_equity à chaque cycle. Les bot_values gardent
+    # leur usage relatif pour calculer les poids/engines/regime.
     if broker_equity is not None and broker_equity > 0 and new_z_capital > 0:
-        drift_z = abs(new_z_capital / broker_equity - 1)
-        if drift_z > 0.30:
+        drift_z = (new_z_capital / broker_equity - 1) * 100
+        if abs(drift_z) > 1.0:  # log seulement si écart significatif
             print(
-                f"[BOT Z] DRIFT BROKER: z_capital={new_z_capital:.0f}$ vs broker={broker_equity:.0f}$ "
-                f"({(new_z_capital/broker_equity-1)*100:+.0f}%) → resync sur broker"
+                f"[BOT Z] SYNC BROKER: z_capital {new_z_capital:.0f}$ → {broker_equity:.0f}$ "
+                f"(écart {drift_z:+.1f}%)"
             )
-            new_z_capital = broker_equity
-            # Reset cb_peak au broker pour ne pas garder un peak fantôme
+        new_z_capital = broker_equity
+        # Reset cb_peak si broker a baissé sous l'ancien peak (pas de peak fantôme)
+        if state.get("cb_peak", 0) > broker_equity * 1.5:
             state["cb_peak"] = broker_equity
 
     cb_peak   = max(state.get("cb_peak", INITIAL_CAP), new_z_capital)
