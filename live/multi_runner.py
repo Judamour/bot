@@ -290,6 +290,10 @@ def run():
             log("⛔ Startup check ÉCHOUÉ — connexion Kraken impossible. Arrêt du bot.", "WARN")
             return
         log("✓ Startup check OK — connexion Kraken vérifiée", "OK")
+        # Reconcile positions Kraken pour chaque bot actif
+        for _bot_id, _state in [("a", state_a), ("b", state_b), ("c", state_c),
+                                  ("g", state_g), ("h", state_h), ("i", state_i), ("j", state_j)]:
+            reconcile_positions(_state, _bot_id)
 
     # Alpaca a son propre mode paper/live (via APCA_API_BASE_URL) — toujours vérifier
     if getattr(config, "ALPACA_ENABLED", False) and getattr(config, "STOCKS", []):
@@ -299,10 +303,6 @@ def run():
             log("⛔ Alpaca startup ÉCHOUÉ — stocks indisponibles ce cycle.", "WARN")
         else:
             log("✓ Alpaca startup OK", "OK")
-        # Reconcile positions pour chaque bot actif
-        for _bot_id, _state in [("a", state_a), ("b", state_b), ("c", state_c),
-                                  ("g", state_g), ("h", state_h), ("i", state_i), ("j", state_j)]:
-            reconcile_positions(_state, _bot_id)
 
     _prev_budget   = {}   # Track previous budget for change detection
     z_summary      = None # BUG-01 : initialisé ici pour éviter NameError si Bot Z crashe au 1er cycle
