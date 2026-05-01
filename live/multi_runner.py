@@ -258,23 +258,23 @@ def run():
     state_i = load_rsl()
     state_j = load_mr()
 
-    # ── Startup checks (mode LIVE uniquement) ────────────────────────────────
+    # ── Startup checks ──────────────────────────────────────────────────────
     if not config.PAPER_TRADING:
         from live.order_executor import startup_check, reconcile_positions
-        log("⚠️  Mode LIVE — vérifications au démarrage...", "WARN")
+        log("⚠️  Mode LIVE Kraken — vérifications au démarrage...", "WARN")
         if not startup_check():
             log("⛔ Startup check ÉCHOUÉ — connexion Kraken impossible. Arrêt du bot.", "WARN")
             return
         log("✓ Startup check OK — connexion Kraken vérifiée", "OK")
 
-        # Alpaca startup si stocks dans l'univers
-        if getattr(config, "ALPACA_ENABLED", False) and getattr(config, "STOCKS", []):
-            from live import alpaca_executor as _ax
-            log("⚠️  Univers contient des stocks — vérification Alpaca...", "WARN")
-            if not _ax.startup_check():
-                log("⛔ Alpaca startup ÉCHOUÉ — bot continue avec Kraken seul.", "WARN")
-            else:
-                log("✓ Alpaca startup OK", "OK")
+    # Alpaca a son propre mode paper/live (via APCA_API_BASE_URL) — toujours vérifier
+    if getattr(config, "ALPACA_ENABLED", False) and getattr(config, "STOCKS", []):
+        from live import alpaca_executor as _ax
+        log("⚠️  Univers contient des stocks — vérification Alpaca...", "WARN")
+        if not _ax.startup_check():
+            log("⛔ Alpaca startup ÉCHOUÉ — stocks indisponibles ce cycle.", "WARN")
+        else:
+            log("✓ Alpaca startup OK", "OK")
         # Reconcile positions pour chaque bot actif
         for _bot_id, _state in [("a", state_a), ("b", state_b), ("c", state_c),
                                   ("g", state_g), ("h", state_h), ("i", state_i), ("j", state_j)]:
