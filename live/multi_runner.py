@@ -282,6 +282,19 @@ def run():
     state_i = load_rsl()
     state_j = load_mr()
 
+    # ── Sync states fraîches avec capital dynamique (issu du broker) ────────
+    # Chaque strategy a son INITIAL_CAPITAL hardcodé (1000) — on override pour
+    # les states fraîches (sans trades, sans positions) avec INITIAL_CAPITAL_PER_BOT
+    # calculé dynamiquement depuis Alpaca au boot. Préserve les states évolués.
+    for _label, _st in [("B", state_b), ("C", state_c), ("G", state_g),
+                         ("H", state_h), ("I", state_i), ("J", state_j)]:
+        is_fresh = not _st.get("positions") and not _st.get("trades")
+        if is_fresh:
+            old_cap = _st.get("capital", 0)
+            _st["capital"] = INITIAL_CAPITAL_PER_BOT
+            _st["initial_capital"] = INITIAL_CAPITAL_PER_BOT
+            log(f"[CAPITAL] Bot {_label} fresh state : {old_cap:.2f}$ → {INITIAL_CAPITAL_PER_BOT:.2f}$ (broker sync)")
+
     # ── Startup checks ──────────────────────────────────────────────────────
     if not config.PAPER_TRADING:
         from live.order_executor import startup_check, reconcile_positions
