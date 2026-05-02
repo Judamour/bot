@@ -380,19 +380,27 @@ def place_stop_loss(symbol: str, qty: float, stop_price: float,
     """
     Place un ordre STOP SELL chez Alpaca (protège la position même si le bot crashe).
 
-    Si take_profit_price fourni, place aussi un LIMIT SELL OCO avec le stop
-    (oco order_class : un fill annule l'autre).
+    Si take_profit_price fourni ET qty entière, place ordre OCO (stop + TP).
+    Sinon (fractional ou crypto), stop seul (TP géré bot-side).
 
     Retourne dict {"stop_id": ..., "tp_id": ...} ou {} si échec (ne raise pas
     pour ne pas bloquer le bot — la position reste ouverte sans broker-side stop).
     """
+    import math
     is_crypto = "/" in symbol
+    # Down-round qty à 6 décimales pour ne jamais excéder qty_available Alpaca
+    # (broker stocke 9 décimales mais accepte 6 max sans floating overshoot)
+    qty = math.floor(float(qty) * 1e6) / 1e6
+    is_fractional = qty != int(qty)
+
     # Stocks fractionnaires Alpaca exigent time_in_force=day (gtc refusé)
     # Crypto Alpaca : gtc OK
     tif = "gtc" if is_crypto else "day"
 
-    # Crypto Alpaca ne supporte pas oco/stop sur paper → fallback stop seul
-    use_oco = take_profit_price is not None and not is_crypto
+    # OCO refusé sur fractional shares ET sur crypto paper → stop seul si l'un des deux
+    use_oco = (take_profit_price is not None
+               and not is_crypto
+               and not is_fractional)
 
     try:
         if use_oco:
