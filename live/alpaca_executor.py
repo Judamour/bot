@@ -388,9 +388,11 @@ def place_stop_loss(symbol: str, qty: float, stop_price: float,
     """
     import math
     is_crypto = "/" in symbol
-    # Down-round qty à 6 décimales pour ne jamais excéder qty_available Alpaca
-    # (broker stocke 9 décimales mais accepte 6 max sans floating overshoot)
-    qty = math.floor(float(qty) * 1e6) / 1e6
+    # Down-round qty : crypto 6 décimales, stocks 5 (Alpaca round display à 5 dec
+    # et l'interpréte comme la qty demandée → "insufficient qty" si on dépasse)
+    decimals = 6 if is_crypto else 5
+    factor = 10 ** decimals
+    qty = math.floor(float(qty) * factor) / factor
     is_fractional = qty != int(qty)
 
     # Stocks fractionnaires Alpaca exigent time_in_force=day (gtc refusé)
