@@ -526,6 +526,15 @@ def api_trades():
             current = _live_prices.get(symbol, entry)
             pnl_eur = (current - entry) * size
             pnl_pct = ((current - entry) / entry * 100) if entry else 0
+            # Age de la position (heures depuis ouverture)
+            age_hours = None
+            try:
+                from datetime import datetime as _dt
+                d_str = str(pos.get("date", ""))[:19].replace("T", " ")
+                if d_str:
+                    age_hours = round((_dt.now() - _dt.fromisoformat(d_str)).total_seconds() / 3600, 1)
+            except Exception:
+                pass
             open_positions.append({
                 "bot":       bot_id.upper(),
                 "bot_name":  bot_name,
@@ -539,7 +548,10 @@ def api_trades():
                 "pnl_eur":   round(pnl_eur, 2),
                 "pnl_pct":   round(pnl_pct, 2),
                 "stop":      round(pos.get("stop", 0), 4),
+                "tp":        round(pos.get("tp", 0), 4) if pos.get("tp") else None,
                 "date":      str(pos.get("date", ""))[:16],
+                "age_hours": age_hours,
+                "broker_protected": bool(pos.get("alpaca_stop_id")),
             })
 
         # Trades fermés (30 derniers par bot, on merge ensuite)
