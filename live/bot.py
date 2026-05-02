@@ -109,6 +109,17 @@ def apply_trailing_stop(position: dict, current_price: float, atr: float, symbol
     if new_stop > position["stop"]:
         position["stop"] = new_stop
         log(f"{symbol} — Trailing stop → {new_stop:.4f}€", "INFO")
+        # Sync broker-side stop (Alpaca) si présent
+        sid = position.get("alpaca_stop_id")
+        if sid:
+            from live.order_executor import update_broker_stop, place_broker_stop
+            new_id = update_broker_stop(symbol, sid, new_stop, qty=position["size"])
+            if new_id is None:
+                # PATCH a échoué → recreate
+                ids = place_broker_stop(symbol, position["size"], new_stop)
+                position["alpaca_stop_id"] = ids.get("stop_id")
+            else:
+                position["alpaca_stop_id"] = new_id
     return position
 
 
@@ -215,6 +226,16 @@ def process_symbol(
                 position["stop"] = new_stop
                 position["breakeven_set"] = True
                 log(f"{symbol} — Stop déplacé au break-even ({new_stop:.4f}€) après +1R", "INFO")
+                # Sync broker stop
+                sid = position.get("alpaca_stop_id")
+                if sid:
+                    from live.order_executor import update_broker_stop, place_broker_stop
+                    new_id = update_broker_stop(symbol, sid, new_stop, qty=position["size"])
+                    if new_id is None:
+                        ids = place_broker_stop(symbol, position["size"], new_stop)
+                        position["alpaca_stop_id"] = ids.get("stop_id")
+                    else:
+                        position["alpaca_stop_id"] = new_id
 
     # ── Scale-out partiel : sortir 50% à +1.5R, laisse 50% courir en chandelier ──
     # Réduit la variance du PnL, sécurise une partie du gain. AQR "A Century of
@@ -255,7 +276,10 @@ def process_symbol(
                 pass
 
         if reason:
-            from live.order_executor import execute_sell as _exec_sell
+            # Annuler le stop-loss broker AVANT le SELL manuel (sinon double-fill)
+            from live.order_executor import execute_sell as _exec_sell, cancel_broker_stop
+            cancel_broker_stop(symbol, position.get("alpaca_stop_id"))
+            cancel_broker_stop(symbol, position.get("alpaca_tp_id"))
             _order = _exec_sell(symbol, position["size"], exit_price, reason=reason)
             if not _order.success:
                 log(f"⛔ SELL {symbol} échoué: {_order.error} — position maintenue", "WARN")
@@ -444,6 +468,12 @@ def process_symbol(
         total_cost = pos["size"] * effective_buy + fee_entry
 
         state["capital"] -= total_cost
+
+        # ── Stop-loss broker-side : protection même si bot down ──
+        from live.order_executor import place_broker_stop
+        stop_ids = place_broker_stop(symbol, pos["size"], pos["stop_loss"],
+                                      take_profit=pos["take_profit"])
+
         position_data = {
             "entry": effective_buy,
             "size": pos["size"],
@@ -453,6 +483,8 @@ def process_symbol(
             "date": str(datetime.now()),
             "risk_eur": pos["risk_eur"],
             "fee_entry": round(fee_entry, 4),
+            "alpaca_stop_id": stop_ids.get("stop_id"),
+            "alpaca_tp_id":   stop_ids.get("tp_id"),
         }
 
         state["positions"][symbol] = position_data

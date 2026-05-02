@@ -249,6 +249,35 @@ def reset_notif_dedup():
 
 # ── Exécution d'ordres ───────────────────────────────────────────────────────
 
+def place_broker_stop(symbol: str, qty: float, stop_price: float,
+                      take_profit: float | None = None) -> dict:
+    """Place un stop-loss broker-side (protection si bot down). Retourne dict ids."""
+    from live import alpaca_executor
+    if alpaca_executor.is_alpaca_routed(symbol):
+        return alpaca_executor.place_stop_loss(symbol, qty, stop_price, take_profit)
+    return {}  # Kraken : non implémenté pour l'instant
+
+
+def update_broker_stop(symbol: str, stop_order_id: str, new_stop_price: float,
+                       qty: float | None = None) -> str | None:
+    """Update un stop-loss broker (trailing). Retourne nouveau order_id ou None
+    (caller doit re-créer si None)."""
+    from live import alpaca_executor
+    if alpaca_executor.is_alpaca_routed(symbol):
+        return alpaca_executor.replace_stop_loss(stop_order_id, new_stop_price, qty)
+    return stop_order_id
+
+
+def cancel_broker_stop(symbol: str, stop_order_id: str) -> bool:
+    """Annule un stop-loss broker (avant de SELL manuellement)."""
+    if not stop_order_id:
+        return True
+    from live import alpaca_executor
+    if alpaca_executor.is_alpaca_routed(symbol):
+        return alpaca_executor.cancel_order(stop_order_id)
+    return True
+
+
 def execute_buy(symbol: str, size: float, price_estimate: float,
                 max_wait_sec: int = 30) -> OrderResult:
     """

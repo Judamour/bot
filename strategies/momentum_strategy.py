@@ -144,7 +144,8 @@ def run_momentum_cycle(state: dict, daily_cache: dict, macro_context: dict = Non
         entry = pos.get("entry", current_price)
         loss_pct = (current_price - entry) / entry if entry > 0 else 0
         if loss_pct <= -STOP_LOSS_PCT:
-            from live.order_executor import execute_sell as _exec_sell
+            from live.order_executor import execute_sell as _exec_sell, cancel_broker_stop
+            cancel_broker_stop(symbol, pos.get("alpaca_stop_id"))
             _order = _exec_sell(symbol, pos["size"], current_price, reason="stop_loss")
             if not _order.success:
                 log(f"⛔ SELL {symbol} échoué: {_order.error} — position maintenue", "WARN")
@@ -224,7 +225,8 @@ def run_momentum_cycle(state: dict, daily_cache: dict, macro_context: dict = Non
                 continue
 
             _raw_exit = float(df["close"].iloc[-1])
-            from live.order_executor import execute_sell as _exec_sell
+            from live.order_executor import execute_sell as _exec_sell, cancel_broker_stop
+            cancel_broker_stop(symbol, pos.get("alpaca_stop_id"))
             _order = _exec_sell(symbol, pos["size"], _raw_exit, reason="momentum_rotation")
             if not _order.success:
                 log(f"⛔ SELL {symbol} échoué: {_order.error} — position maintenue", "WARN")
@@ -302,12 +304,17 @@ def run_momentum_cycle(state: dict, daily_cache: dict, macro_context: dict = Non
         total_cost = size * entry_price + fee_entry
 
         state["capital"] -= total_cost
+        # Stop-loss broker-side : -12% (STOP_LOSS_PCT)
+        from live.order_executor import place_broker_stop
+        sl_price = round(entry_price * (1 - STOP_LOSS_PCT), 4)
+        stop_ids = place_broker_stop(symbol, size, sl_price)
         state["positions"][symbol] = {
             "entry": round(entry_price, 4),
             "size": round(size, 6),
             "cost": round(total_cost, 4),
             "date": str(datetime.now()),
             "score": round(scores.get(symbol, 0), 4),
+            "alpaca_stop_id": stop_ids.get("stop_id"),
         }
         log(
             f"▲ BUY {symbol} | {entry_price:.4f}€ | {size:.4f} unités | "

@@ -162,7 +162,8 @@ def run_breakout_cycle(state: dict, daily_cache: dict, macro_context: dict = Non
                 exit_price = dc_lower_exit
 
             if exit_reason:
-                from live.order_executor import execute_sell as _exec_sell
+                from live.order_executor import execute_sell as _exec_sell, cancel_broker_stop
+                cancel_broker_stop(symbol, position.get("alpaca_stop_id"))
                 _order = _exec_sell(symbol, position["size"], exit_price, reason=exit_reason)
                 if not _order.success:
                     log(f"⛔ SELL {symbol} échoué: {_order.error} — position maintenue", "WARN")
@@ -232,6 +233,8 @@ def run_breakout_cycle(state: dict, daily_cache: dict, macro_context: dict = Non
                 total_cost = size * entry_price + fee_entry
 
                 state["capital"] -= total_cost
+                from live.order_executor import place_broker_stop
+                stop_ids = place_broker_stop(symbol, size, round(stop_loss, 4))
                 state["positions"][symbol] = {
                     "entry": round(entry_price, 4),
                     "size": round(size, 6),
@@ -239,6 +242,7 @@ def run_breakout_cycle(state: dict, daily_cache: dict, macro_context: dict = Non
                     "stop": round(stop_loss, 4),
                     "date": str(datetime.now()),
                     "atr": round(atr, 4),
+                    "alpaca_stop_id": stop_ids.get("stop_id"),
                 }
                 log(
                     f"▲ BUY {symbol} | {entry_price:.4f}€ | {size:.4f} unités | "

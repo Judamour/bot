@@ -143,11 +143,21 @@ def run_trend_cycle(state: dict, daily_cache: dict, macro_context: dict = None) 
 
         position = state["positions"].get(symbol)
 
-        # ── Trailing stop update ──
+        # ── Trailing stop update (broker-side sync) ──
         if position:
             new_stop = round(current_price - STOP_ATR_MULT * atr, 4)
             if new_stop > position["stop"]:
                 position["stop"] = new_stop
+                # Sync broker stop si présent
+                sid = position.get("alpaca_stop_id")
+                if sid:
+                    from live.order_executor import update_broker_stop, place_broker_stop
+                    new_id = update_broker_stop(symbol, sid, new_stop, qty=position["size"])
+                    if new_id is None:
+                        ids = place_broker_stop(symbol, position["size"], new_stop)
+                        position["alpaca_stop_id"] = ids.get("stop_id")
+                    else:
+                        position["alpaca_stop_id"] = new_id
                 state["positions"][symbol] = position
                 log(f"{symbol} — Trailing stop → {new_stop:.4f}€")
 
@@ -164,7 +174,8 @@ def run_trend_cycle(state: dict, daily_cache: dict, macro_context: dict = None) 
                 exit_reason = "sma200_break"
 
             if exit_reason:
-                from live.order_executor import execute_sell as _exec_sell
+                from live.order_executor import execute_sell as _exec_sell, cancel_broker_stop
+                cancel_broker_stop(symbol, position.get("alpaca_stop_id"))
                 _order = _exec_sell(symbol, position["size"], exit_price, reason=exit_reason)
                 if not _order.success:
                     log(f"⛔ SELL {symbol} échoué: {_order.error} — position maintenue", "WARN")
@@ -245,6 +256,9 @@ def run_trend_cycle(state: dict, daily_cache: dict, macro_context: dict = None) 
                 total_cost = size * entry_price + fee
 
                 state["capital"] -= total_cost
+                # Stop-loss broker-side (pas de TP pour Bot G : trend follow)
+                from live.order_executor import place_broker_stop
+                stop_ids = place_broker_stop(symbol, size, stop_loss)
                 state["positions"][symbol] = {
                     "entry": round(entry_price, 4),
                     "size": round(size, 6),
@@ -253,6 +267,7 @@ def run_trend_cycle(state: dict, daily_cache: dict, macro_context: dict = None) 
                     "date": str(datetime.now()),
                     "atr": round(atr, 4),
                     "vol_pct": round(annual_vol * 100, 1),
+                    "alpaca_stop_id": stop_ids.get("stop_id"),
                 }
                 log(
                     f"▲ BUY {symbol} | {entry_price:.4f}€ | {size:.6f} units | "

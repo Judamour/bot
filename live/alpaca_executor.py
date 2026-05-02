@@ -373,6 +373,95 @@ def execute_sell(symbol: str, size: float, price_estimate: float,
         return OrderResult(success=False, error=err_msg)
 
 
+# ── Stop-loss broker-side (protection même si bot down) ──────────────────────
+
+def place_stop_loss(symbol: str, qty: float, stop_price: float,
+                    take_profit_price: float | None = None) -> dict:
+    """
+    Place un ordre STOP SELL chez Alpaca (protège la position même si le bot crashe).
+
+    Si take_profit_price fourni, place aussi un LIMIT SELL OCO avec le stop
+    (oco order_class : un fill annule l'autre).
+
+    Retourne dict {"stop_id": ..., "tp_id": ...} ou {} si échec (ne raise pas
+    pour ne pas bloquer le bot — la position reste ouverte sans broker-side stop).
+    """
+    is_crypto = "/" in symbol
+    tif = "gtc"  # toujours gtc pour stops/oco
+
+    # Crypto Alpaca ne supporte pas oco/stop sur paper → fallback stop seul
+    use_oco = take_profit_price is not None and not is_crypto
+
+    try:
+        if use_oco:
+            payload = {
+                "symbol": symbol,
+                "qty": str(qty),
+                "side": "sell",
+                "type": "limit",
+                "limit_price": str(round(take_profit_price, 2)),
+                "time_in_force": tif,
+                "order_class": "oco",
+                "stop_loss": {"stop_price": str(round(stop_price, 2))},
+                "take_profit": {"limit_price": str(round(take_profit_price, 2))},
+            }
+            o = _request("POST", "/v2/orders", body=payload)
+            legs = o.get("legs") or []
+            stop_id = next((l["id"] for l in legs if l.get("type") == "stop"), o.get("id"))
+            tp_id   = next((l["id"] for l in legs if l.get("type") == "limit"), None)
+            logger.info(f"[ALPACA] OCO {symbol} stop={stop_price:.2f} tp={take_profit_price:.2f}")
+            return {"stop_id": stop_id, "tp_id": tp_id, "parent_id": o.get("id")}
+
+        payload = {
+            "symbol": symbol,
+            "qty": str(qty),
+            "side": "sell",
+            "type": "stop",
+            "stop_price": str(round(stop_price, 2)),
+            "time_in_force": tif,
+        }
+        o = _request("POST", "/v2/orders", body=payload)
+        logger.info(f"[ALPACA] STOP {symbol} qty={qty:.6f} @ {stop_price:.2f}$")
+        return {"stop_id": o.get("id")}
+    except Exception as e:
+        logger.warning(f"[ALPACA] place_stop_loss {symbol} échec: {e} — bot SL interne reste actif")
+        return {}
+
+
+def cancel_order(order_id: str) -> bool:
+    """Cancel un ordre par id. True si OK ou déjà fillé/canceled."""
+    if not order_id:
+        return False
+    try:
+        _request("DELETE", f"/v2/orders/{order_id}")
+        return True
+    except Exception as e:
+        msg = str(e)
+        if "422" in msg or "not cancelable" in msg.lower():
+            return True  # déjà fillé/canceled, OK
+        logger.warning(f"[ALPACA] cancel_order {order_id}: {e}")
+        return False
+
+
+def replace_stop_loss(stop_order_id: str, new_stop_price: float,
+                      qty: float | None = None) -> str | None:
+    """
+    Update un ordre stop existant (trailing). Si Alpaca refuse PATCH, fallback
+    cancel + recreate. Retourne le nouvel order_id ou None si échec.
+    """
+    try:
+        body = {"stop_price": str(round(new_stop_price, 2))}
+        if qty is not None:
+            body["qty"] = str(qty)
+        o = _request("PATCH", f"/v2/orders/{stop_order_id}", body=body)
+        return o.get("id") or stop_order_id
+    except Exception as e:
+        logger.warning(f"[ALPACA] PATCH stop {stop_order_id} échec ({e}) — fallback cancel+recreate")
+        # Fallback : cancel old + recreate (perd l'id, le caller doit récupérer)
+        cancel_order(stop_order_id)
+        return None  # caller doit appeler place_stop_loss à nouveau
+
+
 # ── Startup check ────────────────────────────────────────────────────────────
 
 def startup_check() -> bool:
