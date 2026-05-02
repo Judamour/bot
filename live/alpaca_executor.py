@@ -387,7 +387,9 @@ def place_stop_loss(symbol: str, qty: float, stop_price: float,
     pour ne pas bloquer le bot — la position reste ouverte sans broker-side stop).
     """
     is_crypto = "/" in symbol
-    tif = "gtc"  # toujours gtc pour stops/oco
+    # Stocks fractionnaires Alpaca exigent time_in_force=day (gtc refusé)
+    # Crypto Alpaca : gtc OK
+    tif = "gtc" if is_crypto else "day"
 
     # Crypto Alpaca ne supporte pas oco/stop sur paper → fallback stop seul
     use_oco = take_profit_price is not None and not is_crypto
