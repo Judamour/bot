@@ -1170,7 +1170,13 @@ def run_bot_z_cycle(macro: dict, ohlcv: dict = None, broker_equity: float = None
                             for b, s in all_states.items() if b in VALID_BOTS}
             update_omega_history(state, {b: bot_values.get(b, 0) for b in VALID_BOTS}, bot_capitals)
             # Compute weights Omega
-            omega_weights = compute_omega_allocation(state, VALID_BOTS, regime, macro, cb_factor_final, sub_states=all_states)
+            # Activity factor conditionnel au régime offensif (BULL/BALANCED).
+            # En PARITY/SHIELD, les bots "dormants" assurent la diversification
+            # protectrice — ne pas les écraser. (Backtest 2021-2025 confirme :
+            # activity factor en bear 2022 dégrade CAGR de 27 pts.)
+            apply_activity = current_engine in ("BULL", "BALANCED")
+            sub_states_arg = all_states if apply_activity else None
+            omega_weights = compute_omega_allocation(state, VALID_BOTS, regime, macro, cb_factor_final, sub_states=sub_states_arg)
             if omega_weights and abs(sum(omega_weights.values()) - 1.0) < 0.01:
                 blended = omega_weights  # override
                 print(f"[BOT Z] Omega weights actifs : {omega_weights}")

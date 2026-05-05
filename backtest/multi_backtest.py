@@ -2834,6 +2834,45 @@ def backtest_bot_z_meta_v2(results: dict, vix_s: pd.Series, qqq_df: pd.DataFrame
 
         # ── Appliquer l'engine sélectionné ───────────────────────────────────
         weights = _engine_weights(current_engine)
+
+        # ── Activity factor + WEIGHT_CAPS (port des fixes live 2026-05-05) ───
+        # CONDITIONNEL AU RÉGIME : actif seulement en BULL/BALANCED (engines
+        # offensifs où la concentration sur bots actifs est bénéfique).
+        # En PARITY/SHIELD (defensive), garder weights baseline pour préserver
+        # la diversification protectrice — bots "dormants" en bear sont
+        # justement ceux qui amortissent la chute, ne pas les écraser.
+        if current_engine in ("BULL", "BALANCED"):
+            ACTIVITY_WIN = 30
+            WEIGHT_CAPS_BT = {
+                "a": {"min": 0.05, "max": 0.60},
+                "b": {"min": 0.00, "max": 0.15},
+                "c": {"min": 0.00, "max": 0.15},
+                "g": {"min": 0.05, "max": 0.60},
+            }
+            activity = {}
+            for k in ks:
+                recent = ret_history[k][-ACTIVITY_WIN:] if len(ret_history[k]) >= ACTIVITY_WIN else ret_history[k]
+                n_active = sum(1 for r in recent if abs(r) > 1e-6)
+                activity[k] = 1.0 if n_active >= 1 else 0.10
+            adj = {k: weights[k] * activity[k] for k in ks}
+            tot_a = sum(adj.values()) or 1.0
+            weights = {k: v / tot_a for k, v in adj.items()}
+            for _ in range(15):
+                total = sum(weights.values()) or 1.0
+                weights = {b: v / total for b, v in weights.items()}
+                changed = False
+                for b in ks:
+                    cap = WEIGHT_CAPS_BT.get(b, {})
+                    lo, hi = cap.get("min", 0.0), cap.get("max", 1.0)
+                    new_w = max(lo, min(hi, weights[b]))
+                    if abs(new_w - weights[b]) > 1e-6:
+                        changed = True
+                    weights[b] = new_w
+                if not changed:
+                    break
+            total = sum(weights.values()) or 1.0
+            weights = {b: v / total for b, v in weights.items()}
+
         r_port  = sum(weights[k] * bot_r[k] for k in ks)
 
         # ── Circuit Breaker ──────────────────────────────────────────────────
