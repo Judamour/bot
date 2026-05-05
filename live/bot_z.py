@@ -79,13 +79,18 @@ MAX_BOTS_SAME_ASSET = 2      # max 2 bots simultanés long sur le même actif
 CASH_VIX_THRESHOLD  = 35.0   # VIX > 35 → forcer cash 30%
 TARGET_VOL          = 0.15   # volatilité cible (pour rolling score)
 
-# ── Mode Omega (le plus puissant — port de backtest_bot_z_omega) ────────────
+# ── Mode QualityScore (architecture supérieure d'après backtest 4y) ─────────
+# QUALITYSCORE_MODE=True : skip le switching d'engines BULL/BALANCED/PARITY/SHIELD
+# (hors hard rules) → allocation Omega softmax CONTINUE en BALANCED. Évite la
+# dilution des gains BULL par les switchs vers PARITY/SHIELD que le backtest
+# 2021-2025 a révélée (Meta v2 +13.4% vs QualityScore pur +42.6% CAGR).
+# Hard rules SHIELD préservées (VIX>32, BTC+QQQ bearish + VIX>26, DD<-12%).
+QUALITYSCORE_MODE = True
+
 # OMEGA_MODE=True : remplace allocation Meta v2 par algo Expected Return Engine
 #   + Risk Engine + Correlation Penalty + Softmax weights.
 #   Backtest 3y nouvel univers USD : CAGR +44.6% / Sharpe 1.55 / MaxDD -17.4%
-#   → bat NASDAQ-100 sur les 3 axes.
-# Warmup : 18 cycles hebdo (~4 mois). Avant warmup = equal-weight (= +33% CAGR backtest).
-# Hard rules SHIELD toujours préservées (VIX>32, BTC+QQQ bearish, DD<-12%).
+# Warmup : 18 cycles hebdo (~4 mois). Avant warmup = equal-weight.
 OMEGA_MODE = True
 
 # ── Mode agressif (legacy, supplanted par OMEGA_MODE si activé) ─────────────
@@ -1048,40 +1053,57 @@ def run_bot_z_cycle(macro: dict, ohlcv: dict = None, broker_equity: float = None
     current_engine = state.get("current_engine", "BALANCED")
     pending_engine = state.get("pending_engine", "BALANCED")
     days_pending   = state.get("days_pending", 0)
-
-    # Sélection engine avec switch penalty + confidence × persistence
-    raw_engine = select_engine_live(
-        vix, btc_bearish, qqq_bearish, port_dd, regime,
-        rolling_scores, bot_vols,
-        current_engine=current_engine,
-        regime_confidence=regime_confidence,
-        regime_strength=regime_strength,
-    )
-
     prev_engine = current_engine  # pour détecter les switchs
-    if raw_engine != pending_engine:
-        pending_engine = raw_engine
-        days_pending   = 0
-    else:
-        # Plafonner au seuil d'hystérésis pour éviter compteur infini
-        _hyst_table = AGGRESSIVE_HYSTERESIS if AGGRESSIVE_MODE else META_ENGINE_HYSTERESIS
-        hyst_max = _hyst_table.get(pending_engine, 5)
-        days_pending = min(days_pending + 1, hyst_max)
 
-    engine_switched = False
-    _hyst_table = AGGRESSIVE_HYSTERESIS if AGGRESSIVE_MODE else META_ENGINE_HYSTERESIS
-    if days_pending >= _hyst_table.get(pending_engine, 5):
-        engine_switched = (current_engine != pending_engine)
+    if QUALITYSCORE_MODE:
+        # Bypass scoring + hystérésis : Omega softmax allocation continue en BALANCED.
+        # Hard rules SHIELD préservées pour les crises (sécurité non-négociable).
+        _hard_pro = ((btc_bearish and qqq_bearish and vix > 26) or vix > 32 or port_dd < -0.12)
+        raw_engine = "SHIELD" if _hard_pro else "BALANCED"
+        engine_switched = (current_engine != raw_engine)
         if engine_switched:
             _engine_emojis = {"BULL": "🟢", "BALANCED": "🔵", "PARITY": "🟡", "SHIELD": "🔴"}
             notify(
-                f"🔄 <b>Bot Z — Changement d'engine</b>\n"
+                f"🔄 <b>Bot Z — Changement d'engine (QualityScore)</b>\n"
                 f"{_engine_emojis.get(prev_engine, '⚪')} {prev_engine} → "
-                f"{_engine_emojis.get(pending_engine, '⚪')} <b>{pending_engine}</b>\n"
-                f"Régime : {regime} | VIX : {vix:.1f}\n"
+                f"{_engine_emojis.get(raw_engine, '⚪')} <b>{raw_engine}</b>\n"
+                f"Régime : {regime} | VIX : {vix:.1f} | DD : {port_dd*100:+.1f}%\n"
                 f"Capital Z : {new_z_capital:.2f}€ ({(new_z_capital/INITIAL_CAP-1)*100:+.1f}%)"
             )
-        current_engine = pending_engine
+        current_engine = pending_engine = raw_engine
+        days_pending = 0
+    else:
+        # Sélection engine avec switch penalty + confidence × persistence (Meta v2 legacy)
+        raw_engine = select_engine_live(
+            vix, btc_bearish, qqq_bearish, port_dd, regime,
+            rolling_scores, bot_vols,
+            current_engine=current_engine,
+            regime_confidence=regime_confidence,
+            regime_strength=regime_strength,
+        )
+
+        if raw_engine != pending_engine:
+            pending_engine = raw_engine
+            days_pending   = 0
+        else:
+            _hyst_table = AGGRESSIVE_HYSTERESIS if AGGRESSIVE_MODE else META_ENGINE_HYSTERESIS
+            hyst_max = _hyst_table.get(pending_engine, 5)
+            days_pending = min(days_pending + 1, hyst_max)
+
+        engine_switched = False
+        _hyst_table = AGGRESSIVE_HYSTERESIS if AGGRESSIVE_MODE else META_ENGINE_HYSTERESIS
+        if days_pending >= _hyst_table.get(pending_engine, 5):
+            engine_switched = (current_engine != pending_engine)
+            if engine_switched:
+                _engine_emojis = {"BULL": "🟢", "BALANCED": "🔵", "PARITY": "🟡", "SHIELD": "🔴"}
+                notify(
+                    f"🔄 <b>Bot Z — Changement d'engine</b>\n"
+                    f"{_engine_emojis.get(prev_engine, '⚪')} {prev_engine} → "
+                    f"{_engine_emojis.get(pending_engine, '⚪')} <b>{pending_engine}</b>\n"
+                    f"Régime : {regime} | VIX : {vix:.1f}\n"
+                    f"Capital Z : {new_z_capital:.2f}€ ({(new_z_capital/INITIAL_CAP-1)*100:+.1f}%)"
+                )
+            current_engine = pending_engine
 
     # Raisons de sélection d'engine (pour historique et debug)
     _hard_pro = ((btc_bearish and qqq_bearish and vix > 26) or vix > 32 or port_dd < -0.12)
