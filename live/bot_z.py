@@ -107,10 +107,10 @@ REGIME_PERSIST_DAYS    = 7      # jours pour confiance pleine dans un régime (p
 # Bot G : vrai stabilisateur (+23.4%) → peut monter à 55% en SHIELD
 # Bot A : peut descendre à 5% en SHIELD (mais jamais 0 — moteur principal)
 WEIGHT_CAPS = {
-    "a": {"min": 0.05, "max": 0.50},
-    "b": {"min": 0.00, "max": 0.30},
-    "c": {"min": 0.00, "max": 0.25},
-    "g": {"min": 0.15, "max": 0.55},
+    "a": {"min": 0.05, "max": 0.60},
+    "b": {"min": 0.00, "max": 0.15},
+    "c": {"min": 0.00, "max": 0.15},
+    "g": {"min": 0.05, "max": 0.60},
 }
 
 # ── Transition smooth entre engines ──────────────────────────────────────────

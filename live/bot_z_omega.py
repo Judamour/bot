@@ -98,23 +98,50 @@ def update_omega_history(state: dict, bot_values: dict, bot_capitals: dict) -> d
     return state
 
 
+def _count_recent_trades(trades: list, days: int = 30) -> int:
+    """Compte les trades dont exit_date est dans les `days` derniers jours."""
+    if not trades:
+        return 0
+    from datetime import datetime, timedelta
+    cutoff = datetime.now() - timedelta(days=days)
+    n = 0
+    for t in trades:
+        ts = t.get("exit_date") or t.get("entry_date") or ""
+        if not ts:
+            continue
+        try:
+            # Format observé: "2026-05-01 13:37:30.516237" ou ISO 8601
+            dt = datetime.fromisoformat(str(ts).replace(" ", "T", 1)) if "T" not in str(ts) else datetime.fromisoformat(str(ts))
+            if dt >= cutoff:
+                n += 1
+        except Exception:
+            continue
+    return n
+
+
 def _activity_factor(sub_state: dict) -> float:
-    """Pénalise les bots qui ne déploient pas leur capital (positions=0 + trades=0).
+    """Pénalise les bots qui ne déploient pas leur capital (positions=0 + trades récents=0).
 
     Évite le capital fantôme : un bot dormant ne doit pas conserver 14-28%
     du portfolio en cash inutilisé. Sa part se redéploie vers les bots actifs.
     Quand le bot reprend l'activité (positions ≥ 1), factor = 1.0 → réallocation
     automatique au cycle suivant.
+
+    Mesure l'activité sur les **30 derniers jours** (lookback temporel) au lieu
+    du cumul historique : un bot qui a fait 20 trades l'an dernier mais 0 ce mois-ci
+    est traité comme dormant, pas comme actif.
     """
     n_positions = len(sub_state.get("positions", {}) or {})
-    n_trades = len(sub_state.get("trades", []) or [])
     if n_positions >= 1:
         return 1.0
-    if n_trades == 0:
+
+    trades = sub_state.get("trades", []) or []
+    n_recent = _count_recent_trades(trades, days=30)
+    if n_recent == 0:
         return 0.10
-    if n_trades < 5:
+    if n_recent < 5:
         return 0.30
-    if n_trades < 15:
+    if n_recent < 15:
         return 0.60
     return 1.0
 

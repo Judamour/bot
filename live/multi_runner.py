@@ -115,6 +115,19 @@ def _apply_z_budget(state: dict, z_budget_eur: float, ohlcv_cache: dict | None =
     state["capital"] = round(cash_target, 2)
     state["initial_capital"] = round(z_budget_eur, 2)
     state["z_budget_eur"] = round(z_budget_eur, 2)
+
+    # Audit dormant : compteur de cycles consécutifs sans positions ni trades.
+    # Alerte console à 90 cycles (≈15j en 4h) — signal stratégie inadaptée à l'univers.
+    n_pos = len(state.get("positions", {}) or {})
+    n_tr = len(state.get("trades", []) or [])
+    if n_pos == 0 and n_tr == 0:
+        state["dormant_cycles"] = int(state.get("dormant_cycles", 0)) + 1
+        if state["dormant_cycles"] in (90, 180, 360):
+            bid = state.get("_bot_id", "?")
+            log(f"💤 Bot {bid} dormant depuis {state['dormant_cycles']} cycles "
+                f"(~{state['dormant_cycles']*4//24}j) — vérifier si stratégie adaptée à l'univers", "WARN")
+    else:
+        state["dormant_cycles"] = 0
     return state
 
 
@@ -185,12 +198,22 @@ def print_contest_status(state_a: dict, state_b: dict, state_c: dict,
     print(f"{'Bot':<26} {'Libre':>10} {'Total':>10} {'Positions':>10} {'Trades':>8} {'Perf':>8}")
     print("-" * 72)
 
-    all_states = [state_a, state_b, state_c, state_g, state_h, state_i]
-    if state_j:
-        all_states.append(state_j)
-    for name, state in bots:
-        if not state:
+    # Map bot_id → state pour filtrer sur ACTIVE_BOTS (ne pas afficher les bots
+    # désactivés dont le capital fantôme fausse la perf totale).
+    bots_map = [
+        ("a", "A — Supertrend+MR",     state_a),
+        ("b", "B — Momentum",          state_b),
+        ("c", "C — Breakout",          state_c),
+        ("g", "G — Trend Multi-Asset", state_g),
+        ("h", "H — VCB Breakout",      state_h),
+        ("i", "I — RS Leaders",        state_i),
+        ("j", "J — Mean Reversion",    state_j or {}),
+    ]
+    active_states = []
+    for bid, name, state in bots_map:
+        if not state or bid not in config.ACTIVE_BOTS:
             continue
+        active_states.append(state)
         total = _portfolio_value(state, daily_cache)
         init = state.get("initial_capital", INITIAL_CAPITAL_PER_BOT)
         perf = (total - init) / init * 100 if init > 0 else 0
@@ -200,18 +223,21 @@ def print_contest_status(state_a: dict, state_b: dict, state_c: dict,
 
         color = Fore.GREEN if perf > 0 else Fore.RED if perf < 0 else Fore.WHITE
         print(
-            f"Bot {name:<22} {capital:>8.2f}€  {total:>8.2f}€  "
+            f"Bot {name:<22} {capital:>8.2f}$  {total:>8.2f}$  "
             f"{positions:<12} {trades:>6}  {color}{perf:>+6.1f}%{Style.RESET_ALL}"
         )
 
-    # Combined
-    n_bots = len(all_states)
-    total_all = sum(_portfolio_value(s, daily_cache) for s in all_states)
-    total_init = sum(s.get("initial_capital", INITIAL_CAPITAL_PER_BOT) for s in all_states)
-    combined_perf = (total_all - total_init) / total_init * 100 if total_init > 0 else 0
+    # TOTAL : référence = broker equity (fetché par _sync_broker_capital_periodic)
+    # plutôt que sum(initial_capital) qui fluctue avec les budgets dispatchés Bot Z.
+    total_all = sum(_portfolio_value(s, daily_cache) for s in active_states)
+    broker_ref = float(config.INITIAL_CAPITAL or 0) or sum(
+        s.get("original_capital", s.get("initial_capital", INITIAL_CAPITAL_PER_BOT))
+        for s in active_states
+    )
+    combined_perf = (total_all - broker_ref) / broker_ref * 100 if broker_ref > 0 else 0
     color = Fore.GREEN if combined_perf > 0 else Fore.RED
     print("-" * 72)
-    print(f"{'TOTAL ('+ str(n_bots*1000) +'€ base)':<26} {'':>10} {total_all:>8.2f}€  "
+    print(f"{'TOTAL (broker '+f'{broker_ref:.0f}'+'$)':<26} {'':>10} {total_all:>8.2f}$  "
           f"{'':>10} {'':>8}  {color}{combined_perf:>+6.1f}%{Style.RESET_ALL}")
     print(f"{Fore.CYAN}{'='*72}{Style.RESET_ALL}\n")
 
@@ -259,10 +285,15 @@ def _states_total_value(states: list[dict], ohlcv_cache: dict | None = None) -> 
 
 
 def _sync_broker_capital_periodic(active_states: list[tuple[str, dict]],
-                                  ohlcv_cache: dict | None = None) -> tuple[float | None, bool]:
+                                  ohlcv_cache: dict | None = None,
+                                  is_first_cycle: bool = False) -> tuple[float | None, bool]:
     """
     Re-fetch broker equity, log drift vs sum(states). Si drift > seuil, hard-realign.
     Retourne (broker_equity, realigned).
+
+    `is_first_cycle=True` : skip le hard realign brutal au boot — laisse
+    `_apply_z_budget` réaligner proprement via z_budget − positions_mtm. Le drift
+    transitoire est attendu après restart (states sub-bots du cycle précédent).
     """
     global INITIAL_CAPITAL_PER_BOT
     broker_equity = _fetch_broker_equity()
@@ -278,6 +309,15 @@ def _sync_broker_capital_periodic(active_states: list[tuple[str, dict]],
     drift_pct   = abs(drift_ratio) * 100
     log(f"[CAPITAL_SYNC] broker={broker_equity:.0f}$ states_sum={sum_states:.0f}$ "
         f"drift={drift_ratio*100:+.1f}%", "INFO")
+
+    if is_first_cycle and drift_pct > DRIFT_REALIGN_THRESHOLD * 100:
+        log(f"[CAPITAL_SYNC] First cycle après restart : skip hard realign "
+            f"(drift {drift_pct:.0f}% sera lissé par _apply_z_budget)", "INFO")
+        active_count = max(len(active_states), 1)
+        config.INITIAL_CAPITAL = broker_equity
+        config.INITIAL_CAPITAL_PER_BOT = round(broker_equity / active_count, 2)
+        INITIAL_CAPITAL_PER_BOT = config.INITIAL_CAPITAL_PER_BOT
+        return broker_equity, False
 
     if drift_pct <= DRIFT_REALIGN_THRESHOLD * 100:
         # Drift acceptable : on garde les capitals des bots (contest dynamique préservé)
@@ -456,6 +496,7 @@ def run():
     _prev_budget   = {}   # Track previous budget for change detection
     z_summary      = None # BUG-01 : initialisé ici pour éviter NameError si Bot Z crashe au 1er cycle
     z_budget_alloc = {}   # BUG-03 : initialisé ici pour éviter spam Telegram après crash Bot Z
+    _cycle_count   = 0    # 1er cycle = skip hard realign brutal (transitoire après restart)
 
     log(f"Bot A capital: {state_a['capital']:.2f}€ | Positions: {list(state_a['positions'].keys())}")
     log(f"Bot B capital: {state_b['capital']:.2f}€ | Positions: {list(state_b['positions'].keys())}")
@@ -518,7 +559,8 @@ def run():
             if "h" in config.ACTIVE_BOTS: _active_for_sync.append(("H", state_h))
             if "i" in config.ACTIVE_BOTS: _active_for_sync.append(("I", state_i))
             if "j" in config.ACTIVE_BOTS: _active_for_sync.append(("J", state_j))
-            broker_equity_now, realigned = _sync_broker_capital_periodic(_active_for_sync, ohlcv_daily)
+            broker_equity_now, realigned = _sync_broker_capital_periodic(_active_for_sync, ohlcv_daily, is_first_cycle=(_cycle_count == 0))
+            _cycle_count += 1
             if realigned:
                 # Persist états réalignés avant Bot Z (sinon Bot Z lit l'ancien capital)
                 save_state_a(state_a); save_mom(state_b); save_brk(state_c); save_trd(state_g)
