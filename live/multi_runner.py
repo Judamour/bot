@@ -56,27 +56,39 @@ INITIAL_CAPITAL_PER_BOT = config.INITIAL_CAPITAL_PER_BOT
 Z_BUDGET_FILE = "logs/bot_z/budget.json"
 
 
-def _apply_z_budget(state: dict, z_budget_eur: float) -> dict:
-    """Applique l'allocation Bot Z à l'état d'un sub-bot en scalant le capital proportionnellement.
+def _apply_z_budget(state: dict, z_budget_eur: float, ohlcv_cache: dict | None = None) -> dict:
+    """Aligne le `capital` cash d'un sub-bot sur (z_budget − positions mark-to-market).
 
-    Si Bot Z alloue 4 000€ à Bot A (qui avait 1 000€ initial), le capital disponible
-    est multiplié ×4 tout en préservant le ratio de PnL accumulé.
+    Le budget Bot Z représente l'allocation cible totale du sub-bot (cash + positions).
+    On dérive donc le cash disponible : capital = max(0, z_budget − positions_value_mtm).
+    Cela garantit que sum(states.capital + positions_mtm) ≈ sum(z_budget) ≈ broker_equity,
+    éliminant le drift cumulatif des bots qui ne tradent pas (B, C) — leur capital cash
+    s'aligne automatiquement sur leur budget cible au lieu de s'empiler par scale ratio.
 
-    Si le bot est "mort" (capital + positions < 5€), injecte le budget comme capital frais
-    au lieu de scaler 0 × N = 0.
+    Si le bot est "mort" (capital + positions < 5€), injecte le budget comme capital frais.
     """
-    # Préserver le capital original pour le drawdown check (jamais rescalé)
     if "original_capital" not in state:
         state["original_capital"] = state.get("initial_capital", INITIAL_CAPITAL_PER_BOT)
 
-    # Calculer la valeur totale du bot (cash + positions mark-to-market)
-    positions_value = sum(
-        p.get("entry", 0) * p.get("size", 0)
-        for p in state.get("positions", {}).values()
-    )
-    total_value = state.get("capital", 0) + positions_value
+    def _mtm_price(symbol: str, fallback: float) -> float:
+        if ohlcv_cache and symbol in ohlcv_cache:
+            try:
+                df = ohlcv_cache[symbol]
+                if df is not None and not df.empty:
+                    import math
+                    px = float(df["close"].iloc[-1])
+                    if not math.isnan(px) and px > 0:
+                        return px
+            except Exception:
+                pass
+        return float(fallback or 0)
 
-    # Bot mort : injecter capital frais au lieu de scaler 0
+    positions_mtm = sum(
+        _mtm_price(sym, p.get("entry", 0)) * float(p.get("size", 0) or 0)
+        for sym, p in state.get("positions", {}).items()
+    )
+    total_value = state.get("capital", 0) + positions_mtm
+
     if total_value < 5.0 and z_budget_eur > 0:
         bot_id = state.get("_bot_id", "?")
         log(f"[Z→] Bot {bot_id} mort ({total_value:.2f}€) — injection {z_budget_eur:.0f}€", "WARN")
@@ -84,31 +96,23 @@ def _apply_z_budget(state: dict, z_budget_eur: float) -> dict:
         notify_bot_revived(bot_id, z_budget_eur)
         state["capital"] = round(z_budget_eur, 2)
         state["positions"] = {}
-        state["trades"] = []  # Reset historique — nouveau départ
+        state["trades"] = []
         state["initial_capital"] = round(z_budget_eur, 2)
         state["z_budget_eur"] = round(z_budget_eur, 2)
-        state["original_capital"] = round(z_budget_eur, 2)  # Reset drawdown baseline
-        state["dd_frozen"] = False  # Dégeler le bot
+        state["original_capital"] = round(z_budget_eur, 2)
+        state["dd_frozen"] = False
         return state
 
-    prev = state.get("z_budget_eur", state.get("initial_capital", INITIAL_CAPITAL_PER_BOT))
-    if prev <= 0:
-        prev = INITIAL_CAPITAL_PER_BOT
-    # CAP : ne jamais scale en-dessous de min_order × 2 (5€) sinon les sub-bots
-    # ne peuvent rien faire. Si le budget est trop petit, on injecte le budget
-    # comme nouveau capital initial (pas de scale), reset baseline.
     if z_budget_eur < config.MIN_ORDER_EUR * 2:
-        # Budget Bot Z < 10€ pour ce sub-bot : pas viable, on garde minimum
-        # mais on flagge dispo=False pour skip ce bot ce cycle
         state["capital"] = round(z_budget_eur, 2)
         state["initial_capital"] = round(z_budget_eur, 2)
         state["z_budget_eur"] = round(z_budget_eur, 2)
-        state["_below_min_order"] = True  # flag pour skip
+        state["_below_min_order"] = True
         return state
     state["_below_min_order"] = False
-    # Scale standard : préserver le ratio cash/positions du bot
-    scale = z_budget_eur / prev
-    state["capital"] = round(state["capital"] * scale, 2)
+
+    cash_target = max(0.0, z_budget_eur - positions_mtm)
+    state["capital"] = round(cash_target, 2)
     state["initial_capital"] = round(z_budget_eur, 2)
     state["z_budget_eur"] = round(z_budget_eur, 2)
     return state
@@ -329,14 +333,18 @@ def _sync_broker_capital_periodic(active_states: list[tuple[str, dict]],
     config.INITIAL_CAPITAL_PER_BOT = round(per_bot, 2)
     INITIAL_CAPITAL_PER_BOT = config.INITIAL_CAPITAL_PER_BOT
 
-    try:
-        from live.notifier import notify
-        notify(f"⚠️ <b>DRIFT CAPITAL CORRIGÉ (paper)</b>\n"
-               f"Broker : {broker_equity:.0f}$\n"
-               f"States avant : {sum_states:.0f}$ ({drift_ratio*100:+.1f}%)\n"
-               f"Bots réalignés à {per_bot:.0f}$ chacun.")
-    except Exception:
-        pass
+    # Pas de notify Telegram en paper : le drift résiduel est attendu (perf différentielle
+    # entre sub-bots vs broker équity), le realign est silencieux. On notifie seulement
+    # si le drift est massif (> 50%) — vrai signe d'anomalie.
+    if drift_pct > 50:
+        try:
+            from live.notifier import notify
+            notify(f"⚠️ <b>DRIFT CAPITAL CORRIGÉ (paper)</b>\n"
+                   f"Broker : {broker_equity:.0f}$\n"
+                   f"States avant : {sum_states:.0f}$ ({drift_ratio*100:+.1f}%)\n"
+                   f"Bots réalignés à {per_bot:.0f}$ chacun.")
+        except Exception:
+            pass
     return broker_equity, True
 
 
@@ -565,13 +573,13 @@ def run():
                     # il ne reçoit pas le capital initial par défaut → pas de capital fantôme.
                     # _apply_z_budget skip si budget=0 (via flag _below_min_order).
                     if "a" in config.ACTIVE_BOTS:
-                        state_a = _apply_z_budget(state_a, z_budget_alloc.get("a", 0))
+                        state_a = _apply_z_budget(state_a, z_budget_alloc.get("a", 0), ohlcv_daily)
                     if "b" in config.ACTIVE_BOTS:
-                        state_b = _apply_z_budget(state_b, z_budget_alloc.get("b", 0))
+                        state_b = _apply_z_budget(state_b, z_budget_alloc.get("b", 0), ohlcv_daily)
                     if "c" in config.ACTIVE_BOTS:
-                        state_c = _apply_z_budget(state_c, z_budget_alloc.get("c", 0))
+                        state_c = _apply_z_budget(state_c, z_budget_alloc.get("c", 0), ohlcv_daily)
                     if "g" in config.ACTIVE_BOTS:
-                        state_g = _apply_z_budget(state_g, z_budget_alloc.get("g", 0))
+                        state_g = _apply_z_budget(state_g, z_budget_alloc.get("g", 0), ohlcv_daily)
 
                     # Sauvegarder immédiatement : persistance même si un bot crashe ensuite
                     save_state_a(state_a)
@@ -808,12 +816,14 @@ def run():
                     log(f"[daily_health] erreur: {_e}", "WARN")
 
             # ── 16. Drawdown checks ───────────────────────────────────────────
-            # DD baseline = original_capital (figé), pas initial_capital (réécrit par
-            # _apply_z_budget à chaque cycle). Sinon le freeze ne se déclenche jamais.
+            # DD baseline = z_budget_eur (allocation cible actuelle Bot Z) ou
+            # original_capital pour les bots non-pilotés (H/I/J). Le z_budget
+            # reflète la sous/sur-pondération régime — un bot sous-pondéré n'est
+            # PAS en drawdown, juste alloué moins. Évite les faux freezes en BULL.
             UNFREEZE_DD = -0.08  # -8% : marge de 7% depuis seuil -15%
             for name, state in [("A", state_a), ("B", state_b), ("C", state_c), ("G", state_g), ("H", state_h), ("I", state_i), ("J", state_j)]:
                 total = _portfolio_value(state, ohlcv_daily)
-                init = state.get("original_capital", state.get("initial_capital", INITIAL_CAPITAL_PER_BOT))
+                init = state.get("z_budget_eur") or state.get("original_capital") or state.get("initial_capital", INITIAL_CAPITAL_PER_BOT)
                 dd = (total - init) / init if init > 0 else 0
                 was_frozen = state.get("dd_frozen", False)
                 if dd <= config.MAX_DRAWDOWN and not was_frozen:
