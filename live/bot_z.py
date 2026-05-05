@@ -475,28 +475,63 @@ def get_exposure(all_states: dict) -> dict:
 
 # ── Qualité récente des bots ─────────────────────────────────────────────────
 
+def compute_activity_factor(state: dict) -> float:
+    """
+    Pénalise les bots inactifs pour libérer leur capital vers les bots productifs.
+
+    Évite le "capital fantôme" : un bot qui n'utilise pas son allocation
+    (B, C en BULL régime depuis 60j) ne doit pas bloquer 14-28% du capital total
+    en cash dormant. Son budget se redéploie automatiquement vers les bots
+    actifs (A, G avec positions ouvertes).
+
+    Logique :
+      - positions ouvertes ≥ 1 → ACTIF (1.0) : bot a déployé son capital
+      - 0 positions + historique de trades → factor croissant avec n_trades
+
+    Quand un bot dormant signale BUY, ses positions passent à ≥ 1 → activity=1.0
+    au cycle suivant → réallocation automatique. Le contest dynamique reste vivant.
+    """
+    n_positions = len(state.get("positions", {}))
+    n_trades = len(state.get("trades", []))
+
+    if n_positions >= 1:
+        return 1.0
+    if n_trades == 0:
+        return 0.10  # totalement dormant : 10% du budget cible
+    if n_trades < 5:
+        return 0.30
+    if n_trades < 15:
+        return 0.60
+    return 1.0
+
+
 def compute_rolling_score(bot_id: str, state: dict, window: int = 20) -> float:
     """
-    Score de qualité récente basé sur les N derniers trades.
-    Sharpe approximatif normalisé entre 0.3 et 1.5.
+    Score de qualité combinant Sharpe (PnL) × activity (capital deployment).
+    Sharpe approximatif normalisé entre 0.3 et 1.5, multiplié par activity factor.
 
-    Ramp-up progressif (évite de sur-pondérer un score instable) :
+    Ramp-up progressif sur le Sharpe (évite de sur-pondérer un score instable) :
       < 5 trades  → neutre 1.0
       5-20 trades → blend progressif entre neutre et score réel
       >= 20 trades → score plein
+
+    L'activity factor (0.10 à 1.0) pénalise les bots inactifs pour éviter
+    qu'ils bloquent du capital sans le déployer.
     """
+    activity = compute_activity_factor(state)
+
     trades = state.get("trades", [])[-window:]
     n = len(trades)
     if n < 5:
-        return 1.0  # neutre — pas assez de data
+        return 1.0 * activity  # neutre Sharpe, mais activity peut pénaliser
     pnls = [t.get("pnl", 0) for t in trades]
     avg = sum(pnls) / n
     std = math.sqrt(sum((p - avg) ** 2 for p in pnls) / n) if n > 1 else 1.0
     sharpe = avg / std if std > 0 else 0.0
     raw = max(0.3, min(1.5, 1.0 + sharpe * 0.3))
-    # Blend progressif : confiance croît de 0 à 1 entre 5 et 20 trades
     confidence = min(1.0, (n - 5) / 15.0)
-    return 1.0 + confidence * (raw - 1.0)
+    sharpe_quality = 1.0 + confidence * (raw - 1.0)
+    return sharpe_quality * activity
 
 
 def compute_bot_volatility(state: dict, window: int = 20) -> float:
@@ -1135,7 +1170,7 @@ def run_bot_z_cycle(macro: dict, ohlcv: dict = None, broker_equity: float = None
                             for b, s in all_states.items() if b in VALID_BOTS}
             update_omega_history(state, {b: bot_values.get(b, 0) for b in VALID_BOTS}, bot_capitals)
             # Compute weights Omega
-            omega_weights = compute_omega_allocation(state, VALID_BOTS, regime, macro, cb_factor_final)
+            omega_weights = compute_omega_allocation(state, VALID_BOTS, regime, macro, cb_factor_final, sub_states=all_states)
             if omega_weights and abs(sum(omega_weights.values()) - 1.0) < 0.01:
                 blended = omega_weights  # override
                 print(f"[BOT Z] Omega weights actifs : {omega_weights}")

@@ -98,12 +98,34 @@ def update_omega_history(state: dict, bot_values: dict, bot_capitals: dict) -> d
     return state
 
 
+def _activity_factor(sub_state: dict) -> float:
+    """Pénalise les bots qui ne déploient pas leur capital (positions=0 + trades=0).
+
+    Évite le capital fantôme : un bot dormant ne doit pas conserver 14-28%
+    du portfolio en cash inutilisé. Sa part se redéploie vers les bots actifs.
+    Quand le bot reprend l'activité (positions ≥ 1), factor = 1.0 → réallocation
+    automatique au cycle suivant.
+    """
+    n_positions = len(sub_state.get("positions", {}) or {})
+    n_trades = len(sub_state.get("trades", []) or [])
+    if n_positions >= 1:
+        return 1.0
+    if n_trades == 0:
+        return 0.10
+    if n_trades < 5:
+        return 0.30
+    if n_trades < 15:
+        return 0.60
+    return 1.0
+
+
 def compute_omega_allocation(
     state: dict,
     valid_bots: list,
     regime: str,
     macro: dict,
     cb_factor_in: float = 1.0,
+    sub_states: dict | None = None,
 ) -> dict:
     """
     Calcule les poids Omega à partir de l'historique stocké dans state.
@@ -111,6 +133,10 @@ def compute_omega_allocation(
     Retourne {bot_id: weight, ...} dont la somme = 1.0.
 
     Si historique insuffisant (warmup < SHARPE_WIN), retourne equal-weight.
+
+    Si `sub_states` fourni, applique un activity factor multiplicatif aux weights
+    pour pénaliser les bots qui ne déploient pas leur capital (évite le capital
+    fantôme bloquant 14-28% du portfolio sur des bots inactifs en BULL régime).
     """
     history = state.get("omega_history", {})
     rets_hist = history.get("returns", {})
@@ -223,6 +249,12 @@ def compute_omega_allocation(
     exp_s = {k: math.exp(SOFTMAX_BETA * (final_scores[k] - max_s)) for k in valid_bots}
     total_e = sum(exp_s.values()) or 1.0
     weights = {k: exp_s[k] / total_e for k in valid_bots}
+
+    # ── Activity factor : pénalise les bots qui ne déploient pas leur capital ─
+    if sub_states:
+        adjusted = {k: weights[k] * _activity_factor(sub_states.get(k, {})) for k in valid_bots}
+        total_adj = sum(adjusted.values()) or 1.0
+        weights = {k: v / total_adj for k, v in adjusted.items()}
 
     return weights
 
