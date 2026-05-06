@@ -19,6 +19,7 @@ Usage:
 import json
 import os
 import sys
+import threading
 import time
 from datetime import datetime, timedelta, timezone
 from colorama import Fore, Style, init
@@ -390,6 +391,51 @@ def _sync_broker_capital_periodic(active_states: list[tuple[str, dict]],
 
 # ── Timing ───────────────────────────────────────────────────────────────────
 
+# ── Stop monitor (15min daemon thread) ──────────────────────────────────────
+
+_STOP_MONITOR_INTERVAL_SEC = 900  # 15 minutes
+_stop_monitor_stop = threading.Event()
+
+
+def _stop_monitor_loop(states_registry: dict):
+    """
+    Daemon : entre les cycles 4h, vérifie toutes les 15min que les stops broker
+    sont encore actifs. Re-place ceux expirés (Alpaca DAY tif sur fractional
+    shares expire à 22h UTC chaque soir). Sans ce monitor, une position serait
+    non-protégée jusqu'au prochain cycle 4h après expiration.
+
+    Lit/mute les positions in-memory partagées avec le main thread. Pas de lock :
+    les races sont rares (15min vs 4h) et non-fatales (pire cas = duplicate stop
+    annulé au cycle suivant).
+    """
+    from live.order_executor import renew_broker_stop_if_expired
+    log("[STOP-MONITOR] démarré (interval 15min)")
+    while not _stop_monitor_stop.is_set():
+        # Wait first so on bot startup the main 4h cycle runs before the monitor
+        if _stop_monitor_stop.wait(_STOP_MONITOR_INTERVAL_SEC):
+            break
+        try:
+            checked = 0
+            renewed = 0
+            for bot_id, state in states_registry.items():
+                positions = state.get("positions") or {}
+                for symbol, position in list(positions.items()):
+                    if not position.get("alpaca_stop_id"):
+                        continue
+                    checked += 1
+                    old_id = position["alpaca_stop_id"]
+                    try:
+                        renew_broker_stop_if_expired(symbol, position)
+                        if position.get("alpaca_stop_id") != old_id:
+                            renewed += 1
+                    except Exception as e:
+                        log(f"[STOP-MONITOR] {bot_id}/{symbol} échec: {e}", "WARN")
+            if checked > 0:
+                log(f"[STOP-MONITOR] {checked} stops vérifiés, {renewed} renouvelés")
+        except Exception as e:
+            log(f"[STOP-MONITOR] iteration: {e}", "WARN")
+
+
 def _next_cycle_utc() -> datetime:
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     for h in CYCLE_HOURS_UTC:
@@ -505,6 +551,21 @@ def run():
     log(f"Bot H capital: {state_h['capital']:.2f}€ | Positions: {list(state_h['positions'].keys())}")
     log(f"Bot I capital: {state_i['capital']:.2f}€ | Positions: {list(state_i['positions'].keys())}")
     log(f"Bot J capital: {state_j['capital']:.2f}€ | Positions: {list(state_j['positions'].keys())}")
+
+    # ── Démarre le monitor stops 15min en daemon thread ─────────────────────
+    # Comble le trou de protection nocturne entre les cycles 4h après expiration
+    # des stops Alpaca DAY (fractional shares). Re-place automatiquement si expiré.
+    _states_registry = {
+        "A": state_a, "B": state_b, "C": state_c, "G": state_g,
+        "H": state_h, "I": state_i, "J": state_j,
+    }
+    _monitor_thread = threading.Thread(
+        target=_stop_monitor_loop,
+        args=(_states_registry,),
+        daemon=True,
+        name="stop-monitor",
+    )
+    _monitor_thread.start()
 
     while True:
         try:
