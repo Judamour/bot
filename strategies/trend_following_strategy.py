@@ -249,6 +249,12 @@ def run_trend_cycle(state: dict, daily_cache: dict, macro_context: dict = None) 
                 continue
             if len(state["positions"]) >= MAX_POSITIONS:
                 continue
+            # Cap secteur GLOBAL cross-bots
+            _sec = config.SECTORS.get(symbol)
+            _blocked = (macro_context or {}).get("blocked_sectors") or set()
+            if _sec and _sec in _blocked:
+                log(f"{symbol} — Signal ignoré (secteur '{_sec}' saturé GLOBAL cross-bots)")
+                continue
 
             trend_ok = current_price > sma200 and current_price > sma50
             breakout = current_price > breakout_high if breakout_high > 0 else False

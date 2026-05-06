@@ -207,6 +207,10 @@ def run_breakout_cycle(state: dict, daily_cache: dict, macro_context: dict = Non
         # ── Entry checks (no open position for this symbol) ──
         if macro_context and macro_context.get("exposure_blocked"):
             continue  # Exposition portfolio > 80%
+        # Cap secteur GLOBAL cross-bots
+        _sec = config.SECTORS.get(symbol)
+        if _sec and _sec in ((macro_context or {}).get("blocked_sectors") or set()):
+            continue
         if symbol not in state["positions"]:
             breakout = current_price > dc_upper if dc_upper > 0 else False
             adx_ok = adx > ADX_MIN

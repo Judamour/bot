@@ -378,9 +378,14 @@ def run_rs_leaders_cycle(state: dict, daily_cache: dict, macro_context: dict = N
         to_buy = [s for s in top_symbols if s not in state["positions"]]
     portfolio_val = _portfolio_value(state, daily_cache)
 
+    _blocked_sectors = (macro or {}).get("blocked_sectors") or set()
     for symbol in to_buy:
         df = daily_cache.get(symbol)
         if df is None:
+            continue
+        # Cap secteur GLOBAL cross-bots
+        _sec = config.SECTORS.get(symbol)
+        if _sec and _sec in _blocked_sectors:
             continue
         # Skip BUY xStocks hors heures US (slippage > 0.5% sur Kraken)
         if symbol in config.XSTOCKS and not _is_us_market_open():

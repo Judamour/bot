@@ -209,9 +209,14 @@ def run_mr_cycle(state: dict, daily_cache: dict, macro_context: dict = None) -> 
         _log("Exposition portfolio > 80% — nouvelles entrées suspendues", "WARN")
         return state
 
+    _blocked_sectors = (macro_context or {}).get("blocked_sectors") or set()
     for symbol in config.SYMBOLS:
         if symbol in state["positions"]:
             continue  # déjà en position
+        # Cap secteur GLOBAL cross-bots
+        _sec = config.SECTORS.get(symbol)
+        if _sec and _sec in _blocked_sectors:
+            continue
 
         df = daily_cache.get(symbol)
         if df is None or df.empty:

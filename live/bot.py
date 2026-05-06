@@ -451,13 +451,19 @@ def process_symbol(
             log_signal("BUY_SKIP_MAX_POS", symbol, {"price": current_price, "open_positions": len(state["positions"])})
             return state
 
-        # Corrélation secteur — max MAX_PER_SECTOR positions par secteur
+        # Corrélation secteur — max MAX_PER_SECTOR positions par secteur (intra-bot)
         sector = config.SECTORS.get(symbol)
         if sector:
             occupied = [s for s in state["positions"] if config.SECTORS.get(s) == sector]
             if len(occupied) >= config.MAX_PER_SECTOR:
-                log(f"{symbol} — Signal ignoré (secteur '{sector}' saturé: {occupied})", "INFO")
+                log(f"{symbol} — Signal ignoré (secteur '{sector}' saturé intra-bot: {occupied})", "INFO")
                 log_signal("BUY_SKIP_SECTOR", symbol, {"sector": sector, "occupied_by": occupied, "price": current_price})
+                return state
+            # Cap GLOBAL cross-bots : si secteur déjà saturé sur l'ensemble du portfolio
+            blocked = state.get("_blocked_sectors") or set()
+            if sector in blocked:
+                log(f"{symbol} — Signal ignoré (secteur '{sector}' saturé GLOBAL cross-bots)", "INFO")
+                log_signal("BUY_SKIP_SECTOR_GLOBAL", symbol, {"sector": sector, "price": current_price})
                 return state
 
         # Filtre earnings xStocks

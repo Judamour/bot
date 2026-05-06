@@ -1157,6 +1157,23 @@ def run():
             except Exception as e:
                 log(f"[INACTIVITY] check failed: {e}", "WARN")
 
+            # ── Cap corrélation cross-bots : MAX_PER_SECTOR_GLOBAL ──
+            # Compte les positions par secteur à travers TOUS les bots actifs.
+            # Si un secteur dépasse le cap → bloque les nouvelles entrées sur ce
+            # secteur uniquement (les autres restent libres).
+            global_sector_counts = {}
+            for _st in [state_a, state_b, state_c, state_g, state_h, state_i, state_j]:
+                for _sym in (_st.get("positions") or {}):
+                    _sec = config.SECTORS.get(_sym, "other")
+                    global_sector_counts[_sec] = global_sector_counts.get(_sec, 0) + 1
+            blocked_sectors = {
+                sec for sec, n in global_sector_counts.items()
+                if n >= config.MAX_PER_SECTOR_GLOBAL
+            }
+            if blocked_sectors:
+                log(f"⚠ Cap secteur GLOBAL atteint : {blocked_sectors} (counts: {global_sector_counts})", "INFO")
+            macro["blocked_sectors"] = blocked_sectors
+
             # Passer le flag aux bots pour bloquer les nouvelles entrées
             # exposure_high OR daily_breaker OR max_trades → block new entries
             macro["exposure_blocked"] = bool(exposure_high or breaker_active or max_trades_reached)
@@ -1164,6 +1181,7 @@ def run():
             # ── 5. Bot A: Supertrend + filters ────────────────────────────────
             log(f"\n{Fore.CYAN}--- Bot A: Supertrend+MR ---{Style.RESET_ALL}")
             state_a["_exposure_blocked"] = bool(exposure_high or breaker_active or max_trades_reached)
+            state_a["_blocked_sectors"] = blocked_sectors
 
             rotation = bot_a._compute_rotation_factors(state_a.get("trades", []))
             momentum_filter = bot_a._update_momentum_filter(state_a)

@@ -63,6 +63,9 @@ MAX_DRAWDOWN = -0.35    # Coupe-circuit si capital chute de -35% depuis le dépa
 # 1 → 2 : on bloquait NVDA quand AAPL ouvert, BTC quand ETH ouvert. Rate les
 # rallies sectoriels groupés (NVDA +25%, BTC +20% avril 2026).
 MAX_PER_SECTOR = 2
+# Cap GLOBAL cross-bots : Bot A peut avoir 2 tech, Bot G aussi → 4 positions tech
+# côté broker = trop concentré. Cap dur à 3 par secteur cumulé sur tous les bots.
+MAX_PER_SECTOR_GLOBAL = int(os.getenv("MAX_PER_SECTOR_GLOBAL", "3"))
 SECTORS = {
     # Tech mega-cap (Alpaca)
     "NVDA": "tech",       "GOOGL": "tech",      "META": "tech",

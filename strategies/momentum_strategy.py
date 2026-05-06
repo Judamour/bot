@@ -275,7 +275,13 @@ def run_momentum_cycle(state: dict, daily_cache: dict, macro_context: dict = Non
     target_per_pos = total_portfolio / TOP_N  # Cible uniforme par position
 
     skipped_us_closed = 0
+    _blocked_sectors = (macro_context or {}).get("blocked_sectors") or set()
     for symbol in to_buy:
+        # Cap secteur GLOBAL cross-bots
+        _sec = config.SECTORS.get(symbol)
+        if _sec and _sec in _blocked_sectors:
+            log(f"{symbol} — Signal ignoré (secteur '{_sec}' saturé GLOBAL cross-bots)")
+            continue
         if symbol in config.XSTOCKS and not _is_us_market_open():
             log(f"{symbol} — Marché US fermé, BUY ignoré")
             skipped_us_closed += 1

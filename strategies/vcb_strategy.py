@@ -207,6 +207,10 @@ def run_vcb_cycle(state: dict, ohlcv_4h: dict, macro_context: dict = None) -> di
         # ── Entry checks ──
         if macro_context and macro_context.get("exposure_blocked"):
             continue  # Exposition portfolio > 80%
+        # Cap secteur GLOBAL cross-bots
+        _sec = config.SECTORS.get(symbol)
+        if _sec and _sec in ((macro_context or {}).get("blocked_sectors") or set()):
+            continue
         if symbol not in state["positions"]:
             if len(state["positions"]) >= MAX_POSITIONS:
                 continue
