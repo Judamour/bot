@@ -375,6 +375,24 @@ def execute_sell(symbol: str, size: float, price_estimate: float,
 
 # ── Stop-loss broker-side (protection même si bot down) ──────────────────────
 
+def _fetch_position_qty(symbol: str) -> float | None:
+    """
+    GET /v2/positions/{symbol} → qty disponible côté broker (qty_available).
+    None si pas de position ouverte ou erreur.
+
+    Permet de clamp la qty d'un stop pour éviter "insufficient qty" quand
+    le state.json a un arrondi légèrement supérieur à la position Alpaca réelle.
+    """
+    try:
+        sym_encoded = urllib.parse.quote(symbol, safe="")
+        p = _request("GET", f"/v2/positions/{sym_encoded}")
+        # qty_available = qty - qty bloquée par d'autres ordres ouverts
+        avail = p.get("qty_available") or p.get("qty") or 0
+        return float(avail)
+    except Exception:
+        return None
+
+
 def place_stop_loss(symbol: str, qty: float, stop_price: float,
                     take_profit_price: float | None = None) -> dict:
     """
@@ -388,6 +406,11 @@ def place_stop_loss(symbol: str, qty: float, stop_price: float,
     """
     import math
     is_crypto = "/" in symbol
+    # Clamp qty à la quantité réellement disponible chez Alpaca (évite
+    # "insufficient qty" quand state.json a un arrondi > position broker réelle).
+    real_qty = _fetch_position_qty(symbol)
+    if real_qty is not None and real_qty > 0:
+        qty = min(float(qty), real_qty)
     # Down-round qty : crypto 6 décimales, stocks 5 (Alpaca round display à 5 dec
     # et l'interpréte comme la qty demandée → "insufficient qty" si on dépasse)
     decimals = 6 if is_crypto else 5
@@ -424,16 +447,31 @@ def place_stop_loss(symbol: str, qty: float, stop_price: float,
             logger.info(f"[ALPACA] OCO {symbol} stop={stop_price:.2f} tp={take_profit_price:.2f}")
             return {"stop_id": stop_id, "tp_id": tp_id, "parent_id": o.get("id")}
 
-        payload = {
-            "symbol": symbol,
-            "qty": str(qty),
-            "side": "sell",
-            "type": "stop",
-            "stop_price": str(round(stop_price, 2)),
-            "time_in_force": tif,
-        }
+        # Crypto Alpaca refuse type=stop simple → stop_limit avec limit 1% sous
+        # le stop_price (sécurise le fill malgré la volatilité crypto).
+        if is_crypto:
+            limit_price = round(stop_price * 0.99, 2)
+            payload = {
+                "symbol": symbol,
+                "qty": str(qty),
+                "side": "sell",
+                "type": "stop_limit",
+                "stop_price": str(round(stop_price, 2)),
+                "limit_price": str(limit_price),
+                "time_in_force": tif,
+            }
+        else:
+            payload = {
+                "symbol": symbol,
+                "qty": str(qty),
+                "side": "sell",
+                "type": "stop",
+                "stop_price": str(round(stop_price, 2)),
+                "time_in_force": tif,
+            }
         o = _request("POST", "/v2/orders", body=payload)
-        logger.info(f"[ALPACA] STOP {symbol} qty={qty:.6f} @ {stop_price:.2f}$")
+        kind = "STOP-LIMIT" if is_crypto else "STOP"
+        logger.info(f"[ALPACA] {kind} {symbol} qty={qty:.6f} @ {stop_price:.2f}$")
         return {"stop_id": o.get("id")}
     except Exception as e:
         logger.warning(f"[ALPACA] place_stop_loss {symbol} échec: {e} — bot SL interne reste actif")
