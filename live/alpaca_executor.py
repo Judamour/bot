@@ -418,6 +418,31 @@ def _fetch_position_qty(symbol: str) -> float | None:
         return None
 
 
+def get_spread_pct(symbol: str) -> float | None:
+    """
+    Retourne le spread relatif (ask-bid)/mid en %. None si erreur ou pas de quote.
+
+    Usage : avant de placer un ordre sur un symbole illiquide pour skip si spread
+    > seuil (ex: 1%). En paper Alpaca le spread n'est pas réaliste — fonction
+    no-op-friendly retournant 0.0 sur paper. À activer en live.
+    """
+    if _is_paper_endpoint():
+        return 0.0  # Paper Alpaca : pas de spread réaliste, skip check
+    try:
+        # Endpoint quotes (data API, pas trading)
+        sym_encoded = urllib.parse.quote(symbol, safe="")
+        if "/" in symbol:  # crypto
+            url_path = f"/v1beta3/crypto/us/latest/quotes?symbols={sym_encoded}"
+        else:
+            url_path = f"/v2/stocks/quotes/latest?symbols={sym_encoded}"
+        # Note : data.alpaca.markets a un base URL différent — wrap nécessaire
+        # mais pour l'instant on stub : retourne 0 sauf erreur réseau.
+        # TODO live : implémenter le vrai fetch contre data.alpaca.markets
+        return 0.0
+    except Exception:
+        return None
+
+
 def list_positions() -> dict:
     """
     GET /v2/positions → dict {symbol: position_dict} indexé par symbol normalisé.

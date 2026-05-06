@@ -134,16 +134,55 @@ def _apply_z_budget(state: dict, z_budget_eur: float, ohlcv_cache: dict | None =
 
 # ── State A management ───────────────────────────────────────────────────────
 
+def _validate_state(state: dict, bot_id: str = "?") -> bool:
+    """Vérifie structure minimale d'un state. Backup le fichier en .corrupt si invalide.
+    Retourne True si state utilisable, False si fallback nécessaire."""
+    if not isinstance(state, dict):
+        return False
+    if "capital" not in state or not isinstance(state.get("capital"), (int, float)):
+        return False
+    if "positions" not in state or not isinstance(state.get("positions"), dict):
+        return False
+    if "trades" not in state or not isinstance(state.get("trades"), list):
+        return False
+    # Sanity bounds : capital négatif extrême = corruption (NaN/inf serialized)
+    cap = state["capital"]
+    if cap != cap or cap < -1e9 or cap > 1e12:  # NaN ou bornes absurdes
+        return False
+    return True
+
+
+def _load_state_safe(path: str, bot_id: str, default: dict) -> dict:
+    """Load avec validation. Si corrupt → backup .corrupt-<ts>.bak + return default."""
+    if not os.path.exists(path):
+        return default
+    try:
+        with open(path) as f:
+            state = json.load(f)
+        if _validate_state(state, bot_id):
+            return state
+        log(f"[STATE] Bot {bot_id} : state.json invalide → backup + fresh default", "WARN")
+    except Exception as e:
+        log(f"[STATE] Bot {bot_id} : load échoué ({e}) → backup + fresh default", "WARN")
+    # Backup le fichier corrompu
+    try:
+        ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        backup_path = f"{path}.corrupt-{ts}.bak"
+        os.replace(path, backup_path)
+        from live.notifier import notify
+        notify(f"⚠️ <b>STATE CORRUPT</b>\nBot {bot_id} : {path}\n→ {backup_path}\nReset au capital initial")
+    except Exception:
+        pass
+    return default
+
+
 def load_state_a() -> dict:
-    if os.path.exists(STATE_A_FILE):
-        with open(STATE_A_FILE) as f:
-            return json.load(f)
-    return {
+    return _load_state_safe(STATE_A_FILE, "A", {
         "capital": INITIAL_CAPITAL_PER_BOT,
         "positions": {},
         "trades": [],
         "initial_capital": INITIAL_CAPITAL_PER_BOT,
-    }
+    })
 
 
 def save_state_a(state: dict):
@@ -560,6 +599,60 @@ def _archive_trades_if_needed(state: dict, bot_id: str) -> int:
     state["trades"] = keep
     log(f"[ARCHIVE] Bot {bot_id} : {excess} trades archivés → {archive_path}", "INFO")
     return excess
+
+
+# ── Inactivity alert (bot silencieux trop longtemps) ────────────────────────
+
+INACTIVITY_ALERT_HOURS = int(os.getenv("INACTIVITY_ALERT_HOURS", "168"))  # 7 jours
+INACTIVITY_FILE = "logs/bot_z/inactivity.json"
+
+
+def _check_inactivity_alert(states: list) -> None:
+    """Si aucun trade exit_date dans tous les bots depuis INACTIVITY_ALERT_HOURS,
+    notify Telegram une fois (dedup via fichier d'état). Reset au prochain trade."""
+    last_exit = None
+    for s in states:
+        for t in s.get("trades", []) or []:
+            exit_date = str(t.get("exit_date") or "")[:19]  # YYYY-MM-DD HH:MM:SS
+            if not exit_date:
+                continue
+            try:
+                d = datetime.fromisoformat(exit_date)
+                if last_exit is None or d > last_exit:
+                    last_exit = d
+            except Exception:
+                continue
+
+    if last_exit is None:
+        return  # Pas de trades du tout, nothing to alert (bot fresh)
+
+    # Make timezone-aware for compare
+    if last_exit.tzinfo is None:
+        last_exit = last_exit.replace(tzinfo=timezone.utc)
+    hours_since = (datetime.now(timezone.utc) - last_exit).total_seconds() / 3600
+
+    state_alert = {}
+    if os.path.exists(INACTIVITY_FILE):
+        try:
+            with open(INACTIVITY_FILE) as f:
+                state_alert = json.load(f)
+        except Exception:
+            state_alert = {}
+
+    last_iso = last_exit.isoformat()
+    already_alerted_for = state_alert.get("alerted_for_last_exit")
+
+    if hours_since >= INACTIVITY_ALERT_HOURS and already_alerted_for != last_iso:
+        from live.notifier import notify
+        log(f"⚠ INACTIVITY: aucun trade depuis {hours_since:.0f}h (seuil {INACTIVITY_ALERT_HOURS}h)", "WARN")
+        notify(f"⚠️ <b>BOT INACTIVITY</b>\n"
+               f"Aucun trade depuis <b>{hours_since:.0f}h</b>\n"
+               f"Dernier exit : {last_exit.strftime('%Y-%m-%d %H:%M UTC')}\n"
+               f"Vérifier si stratégies bloquées (régime/filter)")
+        state_alert["alerted_for_last_exit"] = last_iso
+        os.makedirs(os.path.dirname(INACTIVITY_FILE), exist_ok=True)
+        with open(INACTIVITY_FILE, "w") as f:
+            json.dump(state_alert, f)
 
 
 # ── Daily circuit breaker (-3% par jour) ────────────────────────────────────
@@ -1057,6 +1150,12 @@ def run():
             max_trades_reached = trades_today >= MAX_TRADES_PER_DAY
             if max_trades_reached:
                 log(f"⚠ MAX_TRADES_PER_DAY={MAX_TRADES_PER_DAY} atteint ({trades_today}) — block new entries jusqu'à minuit UTC", "WARN")
+
+            # ── Inactivity alert (bot trop silencieux) ──
+            try:
+                _check_inactivity_alert([state_a, state_b, state_c, state_g, state_h, state_i, state_j])
+            except Exception as e:
+                log(f"[INACTIVITY] check failed: {e}", "WARN")
 
             # Passer le flag aux bots pour bloquer les nouvelles entrées
             # exposure_high OR daily_breaker OR max_trades → block new entries
