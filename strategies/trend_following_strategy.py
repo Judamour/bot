@@ -19,7 +19,7 @@ import json
 import math
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 import pytz
 
@@ -201,6 +201,9 @@ def run_trend_cycle(state: dict, daily_cache: dict, macro_context: dict = None) 
                     "result": "win" if pnl > 0 else "loss",
                 })
                 state["positions"].pop(symbol)
+                # Cooldown anti-whipsaw 12h
+                _until = (datetime.now(timezone.utc) + timedelta(hours=12)).isoformat()
+                state.setdefault("cooldowns", {})[symbol] = _until
                 log(
                     f"{'✓' if pnl > 0 else '✗'} CLOSE {symbol} | "
                     f"{position['entry']:.4f}€ → {exit_eff:.4f}€ | "
@@ -217,6 +220,20 @@ def run_trend_cycle(state: dict, daily_cache: dict, macro_context: dict = None) 
 
         # ── Entry checks (pas de position sur ce symbole) ──
         if symbol not in state["positions"]:
+            # Cooldown anti-whipsaw : skip si symbole en cooldown post-exit
+            _cd_until_str = (state.get("cooldowns") or {}).get(symbol)
+            if _cd_until_str:
+                try:
+                    _cd_until = datetime.fromisoformat(_cd_until_str)
+                    _now = datetime.now(_cd_until.tzinfo) if _cd_until.tzinfo else datetime.now()
+                    if _now < _cd_until:
+                        _mins = int((_cd_until - _now).total_seconds() / 60)
+                        log(f"{symbol} — Signal ignoré (cooldown anti-whipsaw, reste {_mins}min)")
+                        continue
+                    state["cooldowns"].pop(symbol, None)
+                except Exception:
+                    state.get("cooldowns", {}).pop(symbol, None)
+
             if no_new_entries:
                 continue
             if len(state["positions"]) >= MAX_POSITIONS:

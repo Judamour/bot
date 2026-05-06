@@ -394,44 +394,93 @@ def _sync_broker_capital_periodic(active_states: list[tuple[str, dict]],
 # ── Stop monitor (15min daemon thread) ──────────────────────────────────────
 
 _STOP_MONITOR_INTERVAL_SEC = 900  # 15 minutes
+_COOLDOWN_HOURS_AFTER_STOP = 12   # Anti-whipsaw : block re-entry pendant 12h
 _stop_monitor_stop = threading.Event()
+
+
+def _close_position_from_broker_fill(state: dict, bot_id: str, symbol: str, filled_price: float):
+    """
+    Ferme une position dans le state suite à un fill broker-side (stop déclenché).
+    Met à jour capital, append trade, supprime de positions, set cooldown.
+    Notify Telegram pour visibilité.
+    """
+    from live.notifier import notify
+    position = state.get("positions", {}).get(symbol)
+    if not position:
+        return
+
+    size = float(position.get("size", 0))
+    entry = float(position.get("entry", filled_price))
+    cost = float(position.get("cost", entry * size))
+    fee = filled_price * size * config.EXCHANGE_FEE
+    proceeds = filled_price * size - fee
+    pnl = proceeds - cost
+
+    state["capital"] = state.get("capital", 0) + proceeds
+    state.setdefault("trades", []).append({
+        "symbol": symbol,
+        "entry_date": position.get("date"),
+        "exit_date": str(datetime.now()),
+        "entry_price": entry,
+        "exit_price": filled_price,
+        "pnl": round(pnl, 2),
+        "reason": "broker_stop_fill",
+        "result": "win" if pnl > 0 else "loss",
+    })
+    state["positions"].pop(symbol, None)
+
+    # Cooldown anti-whipsaw : block re-entry sur ce symbole pendant 12h
+    cooldown_until = datetime.now(timezone.utc) + timedelta(hours=_COOLDOWN_HOURS_AFTER_STOP)
+    state.setdefault("cooldowns", {})[symbol] = cooldown_until.isoformat()
+
+    icon = "✓" if pnl > 0 else "✗"
+    log(f"[STOP-FILL] Bot {bot_id}/{symbol} broker stop déclenché @ {filled_price:.4f} | "
+        f"PnL: {pnl:+.2f} | Cooldown 12h", "WARN")
+    notify(f"🔴 <b>BROKER STOP déclenché</b>\n"
+           f"Bot {bot_id} — <b>{symbol}</b>\n"
+           f"{entry:.4f} → {filled_price:.4f}\n"
+           f"PnL: <b>{pnl:+.2f}$</b> ({icon})\n"
+           f"Cooldown 12h activé")
 
 
 def _stop_monitor_loop(states_registry: dict):
     """
-    Daemon : entre les cycles 4h, vérifie toutes les 15min que les stops broker
-    sont encore actifs. Re-place ceux expirés (Alpaca DAY tif sur fractional
-    shares expire à 22h UTC chaque soir). Sans ce monitor, une position serait
-    non-protégée jusqu'au prochain cycle 4h après expiration.
+    Daemon : entre les cycles 4h, vérifie toutes les 15min l'état des stops broker.
+    - Stop expiré (Alpaca DAY tif sur fractional) → re-place automatiquement
+    - Stop fillé (déclenché) → ferme position dans state, cooldown 12h, notify
+    - Sans ce monitor, une position serait non-protégée jusqu'au prochain cycle 4h.
 
     Lit/mute les positions in-memory partagées avec le main thread. Pas de lock :
     les races sont rares (15min vs 4h) et non-fatales (pire cas = duplicate stop
     annulé au cycle suivant).
     """
-    from live.order_executor import renew_broker_stop_if_expired
-    log("[STOP-MONITOR] démarré (interval 15min)")
+    from live.order_executor import reconcile_broker_stop
+    log("[STOP-MONITOR] démarré (interval 15min, cooldown 12h après fill)")
     while not _stop_monitor_stop.is_set():
         # Wait first so on bot startup the main 4h cycle runs before the monitor
         if _stop_monitor_stop.wait(_STOP_MONITOR_INTERVAL_SEC):
             break
         try:
-            checked = 0
-            renewed = 0
+            checked = renewed = filled = 0
             for bot_id, state in states_registry.items():
                 positions = state.get("positions") or {}
-                for symbol, position in list(positions.items()):
-                    if not position.get("alpaca_stop_id"):
+                for symbol in list(positions.keys()):
+                    position = positions.get(symbol)
+                    if not position or not position.get("alpaca_stop_id"):
                         continue
                     checked += 1
-                    old_id = position["alpaca_stop_id"]
                     try:
-                        renew_broker_stop_if_expired(symbol, position)
-                        if position.get("alpaca_stop_id") != old_id:
+                        action, data = reconcile_broker_stop(symbol, position)
+                        if action == "renewed":
                             renewed += 1
+                        elif action == "filled":
+                            _close_position_from_broker_fill(state, bot_id, symbol, float(data))
+                            filled += 1
                     except Exception as e:
                         log(f"[STOP-MONITOR] {bot_id}/{symbol} échec: {e}", "WARN")
             if checked > 0:
-                log(f"[STOP-MONITOR] {checked} stops vérifiés, {renewed} renouvelés")
+                log(f"[STOP-MONITOR] {checked} stops vérifiés, "
+                    f"{renewed} renouvelés, {filled} fillés (positions fermées)")
         except Exception as e:
             log(f"[STOP-MONITOR] iteration: {e}", "WARN")
 

@@ -3,7 +3,33 @@ import time
 import json
 import os
 import sys
-from datetime import datetime, timedelta  # timedelta requis par _next_cycle_utc()
+from datetime import datetime, timedelta, timezone  # timedelta requis par _next_cycle_utc()
+
+COOLDOWN_HOURS_AFTER_EXIT = 12  # Anti-whipsaw : block re-entry pendant 12h après tout exit
+
+
+def _is_in_cooldown(state: dict, symbol: str) -> tuple[bool, datetime | None]:
+    """Retourne (in_cooldown, until). Nettoie les cooldowns expirés au passage."""
+    cooldowns = state.get("cooldowns") or {}
+    until_str = cooldowns.get(symbol)
+    if not until_str:
+        return False, None
+    try:
+        until = datetime.fromisoformat(until_str)
+    except Exception:
+        cooldowns.pop(symbol, None)
+        return False, None
+    now = datetime.now(until.tzinfo) if until.tzinfo else datetime.now()
+    if now < until:
+        return True, until
+    cooldowns.pop(symbol, None)
+    return False, None
+
+
+def _set_cooldown(state: dict, symbol: str, hours: int = COOLDOWN_HOURS_AFTER_EXIT):
+    """Set un cooldown sur le symbole pour `hours` heures (UTC)."""
+    until = datetime.now(timezone.utc) + timedelta(hours=hours)
+    state.setdefault("cooldowns", {})[symbol] = until.isoformat()
 from colorama import Fore, Style, init
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -294,6 +320,7 @@ def process_symbol(
             proceeds = exit_price_eff * position["size"] - fee_exit
             state["capital"] += proceeds
             state["positions"].pop(symbol)
+            _set_cooldown(state, symbol)  # Anti-whipsaw 12h
 
             pnl = proceeds - (position["entry"] * position["size"] + position.get("fee_entry", 0))
             trade = {
@@ -339,6 +366,15 @@ def process_symbol(
                     notify_winrate_drop("A", wr, len(recent))
 
     # ── Ouvrir position sur signal achat ──
+    # Cooldown anti-whipsaw : bloque re-entry pendant 12h après tout exit
+    if signal == 1 and symbol not in state["positions"]:
+        in_cd, until = _is_in_cooldown(state, symbol)
+        if in_cd:
+            mins_left = int((until - datetime.now(until.tzinfo)).total_seconds() / 60)
+            log(f"{symbol} — Signal ignoré (cooldown anti-whipsaw, reste {mins_left}min)", "INFO")
+            log_signal("BUY_SKIP_COOLDOWN", symbol, {"price": current_price, "until": until.isoformat()})
+            return state
+
     if signal == 1 and symbol in config.XSTOCKS and not _is_us_market_open():
         return state  # Silencieux — marché US fermé (évite spam logs)
 

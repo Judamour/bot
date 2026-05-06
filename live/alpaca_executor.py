@@ -512,6 +512,24 @@ def get_order_status(order_id: str) -> str | None:
         return None
 
 
+def get_order(order_id: str) -> dict | None:
+    """
+    Retourne le dict complet d'un ordre Alpaca (status, filled_avg_price,
+    filled_qty, filled_at, etc.). None si erreur. Dict avec status='missing'
+    si 404 (ordre purgé) — permet au caller de discriminer sans 2e appel.
+    """
+    if not order_id:
+        return None
+    try:
+        return _request("GET", f"/v2/orders/{order_id}")
+    except Exception as e:
+        msg = str(e)
+        if "404" in msg or "not found" in msg.lower():
+            return {"status": "missing"}
+        logger.warning(f"[ALPACA] get_order {order_id}: {e}")
+        return None
+
+
 def replace_stop_loss(stop_order_id: str, new_stop_price: float,
                       qty: float | None = None) -> str | None:
     """

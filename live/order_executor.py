@@ -291,30 +291,60 @@ def get_broker_stop_status(symbol: str, stop_order_id: str) -> str | None:
 
 def renew_broker_stop_if_expired(symbol: str, position: dict) -> None:
     """
-    Vérifie le stop broker d'une position et le re-place s'il est expired/canceled.
+    Legacy : kept for backward compat. Préférer reconcile_broker_stop() qui
+    gère aussi le cas filled. No-op si pas d'alpaca_stop_id ou status actif.
+    """
+    result = reconcile_broker_stop(symbol, position)
+    # Volontairement ignore le cas "filled" ici — caller utilise l'API complète
+    return None
 
-    Alpaca refuse GTC sur fractional shares → tif=DAY → expire chaque soir 22h.
-    Si le trailing ne bouge pas, le stop n'est jamais renouvelé via update_broker_stop
-    et la position reste sans protection broker-side. Cette fonction comble le trou
-    en re-plaçant le stop au prix courant `position["stop"]` à chaque cycle.
 
-    Mute son patch directement sur le dict `position` (alpaca_stop_id écrasé).
-    No-op si pas d'alpaca_stop_id ou si status actif (new/accepted/...).
+def reconcile_broker_stop(symbol: str, position: dict) -> tuple[str, object]:
+    """
+    Vérifie l'état d'un broker stop et agit en conséquence. Retourne un tuple
+    (action, data) :
+
+      ("ok", None)             — stop actif ou pas de stop_id (no-op)
+      ("renewed", new_id)      — stop expired/canceled re-placé (position muté)
+      ("filled", filled_price) — stop déclenché → caller doit fermer la position
+      ("error", err_msg)       — réseau/api error
+      ("orphan", None)         — re-place échoué après expired (alpaca_stop_id reset)
+
+    Cas "filled" : ne touche PAS au state, le caller est responsable de fermer
+    la position (PnL, capital, trades, suppression). Permet aux différentes
+    stratégies de gérer le close à leur façon.
     """
     sid = position.get("alpaca_stop_id")
     if not sid:
-        return
-    status = get_broker_stop_status(symbol, sid)
-    if status not in ("expired", "canceled", "rejected", "missing"):
-        return
-    ids = place_broker_stop(symbol, position["size"], position["stop"])
-    new_id = ids.get("stop_id")
-    if new_id:
-        position["alpaca_stop_id"] = new_id
-        logger.info(f"[STOP-RENEW] {symbol} stop re-placé après {status} @ {position['stop']:.4f}")
-    else:
-        position["alpaca_stop_id"] = None
-        logger.warning(f"[STOP-RENEW] {symbol} échec re-place ({status}) — bot SL interne uniquement")
+        return ("ok", None)
+
+    from live import alpaca_executor
+    if not alpaca_executor.is_alpaca_routed(symbol):
+        return ("ok", None)
+
+    order = alpaca_executor.get_order(sid)
+    if order is None:
+        return ("error", "fetch failed")
+
+    status = order.get("status")
+
+    if status == "filled":
+        filled_price = float(order.get("filled_avg_price") or position.get("stop") or 0)
+        return ("filled", filled_price)
+
+    if status in ("expired", "canceled", "rejected", "missing"):
+        ids = place_broker_stop(symbol, position["size"], position["stop"])
+        new_id = ids.get("stop_id")
+        if new_id:
+            position["alpaca_stop_id"] = new_id
+            logger.info(f"[STOP-RENEW] {symbol} re-placé après {status} @ {position['stop']:.4f}")
+            return ("renewed", new_id)
+        else:
+            position["alpaca_stop_id"] = None
+            logger.warning(f"[STOP-RENEW] {symbol} échec re-place ({status}) — SL interne uniquement")
+            return ("orphan", None)
+
+    return ("ok", None)
 
 
 def execute_buy(symbol: str, size: float, price_estimate: float,
