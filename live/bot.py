@@ -443,10 +443,10 @@ def process_symbol(
             log_signal("BUY_SKIP_COOLDOWN", symbol, {"price": current_price, "until": until.isoformat()})
             return state
 
-    if signal == 1 and symbol in config.XSTOCKS and not _is_us_market_open():
+    if signal == 1 and symbol in config.STOCKS and not _is_us_market_open():
         return state  # Silencieux — marché US fermé (évite spam logs)
 
-    if signal == 1 and symbol in config.XSTOCKS and not qqq_regime_ok:
+    if signal == 1 and symbol in config.STOCKS and not qqq_regime_ok:
         log(f"{symbol} — Signal ignoré (régime baissier : {qqq_description})", "WARN")
         log_signal("BUY_SKIP_QQQ_REGIME", symbol, {"qqq": qqq_description, "price": current_price})
         return state
@@ -504,8 +504,8 @@ def process_symbol(
                 log_signal("BUY_SKIP_SECTOR_GLOBAL", symbol, {"sector": sector, "price": current_price})
                 return state
 
-        # Filtre earnings xStocks
-        if symbol in config.XSTOCKS:
+        # Filtre earnings stocks (Alpaca + xStocks legacy)
+        if symbol in config.STOCKS:
             from data.fetcher import _xstock_ticker
             ticker = _xstock_ticker(symbol)
             if _has_earnings_soon(ticker):
@@ -789,7 +789,7 @@ def _compute_rotation_factors(trades: list) -> dict:
     recent = sorted(trades, key=lambda x: x.get("exit_date", ""))[-20:]
 
     crypto_pnl  = [t["pnl"] for t in recent if t.get("symbol") in config.CRYPTO]
-    xstock_pnl  = [t["pnl"] for t in recent if t.get("symbol") in config.XSTOCKS]
+    xstock_pnl  = [t["pnl"] for t in recent if t.get("symbol") in config.STOCKS]
 
     if len(crypto_pnl) < 3 or len(xstock_pnl) < 3:
         return {"crypto": 1.0, "xstock": 1.0}
@@ -1053,7 +1053,7 @@ def run():
                     time.sleep(1)
                     continue
 
-                category = "xstock" if symbol in config.XSTOCKS else "crypto"
+                category = "xstock" if symbol in config.STOCKS else "crypto"
                 combined = round(vix_factor * rotation[category], 2)
                 fr = funding_rates.get(symbol, 0.0)
                 state = process_symbol(

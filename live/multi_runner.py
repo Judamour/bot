@@ -1225,7 +1225,7 @@ def run():
                     continue
 
                 df_4h = ohlcv_4h.get(symbol)
-                category = "xstock" if symbol in config.XSTOCKS else "crypto"
+                category = "xstock" if symbol in config.STOCKS else "crypto"
                 combined = round(vix_factor * rotation[category], 2)
                 fr = funding_rates.get(symbol, 0.0)
 
