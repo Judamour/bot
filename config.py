@@ -106,7 +106,7 @@ POSITION_SIZE_PCT = 0.25  # 25% du total portfolio par position (vs 20% prudent)
 POSITION_MIN_PCT  = 0.05  # 5% du capital initial = floor relatif
 ATR_MULTIPLIER = 4.0     # Stop-loss = 4x ATR — laisse plus de room aux trends crypto/tech (vs 3x)
 TAKE_PROFIT_RATIO = 3.0  # (référence calcul, non utilisé en live — trailing stop)
-MAX_OPEN_TRADES = 6      # Max 6 positions simultanées (capital 109 USD → 18 USD/position)
+MAX_OPEN_TRADES = 10     # Max 10 positions sur 21 actifs Alpaca paper 100K$ → ~5500$/pos. Avant: 6 (héritage live 109 USD)
 TARGET_VOL   = 0.25     # Volatilité annualisée cible 25% (vs 15% prudent)
 MAX_LEVERAGE = 1.3      # Exposition max ×1.3 (préservé)
 
