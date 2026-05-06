@@ -391,6 +391,159 @@ def _sync_broker_capital_periodic(active_states: list[tuple[str, dict]],
 
 # ── Timing ───────────────────────────────────────────────────────────────────
 
+# ── Reconcile Alpaca positions ↔ states (au boot) ──────────────────────────
+
+def _reconcile_alpaca_positions(states_registry: dict) -> int:
+    """
+    Au boot : compare positions broker (Alpaca) vs positions states. Trois cas :
+    - State a position que Alpaca n'a pas → broker a vendu (manual, margin,
+      stop fillé pendant offline, etc.) → ferme la position dans state au prix
+      de stop (ou entry si stop indisponible), log trade reason='reconcile_missing'
+    - Alpaca a position que aucun state n'a → manual buy ou import → log warning,
+      ne rien toucher (hors scope bot)
+    - Qty mismatch → broker = source de vérité, ajuster state qty + log
+    Retourne nombre de divergences corrigées.
+    """
+    from live import alpaca_executor
+    broker_positions = alpaca_executor.list_positions()
+    if not broker_positions:
+        # Soit pas de positions broker, soit erreur réseau. Si erreur, list_positions
+        # log déjà un warning. On ne bloque pas le boot.
+        # Vérifier quand même si un state a des positions Alpaca-routées qui n'existent
+        # plus → ce sont des candidates au close-reconcile.
+        pass
+
+    # Symbols Alpaca-routés présents dans les states
+    state_symbols_by_bot = {}
+    for bot_id, state in states_registry.items():
+        positions = state.get("positions") or {}
+        state_symbols_by_bot[bot_id] = {
+            s: p for s, p in positions.items()
+            if alpaca_executor.is_alpaca_routed(s)
+        }
+
+    fixes = 0
+    from datetime import datetime as _dt
+    from live.notifier import notify
+
+    # 1. Positions in state but not in broker
+    for bot_id, positions in state_symbols_by_bot.items():
+        for symbol, pos in list(positions.items()):
+            if symbol in broker_positions:
+                continue
+            # Broker n'a plus la position → fermer dans state
+            close_price = float(pos.get("stop") or pos.get("entry") or 0)
+            if close_price <= 0:
+                log(f"[RECONCILE] {bot_id}/{symbol} : broker absent, prix close inconnu — skip", "WARN")
+                continue
+            size = float(pos.get("size", 0))
+            entry = float(pos.get("entry", close_price))
+            cost = float(pos.get("cost", entry * size))
+            proceeds = close_price * size * (1 - config.EXCHANGE_FEE)
+            pnl = proceeds - cost
+            state = states_registry[bot_id]
+            state["capital"] = state.get("capital", 0) + proceeds
+            state.setdefault("trades", []).append({
+                "symbol": symbol,
+                "entry_date": pos.get("date"),
+                "exit_date": str(_dt.now()),
+                "entry_price": entry,
+                "exit_price": close_price,
+                "pnl": round(pnl, 2),
+                "reason": "reconcile_missing",
+                "result": "win" if pnl > 0 else "loss",
+            })
+            state["positions"].pop(symbol, None)
+            log(f"[RECONCILE] Bot {bot_id}/{symbol} : broker absent → close @ {close_price:.4f} | PnL {pnl:+.2f}", "WARN")
+            notify(f"⚠️ <b>RECONCILE</b>\nBot {bot_id} — {symbol}\nbroker absent (margin/manual)\nclosed @ {close_price:.4f} | PnL <b>{pnl:+.2f}</b>")
+            fixes += 1
+
+    # 2. Qty mismatch
+    for bot_id, positions in state_symbols_by_bot.items():
+        for symbol, pos in positions.items():
+            if symbol not in broker_positions:
+                continue
+            broker_qty = float(broker_positions[symbol].get("qty_available") or broker_positions[symbol].get("qty") or 0)
+            state_qty = float(pos.get("size", 0))
+            # Tolérance 0.5% (rounding broker)
+            if state_qty > 0 and abs(broker_qty - state_qty) / state_qty > 0.005:
+                log(f"[RECONCILE] Bot {bot_id}/{symbol} : qty state={state_qty} vs broker={broker_qty} — ajusté à broker", "WARN")
+                pos["size"] = broker_qty
+                fixes += 1
+
+    # 3. Broker positions not in any state (informational only)
+    all_state_symbols = set()
+    for positions in state_symbols_by_bot.values():
+        all_state_symbols.update(positions.keys())
+    for sym in broker_positions:
+        if sym not in all_state_symbols:
+            qty = broker_positions[sym].get("qty", "?")
+            log(f"[RECONCILE] Broker a {sym} (qty={qty}) hors scope bot — ignoré", "INFO")
+
+    if fixes > 0:
+        log(f"[RECONCILE] {fixes} divergence(s) corrigée(s)")
+    else:
+        log(f"[RECONCILE] States ↔ broker synchronisés (0 divergence)")
+    return fixes
+
+
+# ── Daily circuit breaker (-3% par jour) ────────────────────────────────────
+
+DAILY_BREAKER_FILE = "logs/bot_z/daily_breaker.json"
+DAILY_BREAKER_THRESHOLD = -0.03  # -3% intraday → block new entries
+
+
+def _daily_breaker_check(current_equity: float) -> bool:
+    """
+    Track equity journalière, déclenche breaker à -3% sur la journée UTC.
+
+    Persiste dans logs/bot_z/daily_breaker.json :
+        {"date": "YYYY-MM-DD", "anchor_equity": 101000.50, "triggered": false}
+
+    Retourne True si breaker actif (= bloquer nouvelles entrées).
+    Reset auto au passage de minuit UTC.
+    """
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    state = {}
+    if os.path.exists(DAILY_BREAKER_FILE):
+        try:
+            with open(DAILY_BREAKER_FILE) as f:
+                state = json.load(f)
+        except Exception:
+            state = {}
+
+    # Reset au changement de jour
+    if state.get("date") != today:
+        state = {"date": today, "anchor_equity": current_equity, "triggered": False}
+        os.makedirs(os.path.dirname(DAILY_BREAKER_FILE), exist_ok=True)
+        with open(DAILY_BREAKER_FILE, "w") as f:
+            json.dump(state, f, indent=2)
+        return False
+
+    anchor = state.get("anchor_equity", current_equity)
+    if anchor <= 0:
+        return False
+
+    daily_pct = (current_equity - anchor) / anchor
+
+    # Trigger sur seuil
+    if daily_pct <= DAILY_BREAKER_THRESHOLD and not state.get("triggered"):
+        state["triggered"] = True
+        state["triggered_at"] = datetime.now(timezone.utc).isoformat()
+        state["triggered_equity"] = current_equity
+        with open(DAILY_BREAKER_FILE, "w") as f:
+            json.dump(state, f, indent=2)
+        from live.notifier import notify
+        log(f"⛔ DAILY BREAKER déclenché : equity {current_equity:.2f}$ vs anchor {anchor:.2f}$ ({daily_pct*100:.2f}%) — block new entries jusqu'à minuit UTC", "WARN")
+        notify(f"⛔ <b>DAILY CIRCUIT BREAKER</b>\n"
+               f"Loss intraday : <b>{daily_pct*100:.2f}%</b>\n"
+               f"Equity : {current_equity:.0f}$ (anchor {anchor:.0f}$)\n"
+               f"Block new entries jusqu'à 00h UTC.\n"
+               f"Positions ouvertes continuent leur stop normalement.")
+
+    return bool(state.get("triggered"))
+
+
 # ── Stop monitor (15min daemon thread) ──────────────────────────────────────
 
 _STOP_MONITOR_INTERVAL_SEC = 900  # 15 minutes
@@ -601,6 +754,22 @@ def run():
     log(f"Bot I capital: {state_i['capital']:.2f}€ | Positions: {list(state_i['positions'].keys())}")
     log(f"Bot J capital: {state_j['capital']:.2f}€ | Positions: {list(state_j['positions'].keys())}")
 
+    # ── Reconcile états bot ↔ positions broker Alpaca ──────────────────────
+    # Détecte : positions vendues par broker hors-bot (margin, manual dashboard,
+    # broker stop fillé pendant offline), qty mismatch, positions broker hors scope.
+    # Source de vérité = broker (Alpaca).
+    _states_for_reconcile = {
+        "A": state_a, "B": state_b, "C": state_c, "G": state_g,
+        "H": state_h, "I": state_i, "J": state_j,
+    }
+    try:
+        _reconcile_alpaca_positions(_states_for_reconcile)
+        # Save states après reconcile (sinon les corrections sont perdues si crash avant 1er save)
+        save_state_a(state_a); save_mom(state_b); save_brk(state_c)
+        save_trd(state_g); save_vcb(state_h); save_rsl(state_i); save_mr(state_j)
+    except Exception as e:
+        log(f"[RECONCILE] échec : {e}", "WARN")
+
     # ── Démarre le monitor stops 15min en daemon thread ─────────────────────
     # Comble le trou de protection nocturne entre les cycles 4h après expiration
     # des stops Alpaca DAY (fractional shares). Re-place automatiquement si expiré.
@@ -788,12 +957,25 @@ def run():
                 details = " | ".join(f"{s}:{n}" for s, n in sorted(sector_counts.items()))
                 notify_exposure_high(exposure_pct * 100, details)
                 log(f"⚠ Exposition portfolio {exposure_pct*100:.0f}% > {MAX_PORTFOLIO_EXPOSURE*100:.0f}% — nouvelles entrées suspendues", "WARN")
+            # ── Daily circuit breaker (-3% intraday) ──
+            # Calcule equity portfolio et déclenche le breaker si daily loss > seuil
+            try:
+                _broker_eq = _fetch_broker_equity()
+                _equity_for_breaker = _broker_eq if _broker_eq else _states_total_value(
+                    [state_a, state_b, state_c, state_g, state_h, state_i, state_j], ohlcv_daily
+                )
+                breaker_active = _daily_breaker_check(_equity_for_breaker)
+            except Exception as e:
+                log(f"[DAILY-BREAKER] check failed: {e}", "WARN")
+                breaker_active = False
+
             # Passer le flag aux bots pour bloquer les nouvelles entrées
-            macro["exposure_blocked"] = exposure_high
+            # exposure_high OR daily_breaker → block new entries
+            macro["exposure_blocked"] = bool(exposure_high or breaker_active)
 
             # ── 5. Bot A: Supertrend + filters ────────────────────────────────
             log(f"\n{Fore.CYAN}--- Bot A: Supertrend+MR ---{Style.RESET_ALL}")
-            state_a["_exposure_blocked"] = exposure_high
+            state_a["_exposure_blocked"] = bool(exposure_high or breaker_active)
 
             rotation = bot_a._compute_rotation_factors(state_a.get("trades", []))
             momentum_filter = bot_a._update_momentum_filter(state_a)

@@ -393,6 +393,37 @@ def _fetch_position_qty(symbol: str) -> float | None:
         return None
 
 
+def list_positions() -> dict:
+    """
+    GET /v2/positions → dict {symbol: position_dict} indexé par symbol normalisé.
+
+    Alpaca retourne les cryptos sans slash (BTCUSD), on normalise vers le format
+    avec slash (BTC/USD) pour matcher config.CRYPTO.
+
+    Position dict contient : qty, qty_available, market_value, avg_entry_price,
+    unrealized_pl, current_price, etc.
+    Retourne {} si erreur.
+    """
+    try:
+        positions = _request("GET", "/v2/positions")
+        if not isinstance(positions, list):
+            return {}
+        result = {}
+        for p in positions:
+            sym = p.get("symbol", "")
+            # Normalize crypto: BTCUSD → BTC/USD (3 chars base + USD/USDT/USDC suffix)
+            if p.get("asset_class") == "crypto" and "/" not in sym:
+                for suffix in ("USDT", "USDC", "USD"):
+                    if sym.endswith(suffix) and len(sym) > len(suffix):
+                        sym = f"{sym[:-len(suffix)]}/{suffix}"
+                        break
+            result[sym] = p
+        return result
+    except Exception as e:
+        logger.warning(f"[ALPACA] list_positions: {e}")
+        return {}
+
+
 def place_stop_loss(symbol: str, qty: float, stop_price: float,
                     take_profit_price: float | None = None) -> dict:
     """
