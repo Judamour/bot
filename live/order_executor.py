@@ -278,6 +278,45 @@ def cancel_broker_stop(symbol: str, stop_order_id: str) -> bool:
     return True
 
 
+def get_broker_stop_status(symbol: str, stop_order_id: str) -> str | None:
+    """Retourne le status d'un ordre broker ('new', 'filled', 'expired', 'canceled',
+    'rejected', 'missing', ...). None si non-Alpaca ou erreur réseau."""
+    if not stop_order_id:
+        return None
+    from live import alpaca_executor
+    if alpaca_executor.is_alpaca_routed(symbol):
+        return alpaca_executor.get_order_status(stop_order_id)
+    return None
+
+
+def renew_broker_stop_if_expired(symbol: str, position: dict) -> None:
+    """
+    Vérifie le stop broker d'une position et le re-place s'il est expired/canceled.
+
+    Alpaca refuse GTC sur fractional shares → tif=DAY → expire chaque soir 22h.
+    Si le trailing ne bouge pas, le stop n'est jamais renouvelé via update_broker_stop
+    et la position reste sans protection broker-side. Cette fonction comble le trou
+    en re-plaçant le stop au prix courant `position["stop"]` à chaque cycle.
+
+    Mute son patch directement sur le dict `position` (alpaca_stop_id écrasé).
+    No-op si pas d'alpaca_stop_id ou si status actif (new/accepted/...).
+    """
+    sid = position.get("alpaca_stop_id")
+    if not sid:
+        return
+    status = get_broker_stop_status(symbol, sid)
+    if status not in ("expired", "canceled", "rejected", "missing"):
+        return
+    ids = place_broker_stop(symbol, position["size"], position["stop"])
+    new_id = ids.get("stop_id")
+    if new_id:
+        position["alpaca_stop_id"] = new_id
+        logger.info(f"[STOP-RENEW] {symbol} stop re-placé après {status} @ {position['stop']:.4f}")
+    else:
+        position["alpaca_stop_id"] = None
+        logger.warning(f"[STOP-RENEW] {symbol} échec re-place ({status}) — bot SL interne uniquement")
+
+
 def execute_buy(symbol: str, size: float, price_estimate: float,
                 max_wait_sec: int = 30) -> OrderResult:
     """

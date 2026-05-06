@@ -140,6 +140,11 @@ def run_breakout_cycle(state: dict, daily_cache: dict, macro_context: dict = Non
 
         position = state["positions"].get(symbol)
 
+        # ── Renouvellement broker stop expiré (Alpaca DAY tif sur fractional) ──
+        if position:
+            from live.order_executor import renew_broker_stop_if_expired
+            renew_broker_stop_if_expired(symbol, position)
+
         # ── Trailing stop update ──
         if position:
             new_stop = round(current_price - STOP_ATR_MULT * atr, 4)

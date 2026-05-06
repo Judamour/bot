@@ -212,6 +212,11 @@ def process_symbol(
 
     position = state["positions"].get(symbol)
 
+    # ── Renouvellement broker stop expiré (Alpaca DAY tif sur fractional) ──
+    if position:
+        from live.order_executor import renew_broker_stop_if_expired
+        renew_broker_stop_if_expired(symbol, position)
+
     # ── Trailing stop avant vérification de sortie ──
     if position:
         position = apply_trailing_stop(position, current_price, atr, symbol, df=df)

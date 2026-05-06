@@ -455,6 +455,25 @@ def cancel_order(order_id: str) -> bool:
         return False
 
 
+def get_order_status(order_id: str) -> str | None:
+    """
+    Retourne le status d'un ordre Alpaca ('new', 'filled', 'expired', 'canceled',
+    'rejected', 'partially_filled', 'pending_new', 'accepted', etc.).
+    None si erreur ou 404 (ordre purgé après ~30j chez Alpaca).
+    """
+    if not order_id:
+        return None
+    try:
+        o = _request("GET", f"/v2/orders/{order_id}")
+        return o.get("status")
+    except Exception as e:
+        msg = str(e)
+        if "404" in msg or "not found" in msg.lower():
+            return "missing"
+        logger.warning(f"[ALPACA] get_order_status {order_id}: {e}")
+        return None
+
+
 def replace_stop_loss(stop_order_id: str, new_stop_price: float,
                       qty: float | None = None) -> str | None:
     """

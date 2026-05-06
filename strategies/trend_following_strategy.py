@@ -143,6 +143,11 @@ def run_trend_cycle(state: dict, daily_cache: dict, macro_context: dict = None) 
 
         position = state["positions"].get(symbol)
 
+        # ── Renouvellement broker stop expiré (Alpaca DAY tif sur fractional) ──
+        if position:
+            from live.order_executor import renew_broker_stop_if_expired
+            renew_broker_stop_if_expired(symbol, position)
+
         # ── Trailing stop update (broker-side sync) ──
         if position:
             new_stop = round(current_price - STOP_ATR_MULT * atr, 4)

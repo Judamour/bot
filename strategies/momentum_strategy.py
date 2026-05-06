@@ -140,6 +140,11 @@ def run_momentum_cycle(state: dict, daily_cache: dict, macro_context: dict = Non
         df = daily_cache.get(symbol)
         if df is None:
             continue
+
+        # Renouvellement broker stop expiré (Alpaca DAY tif sur fractional)
+        from live.order_executor import renew_broker_stop_if_expired
+        renew_broker_stop_if_expired(symbol, pos)
+
         current_price = float(df["close"].iloc[-1])
         entry = pos.get("entry", current_price)
         loss_pct = (current_price - entry) / entry if entry > 0 else 0
