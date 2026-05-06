@@ -333,13 +333,25 @@ def process_symbol(
 
         if reason:
             # Annuler le stop-loss broker AVANT le SELL manuel (sinon double-fill)
-            from live.order_executor import execute_sell as _exec_sell, cancel_broker_stop
+            from live.order_executor import (
+                execute_sell as _exec_sell, cancel_broker_stop,
+                handle_failed_sell, reset_sell_fail_count,
+            )
             cancel_broker_stop(symbol, position.get("alpaca_stop_id"))
             cancel_broker_stop(symbol, position.get("alpaca_tp_id"))
             _order = _exec_sell(symbol, position["size"], exit_price, reason=reason)
             if not _order.success:
+                if handle_failed_sell(symbol, position, _order.error or ""):
+                    # Force-close : delisted/suspended OU 3 échecs consécutifs
+                    log(f"⛔ {symbol} force-close après échec SELL persistant ({_order.error})", "WARN")
+                    notify(f"⚠️ <b>{symbol}</b> force-close (delisted/persistent fail)\n"
+                           f"Reason: {(_order.error or '')[:100]}")
+                    state["positions"].pop(symbol, None)
+                    _set_cooldown(state, symbol, hours=24)
+                    return state
                 log(f"⛔ SELL {symbol} échoué: {_order.error} — position maintenue", "WARN")
                 return state
+            reset_sell_fail_count(position)
             exit_price_eff = _order.filled_price * (1 - config.EXCHANGE_FEE)
             fee_exit = exit_price_eff * position["size"] * config.EXCHANGE_FEE
             proceeds = exit_price_eff * position["size"] - fee_exit

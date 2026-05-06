@@ -499,6 +499,69 @@ def _reconcile_alpaca_positions(states_registry: dict) -> int:
     return fixes
 
 
+# ── Detect "permanent" SELL errors (delisted/suspended/halted) ──────────────
+
+_PERMANENT_SELL_ERROR_PATTERNS = (
+    "asset is not active",
+    "asset not found",
+    "not tradable",
+    "halted",
+    "suspended",
+    "delisted",
+    "no position",
+)
+
+
+def _is_permanent_sell_error(err_msg: str) -> bool:
+    if not err_msg:
+        return False
+    low = err_msg.lower()
+    return any(p in low for p in _PERMANENT_SELL_ERROR_PATTERNS)
+
+
+# ── Max trades per day (anti-spam) ──────────────────────────────────────────
+
+MAX_TRADES_PER_DAY = int(os.getenv("MAX_TRADES_PER_DAY", "20"))
+
+
+def _trades_today_total(states: list) -> int:
+    """Compte les trades exécutés aujourd'hui UTC à travers tous les bots."""
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    n = 0
+    for s in states:
+        for t in s.get("trades", []) or []:
+            d = str(t.get("exit_date") or "")[:10]
+            if d == today:
+                n += 1
+    return n
+
+
+# ── Archive trades (anti-bloat state.json) ──────────────────────────────────
+
+KEEP_LAST_N_TRADES = int(os.getenv("KEEP_LAST_N_TRADES", "500"))
+
+
+def _archive_trades_if_needed(state: dict, bot_id: str) -> int:
+    """Si state["trades"] dépasse KEEP_LAST_N_TRADES, archive les plus vieux dans
+    logs/archive/<bot>_trades_<YYYY-MM>.jsonl et tronque le state.
+    Retourne le nombre de trades archivés."""
+    trades = state.get("trades") or []
+    if len(trades) <= KEEP_LAST_N_TRADES:
+        return 0
+    excess = len(trades) - KEEP_LAST_N_TRADES
+    to_archive = trades[:excess]
+    keep = trades[excess:]
+    os.makedirs("logs/archive", exist_ok=True)
+    today = datetime.now(timezone.utc).strftime("%Y-%m")
+    archive_path = f"logs/archive/{bot_id}_trades_{today}.jsonl"
+    with open(archive_path, "a") as f:
+        for t in to_archive:
+            f.write(json.dumps(t, default=str) + "\n")
+    state["trades"] = keep
+    log(f"[ARCHIVE] Bot {bot_id} : {excess} trades archivés → {archive_path}", "INFO")
+    return excess
+
+
 # ── Daily circuit breaker (-3% par jour) ────────────────────────────────────
 
 DAILY_BREAKER_FILE = "logs/bot_z/daily_breaker.json"
@@ -766,6 +829,14 @@ def run():
     log(f"Bot I capital: {state_i['capital']:.2f}€ | Positions: {list(state_i['positions'].keys())}")
     log(f"Bot J capital: {state_j['capital']:.2f}€ | Positions: {list(state_j['positions'].keys())}")
 
+    # ── Archive vieux trades (anti-bloat state.json) ────────────────────────
+    for _bid, _st in [("a", state_a), ("b", state_b), ("c", state_c), ("g", state_g),
+                       ("h", state_h), ("i", state_i), ("j", state_j)]:
+        try:
+            _archive_trades_if_needed(_st, _bid)
+        except Exception as e:
+            log(f"[ARCHIVE] Bot {_bid} échec: {e}", "WARN")
+
     # ── Reconcile états bot ↔ positions broker Alpaca ──────────────────────
     # Détecte : positions vendues par broker hors-bot (margin, manual dashboard,
     # broker stop fillé pendant offline), qty mismatch, positions broker hors scope.
@@ -981,13 +1052,19 @@ def run():
                 log(f"[DAILY-BREAKER] check failed: {e}", "WARN")
                 breaker_active = False
 
+            # ── Max trades / jour (anti-spam) ──
+            trades_today = _trades_today_total([state_a, state_b, state_c, state_g, state_h, state_i, state_j])
+            max_trades_reached = trades_today >= MAX_TRADES_PER_DAY
+            if max_trades_reached:
+                log(f"⚠ MAX_TRADES_PER_DAY={MAX_TRADES_PER_DAY} atteint ({trades_today}) — block new entries jusqu'à minuit UTC", "WARN")
+
             # Passer le flag aux bots pour bloquer les nouvelles entrées
-            # exposure_high OR daily_breaker → block new entries
-            macro["exposure_blocked"] = bool(exposure_high or breaker_active)
+            # exposure_high OR daily_breaker OR max_trades → block new entries
+            macro["exposure_blocked"] = bool(exposure_high or breaker_active or max_trades_reached)
 
             # ── 5. Bot A: Supertrend + filters ────────────────────────────────
             log(f"\n{Fore.CYAN}--- Bot A: Supertrend+MR ---{Style.RESET_ALL}")
-            state_a["_exposure_blocked"] = bool(exposure_high or breaker_active)
+            state_a["_exposure_blocked"] = bool(exposure_high or breaker_active or max_trades_reached)
 
             rotation = bot_a._compute_rotation_factors(state_a.get("trades", []))
             momentum_filter = bot_a._update_momentum_filter(state_a)

@@ -92,10 +92,15 @@ def is_alpaca_routed(symbol: str) -> bool:
 
 # ── HTTP helpers ─────────────────────────────────────────────────────────────
 
+_RETRYABLE_STATUSES = {429, 500, 502, 503, 504}
+_MAX_RETRIES = 3
+
+
 def _request(method: str, path: str, body: dict = None, timeout: int = 30) -> dict:
     """
-    Requête authentifiée vers Alpaca REST.
-    Lève RuntimeError sur 4xx/5xx avec le message d'erreur Alpaca.
+    Requête authentifiée vers Alpaca REST avec retry exponentiel sur transient
+    errors (429, 5xx, network errors). Max 3 retries, backoff 1s/2s/4s.
+    Lève RuntimeError sur 4xx (sauf 429) avec le message d'erreur Alpaca.
     """
     url = _base_url() + path
     headers = {
@@ -107,21 +112,41 @@ def _request(method: str, path: str, body: dict = None, timeout: int = 30) -> di
         headers["Content-Type"] = "application/json"
         data = json.dumps(body).encode()
 
-    req = urllib.request.Request(url, data=data, headers=headers, method=method)
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            raw = r.read()
-            if not raw:
-                return {}
-            return json.loads(raw)
-    except urllib.error.HTTPError as e:
-        raw = e.read()
+    last_err = None
+    for attempt in range(_MAX_RETRIES + 1):
+        req = urllib.request.Request(url, data=data, headers=headers, method=method)
         try:
-            err = json.loads(raw)
-            msg = err.get("message") or err.get("code") or str(err)
-        except Exception:
-            msg = raw.decode(errors="replace")[:300]
-        raise RuntimeError(f"Alpaca {e.code}: {msg}") from None
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                raw = r.read()
+                if not raw:
+                    return {}
+                return json.loads(raw)
+        except urllib.error.HTTPError as e:
+            raw = e.read()
+            try:
+                err = json.loads(raw)
+                msg = err.get("message") or err.get("code") or str(err)
+            except Exception:
+                msg = raw.decode(errors="replace")[:300]
+            last_err = RuntimeError(f"Alpaca {e.code}: {msg}")
+            # Retry only on transient statuses
+            if e.code in _RETRYABLE_STATUSES and attempt < _MAX_RETRIES:
+                wait = 2 ** attempt
+                logger.warning(f"[ALPACA] {method} {path} → {e.code} (retry {attempt+1}/{_MAX_RETRIES} dans {wait}s)")
+                time.sleep(wait)
+                continue
+            raise last_err from None
+        except (urllib.error.URLError, OSError, TimeoutError) as e:
+            # Network/timeout — retry
+            last_err = RuntimeError(f"Alpaca network: {e}")
+            if attempt < _MAX_RETRIES:
+                wait = 2 ** attempt
+                logger.warning(f"[ALPACA] {method} {path} network err (retry {attempt+1}/{_MAX_RETRIES} dans {wait}s): {e}")
+                time.sleep(wait)
+                continue
+            raise last_err from None
+    if last_err:
+        raise last_err
 
 
 # ── Market data API (data.alpaca.markets) ────────────────────────────────────

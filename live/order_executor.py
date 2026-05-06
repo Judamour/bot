@@ -299,6 +299,40 @@ def renew_broker_stop_if_expired(symbol: str, position: dict) -> None:
     return None
 
 
+def handle_failed_sell(symbol: str, position: dict, error: str, max_fails: int = 3) -> bool:
+    """
+    Tracker les échecs SELL consécutifs sur une position. Retourne True si la
+    position doit être force-closed (max_fails atteint OU erreur permanente
+    type delisted/suspended).
+
+    À appeler après chaque échec d'execute_sell. Le caller doit fermer la
+    position dans son state si return True.
+    """
+    fail_count = position.get("sell_fail_count", 0) + 1
+    position["sell_fail_count"] = fail_count
+    position["last_sell_error"] = (error or "")[:200]
+
+    err_low = (error or "").lower()
+    permanent = any(p in err_low for p in (
+        "asset is not active", "not tradable", "halted", "suspended",
+        "delisted", "no position", "asset not found",
+    ))
+
+    if permanent:
+        logger.warning(f"[SELL-FAIL] {symbol} erreur permanente détectée → force close (err: {error[:100]})")
+        return True
+    if fail_count >= max_fails:
+        logger.warning(f"[SELL-FAIL] {symbol} {fail_count} échecs consécutifs → force close")
+        return True
+    return False
+
+
+def reset_sell_fail_count(position: dict):
+    """À appeler après un SELL réussi pour reset le compteur."""
+    position.pop("sell_fail_count", None)
+    position.pop("last_sell_error", None)
+
+
 def reconcile_broker_stop(symbol: str, position: dict) -> tuple[str, object]:
     """
     Vérifie l'état d'un broker stop et agit en conséquence. Retourne un tuple

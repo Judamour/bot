@@ -179,12 +179,23 @@ def run_trend_cycle(state: dict, daily_cache: dict, macro_context: dict = None) 
                 exit_reason = "sma200_break"
 
             if exit_reason:
-                from live.order_executor import execute_sell as _exec_sell, cancel_broker_stop
+                from live.order_executor import (
+                    execute_sell as _exec_sell, cancel_broker_stop,
+                    handle_failed_sell, reset_sell_fail_count,
+                )
                 cancel_broker_stop(symbol, position.get("alpaca_stop_id"))
                 _order = _exec_sell(symbol, position["size"], exit_price, reason=exit_reason)
                 if not _order.success:
+                    if handle_failed_sell(symbol, position, _order.error or ""):
+                        log(f"⛔ {symbol} force-close après échec SELL persistant ({_order.error})", "WARN")
+                        notify(f"⚠️ Bot G — <b>{symbol}</b> force-close (delisted/persistent fail)")
+                        state["positions"].pop(symbol, None)
+                        _until = (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
+                        state.setdefault("cooldowns", {})[symbol] = _until
+                        continue
                     log(f"⛔ SELL {symbol} échoué: {_order.error} — position maintenue", "WARN")
                     continue
+                reset_sell_fail_count(position)
                 exit_eff = _order.filled_price * (1 - config.EXCHANGE_FEE)
                 fee = exit_eff * position["size"] * config.EXCHANGE_FEE
                 proceeds = exit_eff * position["size"] - fee
