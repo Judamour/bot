@@ -485,7 +485,7 @@ def _reconcile_alpaca_positions(states_registry: dict) -> int:
             state.setdefault("trades", []).append({
                 "symbol": symbol,
                 "entry_date": pos.get("date"),
-                "exit_date": str(_dt.now()),
+                "exit_date": datetime.now(timezone.utc).isoformat(),
                 "entry_price": entry,
                 "exit_price": close_price,
                 "pnl": round(pnl, 2),
@@ -599,6 +599,20 @@ def _archive_trades_if_needed(state: dict, bot_id: str) -> int:
     state["trades"] = keep
     log(f"[ARCHIVE] Bot {bot_id} : {excess} trades archivés → {archive_path}", "INFO")
     return excess
+
+
+# ── Cross-bot symbol exclusivity ────────────────────────────────────────────
+# Évite que 2 bots détiennent le même symbole : le broker agrège, les stops
+# trailing se conflictent, le PnL state diverge. Compute la liste des symboles
+# déjà détenus, propagée via macro["held_by_other_bots"] pour chaque bot.
+
+def _compute_held_symbols(states: list) -> dict:
+    """Retourne {symbol: True} pour tous les symboles tenus par un sub-bot."""
+    held = {}
+    for state in states:
+        for sym in (state.get("positions") or {}):
+            held[sym] = True
+    return held
 
 
 # ── Inactivity alert (bot silencieux trop longtemps) ────────────────────────
@@ -741,7 +755,7 @@ def _close_position_from_broker_fill(state: dict, bot_id: str, symbol: str, fill
     state.setdefault("trades", []).append({
         "symbol": symbol,
         "entry_date": position.get("date"),
-        "exit_date": str(datetime.now()),
+        "exit_date": datetime.now(timezone.utc).isoformat(),
         "entry_price": entry,
         "exit_price": filled_price,
         "pnl": round(pnl, 2),
@@ -1157,6 +1171,12 @@ def run():
             except Exception as e:
                 log(f"[INACTIVITY] check failed: {e}", "WARN")
 
+            # ── Symbol exclusivity cross-bots ──
+            # Pour chaque bot, on calcule les symboles tenus par les AUTRES bots.
+            # Le BUY logic skippe ces symboles pour éviter conflits (broker agrège,
+            # stops bagarrent). Recalculé à chaque cycle.
+            _all_states = [state_a, state_b, state_c, state_g, state_h, state_i, state_j]
+
             # ── Cap corrélation cross-bots : MAX_PER_SECTOR_GLOBAL ──
             # Compte les positions par secteur à travers TOUS les bots actifs.
             # Si un secteur dépasse le cap → bloque les nouvelles entrées sur ce
@@ -1174,6 +1194,12 @@ def run():
                 log(f"⚠ Cap secteur GLOBAL atteint : {blocked_sectors} (counts: {global_sector_counts})", "INFO")
             macro["blocked_sectors"] = blocked_sectors
 
+            # ── Symbol exclusivity : compute held_by_others par bot ──
+            held_symbols_global = _compute_held_symbols(_all_states)
+            # Note : pour chaque bot, les symboles tenus par LUI-MÊME ne comptent pas
+            # comme "held by others" — c'est sa propre position. On filtre côté bot.
+            macro["held_symbols_global"] = held_symbols_global
+
             # Passer le flag aux bots pour bloquer les nouvelles entrées
             # exposure_high OR daily_breaker OR max_trades → block new entries
             macro["exposure_blocked"] = bool(exposure_high or breaker_active or max_trades_reached)
@@ -1182,6 +1208,9 @@ def run():
             log(f"\n{Fore.CYAN}--- Bot A: Supertrend+MR ---{Style.RESET_ALL}")
             state_a["_exposure_blocked"] = bool(exposure_high or breaker_active or max_trades_reached)
             state_a["_blocked_sectors"] = blocked_sectors
+            state_a["_held_by_other_bots"] = {
+                s for s in held_symbols_global if s not in (state_a.get("positions") or {})
+            }
 
             rotation = bot_a._compute_rotation_factors(state_a.get("trades", []))
             momentum_filter = bot_a._update_momentum_filter(state_a)

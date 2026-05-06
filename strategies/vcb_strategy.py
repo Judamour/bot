@@ -27,7 +27,7 @@ Timeframe : 4h | Capital : 1000€ | Max positions : 5 | Size : 20% / position
 import json
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
@@ -188,7 +188,7 @@ def run_vcb_cycle(state: dict, ohlcv_4h: dict, macro_context: dict = None) -> di
                 state["trades"].append({
                     "symbol": symbol,
                     "entry_date": position["date"],
-                    "exit_date": str(datetime.now()),
+                    "exit_date": datetime.now(timezone.utc).isoformat(),
                     "entry_price": position["entry"],
                     "exit_price": round(exit_eff, 4),
                     "pnl": round(pnl, 2),
@@ -210,6 +210,10 @@ def run_vcb_cycle(state: dict, ohlcv_4h: dict, macro_context: dict = None) -> di
         # Cap secteur GLOBAL cross-bots
         _sec = config.SECTORS.get(symbol)
         if _sec and _sec in ((macro_context or {}).get("blocked_sectors") or set()):
+            continue
+        # Symbol exclusivity cross-bots
+        _held_global = (macro_context or {}).get("held_symbols_global") or {}
+        if symbol in _held_global and symbol not in state["positions"]:
             continue
         if symbol not in state["positions"]:
             if len(state["positions"]) >= MAX_POSITIONS:
@@ -259,7 +263,7 @@ def run_vcb_cycle(state: dict, ohlcv_4h: dict, macro_context: dict = None) -> di
                     "size": round(size, 6),
                     "cost": round(total_cost, 4),
                     "stop": stop_loss,
-                    "date": str(datetime.now()),
+                    "date": datetime.now(timezone.utc).isoformat(),
                     "atr": round(atr, 4),
                     "bb_pct": round(bb_pct, 3),
                 }

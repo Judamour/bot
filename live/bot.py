@@ -276,20 +276,52 @@ def process_symbol(
         risk_per_unit = abs(position["entry"] - position.get("initial_stop", position["stop"]))
         if risk_per_unit > 0 and current_price >= position["entry"] + 1.5 * risk_per_unit:
             half_size = round(position["size"] / 2, 6)
+            # Si la moitié restante serait sous min_order_eur, on fait un FULL exit
+            # (sinon résiduel bloqué : SELL final rejeté pour < min order).
+            half_value = half_size * current_price
+            full_exit_required = half_value < config.MIN_ORDER_EUR
             from live.order_executor import (
                 execute_sell as _exec_sell, cancel_broker_stop, place_broker_stop,
             )
-            # Cancel le broker stop existant (sinon il couvre encore 100% qty
-            # → over-sell potentiel quand il se déclenchera).
             old_stop_id = position.get("alpaca_stop_id")
             if old_stop_id:
                 cancel_broker_stop(symbol, old_stop_id)
                 position["alpaca_stop_id"] = None
 
+            if full_exit_required:
+                # Position trop petite pour scale-out → FULL exit
+                full_size = position["size"]
+                _order = _exec_sell(symbol, full_size, current_price, reason="scale_out_full")
+                if not _order.success:
+                    log(f"{symbol} — Scale-out FULL exit échoué: {_order.error} — re-place stop", "WARN")
+                    ids = place_broker_stop(symbol, position["size"], position["stop"])
+                    if ids.get("stop_id"):
+                        position["alpaca_stop_id"] = ids["stop_id"]
+                else:
+                    exit_eff = _order.filled_price * (1 - config.EXCHANGE_FEE)
+                    fee_full = exit_eff * full_size * config.EXCHANGE_FEE
+                    proceeds = exit_eff * full_size - fee_full
+                    state["capital"] += proceeds
+                    pnl = proceeds - (position["entry"] * full_size + position.get("fee_entry", 0))
+                    state.setdefault("trades", []).append({
+                        "symbol": symbol,
+                        "entry_date": position.get("date"),
+                        "exit_date": datetime.now(timezone.utc).isoformat(),
+                        "entry_price": position["entry"],
+                        "exit_price": _order.filled_price,
+                        "pnl": round(pnl, 2),
+                        "reason": "scale_out_full",
+                        "result": "win" if pnl > 0 else "loss",
+                    })
+                    state["positions"].pop(symbol, None)
+                    _set_cooldown(state, symbol)
+                    log(f"{symbol} — Scale-out FULL (residuel < {config.MIN_ORDER_EUR}€) | "
+                        f"PnL: {pnl:+.2f} | position fermée", "INFO")
+                return state
+
             _order = _exec_sell(symbol, half_size, current_price, reason="scale_out")
             if not _order.success:
                 log(f"{symbol} — Scale-out SELL échoué: {_order.error} — re-place stop original", "WARN")
-                # Re-place le stop annulé pour ne pas laisser la position sans protection
                 ids = place_broker_stop(symbol, position["size"], position["stop"])
                 if ids.get("stop_id"):
                     position["alpaca_stop_id"] = ids["stop_id"]
@@ -302,7 +334,6 @@ def process_symbol(
                 position["scaled_out"] = True
                 log(f"{symbol} — Scale-out 50% à +1.5R [BROKER] | Prix: {_order.filled_price:.4f} | "
                     f"Taille restante: {position['size']:.6f}", "INFO")
-                # Re-place le stop avec la qty restante (50%)
                 ids = place_broker_stop(symbol, position["size"], position["stop"])
                 if ids.get("stop_id"):
                     position["alpaca_stop_id"] = ids["stop_id"]
@@ -363,7 +394,7 @@ def process_symbol(
             trade = {
                 "symbol": symbol,
                 "entry_date": position["date"],
-                "exit_date": str(datetime.now()),
+                "exit_date": datetime.now(timezone.utc).isoformat(),
                 "entry_price": position["entry"],
                 "exit_price": exit_price_eff,
                 "pnl": round(pnl, 2),
@@ -449,6 +480,13 @@ def process_symbol(
         if len(state["positions"]) >= config.MAX_OPEN_TRADES:
             log(f"{symbol} — Signal ignoré (max {config.MAX_OPEN_TRADES} positions ouvertes)", "WARN")
             log_signal("BUY_SKIP_MAX_POS", symbol, {"price": current_price, "open_positions": len(state["positions"])})
+            return state
+
+        # Symbol exclusivity cross-bots : un autre bot le détient déjà
+        held_by_others = state.get("_held_by_other_bots") or set()
+        if symbol in held_by_others:
+            log(f"{symbol} — Signal ignoré (déjà détenu par un autre sub-bot)", "INFO")
+            log_signal("BUY_SKIP_HELD_BY_OTHER", symbol, {"price": current_price})
             return state
 
         # Corrélation secteur — max MAX_PER_SECTOR positions par secteur (intra-bot)
@@ -564,7 +602,7 @@ def process_symbol(
             "stop": pos["stop_loss"],
             "initial_stop": pos["stop_loss"],
             "tp": pos["take_profit"],
-            "date": str(datetime.now()),
+            "date": datetime.now(timezone.utc).isoformat(),
             "risk_eur": pos["risk_eur"],
             "fee_entry": round(fee_entry, 4),
             "alpaca_stop_id": stop_ids.get("stop_id"),

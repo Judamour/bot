@@ -24,7 +24,7 @@ import json
 import math
 import os
 import sys
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
@@ -266,7 +266,7 @@ def run_rs_leaders_cycle(state: dict, daily_cache: dict, macro_context: dict = N
             state["trades"].append({
                 "symbol": symbol,
                 "entry_date": pos["date"],
-                "exit_date": str(datetime.now()),
+                "exit_date": datetime.now(timezone.utc).isoformat(),
                 "entry_price": pos["entry"],
                 "exit_price": round(exit_eff, 4),
                 "pnl": round(pnl, 2),
@@ -348,7 +348,7 @@ def run_rs_leaders_cycle(state: dict, daily_cache: dict, macro_context: dict = N
             state["trades"].append({
                 "symbol": symbol,
                 "entry_date": pos["date"],
-                "exit_date": str(datetime.now()),
+                "exit_date": datetime.now(timezone.utc).isoformat(),
                 "entry_price": pos["entry"],
                 "exit_price": round(exit_price, 4),
                 "pnl": round(pnl, 2),
@@ -379,9 +379,13 @@ def run_rs_leaders_cycle(state: dict, daily_cache: dict, macro_context: dict = N
     portfolio_val = _portfolio_value(state, daily_cache)
 
     _blocked_sectors = (macro or {}).get("blocked_sectors") or set()
+    _held_global = (macro or {}).get("held_symbols_global") or {}
     for symbol in to_buy:
         df = daily_cache.get(symbol)
         if df is None:
+            continue
+        # Symbol exclusivity cross-bots
+        if symbol in _held_global and symbol not in state["positions"]:
             continue
         # Cap secteur GLOBAL cross-bots
         _sec = config.SECTORS.get(symbol)
@@ -429,7 +433,7 @@ def run_rs_leaders_cycle(state: dict, daily_cache: dict, macro_context: dict = N
             "size": round(size, 6),
             "cost": round(total_cost, 4),
             "stop": stop_loss,
-            "date": str(datetime.now()),
+            "date": datetime.now(timezone.utc).isoformat(),
             "atr": round(atr, 4),
             "rs_score": round(scores.get(symbol, 0), 4),
             "vol_pct": round(annual_vol * 100, 1),

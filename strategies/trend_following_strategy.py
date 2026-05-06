@@ -204,7 +204,7 @@ def run_trend_cycle(state: dict, daily_cache: dict, macro_context: dict = None) 
                 state["trades"].append({
                     "symbol": symbol,
                     "entry_date": position["date"],
-                    "exit_date": str(datetime.now()),
+                    "exit_date": datetime.now(timezone.utc).isoformat(),
                     "entry_price": position["entry"],
                     "exit_price": round(exit_eff, 4),
                     "pnl": round(pnl, 2),
@@ -231,6 +231,10 @@ def run_trend_cycle(state: dict, daily_cache: dict, macro_context: dict = None) 
 
         # ── Entry checks (pas de position sur ce symbole) ──
         if symbol not in state["positions"]:
+            # Symbol exclusivity cross-bots
+            _held_global = (macro_context or {}).get("held_symbols_global") or {}
+            if symbol in _held_global:
+                continue
             # Cooldown anti-whipsaw : skip si symbole en cooldown post-exit
             _cd_until_str = (state.get("cooldowns") or {}).get(symbol)
             if _cd_until_str:
@@ -303,7 +307,7 @@ def run_trend_cycle(state: dict, daily_cache: dict, macro_context: dict = None) 
                     "size": round(size, 6),
                     "cost": round(total_cost, 4),
                     "stop": stop_loss,
-                    "date": str(datetime.now()),
+                    "date": datetime.now(timezone.utc).isoformat(),
                     "atr": round(atr, 4),
                     "vol_pct": round(annual_vol * 100, 1),
                     "alpaca_stop_id": stop_ids.get("stop_id"),

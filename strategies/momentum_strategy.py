@@ -14,7 +14,7 @@ Expected performance: 15-20% CAGR (Antonacci dual momentum research)
 import json
 import os
 import sys
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 
 import pytz
 
@@ -163,7 +163,7 @@ def run_momentum_cycle(state: dict, daily_cache: dict, macro_context: dict = Non
             state["trades"].append({
                 "symbol": symbol,
                 "entry_date": pos["date"],
-                "exit_date": str(datetime.now()),
+                "exit_date": datetime.now(timezone.utc).isoformat(),
                 "entry_price": pos["entry"],
                 "exit_price": exit_price,
                 "pnl": round(pnl, 2),
@@ -245,7 +245,7 @@ def run_momentum_cycle(state: dict, daily_cache: dict, macro_context: dict = Non
             state["trades"].append({
                 "symbol": symbol,
                 "entry_date": pos["date"],
-                "exit_date": str(datetime.now()),
+                "exit_date": datetime.now(timezone.utc).isoformat(),
                 "entry_price": pos["entry"],
                 "exit_price": exit_price,
                 "pnl": round(pnl, 2),
@@ -276,7 +276,11 @@ def run_momentum_cycle(state: dict, daily_cache: dict, macro_context: dict = Non
 
     skipped_us_closed = 0
     _blocked_sectors = (macro_context or {}).get("blocked_sectors") or set()
+    _held_global = (macro_context or {}).get("held_symbols_global") or {}
     for symbol in to_buy:
+        # Symbol exclusivity cross-bots (sauf si déjà détenu par soi-même)
+        if symbol in _held_global and symbol not in state["positions"]:
+            continue
         # Cap secteur GLOBAL cross-bots
         _sec = config.SECTORS.get(symbol)
         if _sec and _sec in _blocked_sectors:
@@ -323,7 +327,7 @@ def run_momentum_cycle(state: dict, daily_cache: dict, macro_context: dict = Non
             "entry": round(entry_price, 4),
             "size": round(size, 6),
             "cost": round(total_cost, 4),
-            "date": str(datetime.now()),
+            "date": datetime.now(timezone.utc).isoformat(),
             "score": round(scores.get(symbol, 0), 4),
             "alpaca_stop_id": stop_ids.get("stop_id"),
         }

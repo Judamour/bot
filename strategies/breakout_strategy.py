@@ -14,7 +14,7 @@ Expected performance: 15-20% CAGR (SG CTA Index reference)
 import json
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
@@ -182,7 +182,7 @@ def run_breakout_cycle(state: dict, daily_cache: dict, macro_context: dict = Non
                 state["trades"].append({
                     "symbol": symbol,
                     "entry_date": position["date"],
-                    "exit_date": str(datetime.now()),
+                    "exit_date": datetime.now(timezone.utc).isoformat(),
                     "entry_price": position["entry"],
                     "exit_price": exit_price_eff,
                     "pnl": round(pnl, 2),
@@ -210,6 +210,10 @@ def run_breakout_cycle(state: dict, daily_cache: dict, macro_context: dict = Non
         # Cap secteur GLOBAL cross-bots
         _sec = config.SECTORS.get(symbol)
         if _sec and _sec in ((macro_context or {}).get("blocked_sectors") or set()):
+            continue
+        # Symbol exclusivity cross-bots
+        _held_global = (macro_context or {}).get("held_symbols_global") or {}
+        if symbol in _held_global and symbol not in state["positions"]:
             continue
         if symbol not in state["positions"]:
             breakout = current_price > dc_upper if dc_upper > 0 else False
@@ -249,7 +253,7 @@ def run_breakout_cycle(state: dict, daily_cache: dict, macro_context: dict = Non
                     "size": round(size, 6),
                     "cost": round(total_cost, 4),
                     "stop": round(stop_loss, 4),
-                    "date": str(datetime.now()),
+                    "date": datetime.now(timezone.utc).isoformat(),
                     "atr": round(atr, 4),
                     "alpaca_stop_id": stop_ids.get("stop_id"),
                 }

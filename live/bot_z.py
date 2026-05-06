@@ -40,7 +40,7 @@ import json
 import os
 import sys
 import math
-from datetime import datetime
+from datetime import datetime, timezone
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
@@ -301,7 +301,7 @@ def _write_budget(budget: dict):
     os.makedirs(os.path.dirname(STATE_FILE), exist_ok=True)
     budget_path = os.path.join(os.path.dirname(STATE_FILE), "budget.json")
     with open(budget_path, "w") as f:
-        json.dump({"ts": datetime.now().isoformat(), "budget": budget}, f, indent=2)
+        json.dump({"ts": datetime.now(timezone.utc).isoformat(), "budget": budget}, f, indent=2)
 
 
 def _apply_weight_caps(weights: dict) -> dict:
@@ -914,7 +914,7 @@ def run_bot_z_cycle(macro: dict, ohlcv: dict = None, broker_equity: float = None
 
     Retourne le résumé du cycle pour logging et dashboard.
     """
-    ts = datetime.now().isoformat()
+    ts = datetime.now(timezone.utc).isoformat()
 
     # 1. Charger les états de tous les bots valides
     all_states = {bot_id: load_bot_state(bot_id) for bot_id in BOT_STATE_FILES}

@@ -24,7 +24,7 @@ Objectif live : récolte de données — décision d'intégration à Bot Z à la
 import json
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
@@ -174,7 +174,7 @@ def run_mr_cycle(state: dict, daily_cache: dict, macro_context: dict = None) -> 
             state["trades"].append({
                 "symbol":      symbol,
                 "entry_date":  pos["date"],
-                "exit_date":   str(datetime.now()),
+                "exit_date":   datetime.now(timezone.utc).isoformat(),
                 "entry_price": pos["entry"],
                 "exit_price":  round(exit_eff, 4),
                 "pnl":         round(pnl, 2),
@@ -184,8 +184,8 @@ def run_mr_cycle(state: dict, daily_cache: dict, macro_context: dict = None) -> 
             })
             state["positions"].pop(symbol)
             # Cooldown anti-whipsaw 12h
-            from datetime import timedelta as _td, timezone as _tz
-            _until = (datetime.now(_tz.utc) + _td(hours=12)).isoformat()
+            from datetime import timedelta as _td
+            _until = (datetime.now(timezone.utc) + _td(hours=12)).isoformat()
             state.setdefault("cooldowns", {})[symbol] = _until
 
             _log(
@@ -210,9 +210,13 @@ def run_mr_cycle(state: dict, daily_cache: dict, macro_context: dict = None) -> 
         return state
 
     _blocked_sectors = (macro_context or {}).get("blocked_sectors") or set()
+    _held_global = (macro_context or {}).get("held_symbols_global") or {}
     for symbol in config.SYMBOLS:
         if symbol in state["positions"]:
             continue  # déjà en position
+        # Symbol exclusivity cross-bots
+        if symbol in _held_global:
+            continue
         # Cap secteur GLOBAL cross-bots
         _sec = config.SECTORS.get(symbol)
         if _sec and _sec in _blocked_sectors:
@@ -266,8 +270,10 @@ def run_mr_cycle(state: dict, daily_cache: dict, macro_context: dict = None) -> 
             if not _order.success:
                 _log(f"⛔ BUY {symbol} échoué: {_order.error}", "WARN")
                 continue
-            # Recalcule cost réel sur filled_price (peut différer du current_price estimé)
-            real_entry = _order.filled_price * (1 + config.SLIPPAGE)
+            # filled_price = prix réel du broker (déjà avec slippage en live).
+            # Pas de SLIPPAGE add (sinon double-count en live).
+            real_entry = _order.filled_price
+            size = _order.filled_size
             fee_entry  = real_entry * size * config.EXCHANGE_FEE
             total_cost = size * real_entry + fee_entry
             state["capital"] -= total_cost
@@ -279,7 +285,7 @@ def run_mr_cycle(state: dict, daily_cache: dict, macro_context: dict = None) -> 
                 "cost":       round(total_cost, 4),
                 "stop":       round(stop_loss, 4),
                 "initial_stop": round(stop_loss, 4),
-                "date":       str(datetime.now()),
+                "date":       datetime.now(timezone.utc).isoformat(),
                 "atr14":      round(atr14, 4),
                 "rsi2_entry": round(rsi2, 2),
                 "alpaca_stop_id": stop_ids.get("stop_id"),
