@@ -459,12 +459,24 @@ def _reconcile_alpaca_positions(states_registry: dict) -> int:
             fixes += 1
 
     # 2. Qty mismatch
+    # Utiliser `qty` (total holdings), PAS `qty_available` qui exclut les qty
+    # bloquées par les stops ouverts (qty_available ≈ 0 quand un stop couvre 100%
+    # de la position — ce qui est notre cas normal).
     for bot_id, positions in state_symbols_by_bot.items():
         for symbol, pos in positions.items():
             if symbol not in broker_positions:
                 continue
-            broker_qty = float(broker_positions[symbol].get("qty_available") or broker_positions[symbol].get("qty") or 0)
+            broker_qty = float(broker_positions[symbol].get("qty") or 0)
             state_qty = float(pos.get("size", 0))
+            # BAC est dans Bot A (147.7) ET Bot G (38.8) → broker agrège (186.5).
+            # Skip mismatch check si symbole partagé entre plusieurs bots :
+            # somme des state_qty ≈ broker_qty est attendu.
+            shared = sum(
+                1 for _b, _ps in state_symbols_by_bot.items()
+                if symbol in _ps
+            ) > 1
+            if shared:
+                continue
             # Tolérance 0.5% (rounding broker)
             if state_qty > 0 and abs(broker_qty - state_qty) / state_qty > 0.005:
                 log(f"[RECONCILE] Bot {bot_id}/{symbol} : qty state={state_qty} vs broker={broker_qty} — ajusté à broker", "WARN")
