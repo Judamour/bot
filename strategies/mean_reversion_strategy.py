@@ -159,7 +159,13 @@ def run_mr_cycle(state: dict, daily_cache: dict, macro_context: dict = None) -> 
             exit_reason = "mean_reverted" if current_price > bb_mid else "rsi_exit"
 
         if exit_reason:
-            exit_eff  = exit_price * (1 - config.SLIPPAGE)
+            from live.order_executor import execute_sell as _exec_sell, cancel_broker_stop
+            cancel_broker_stop(symbol, pos.get("alpaca_stop_id"))
+            _order = _exec_sell(symbol, pos["size"], exit_price, reason=exit_reason)
+            if not _order.success:
+                _log(f"⛔ SELL {symbol} échoué: {_order.error} — position maintenue", "WARN")
+                continue
+            exit_eff  = _order.filled_price * (1 - config.EXCHANGE_FEE)
             fee_exit  = exit_eff * pos["size"] * config.EXCHANGE_FEE
             proceeds  = exit_eff * pos["size"] - fee_exit
             pnl       = proceeds - pos["cost"]
@@ -177,6 +183,10 @@ def run_mr_cycle(state: dict, daily_cache: dict, macro_context: dict = None) -> 
                 "rsi2_entry":  pos.get("rsi2_entry", 0),
             })
             state["positions"].pop(symbol)
+            # Cooldown anti-whipsaw 12h
+            from datetime import timedelta as _td, timezone as _tz
+            _until = (datetime.now(_tz.utc) + _td(hours=12)).isoformat()
+            state.setdefault("cooldowns", {})[symbol] = _until
 
             _log(
                 f"{'✓' if pnl > 0 else '✗'} CLOSE {symbol} | "
@@ -246,15 +256,28 @@ def run_mr_cycle(state: dict, daily_cache: dict, macro_context: dict = None) -> 
                 _log(f"{symbol} — Capital insuffisant ({state['capital']:.2f}€ < {total_cost:.2f}€)", "WARN")
                 continue
 
+            from live.order_executor import execute_buy as _exec_buy, place_broker_stop
+            _order = _exec_buy(symbol, size, current_price)
+            if not _order.success:
+                _log(f"⛔ BUY {symbol} échoué: {_order.error}", "WARN")
+                continue
+            # Recalcule cost réel sur filled_price (peut différer du current_price estimé)
+            real_entry = _order.filled_price * (1 + config.SLIPPAGE)
+            fee_entry  = real_entry * size * config.EXCHANGE_FEE
+            total_cost = size * real_entry + fee_entry
             state["capital"] -= total_cost
+            stop_loss = real_entry - ATR_MULT * atr14
+            stop_ids = place_broker_stop(symbol, size, round(stop_loss, 4))
             state["positions"][symbol] = {
-                "entry":      round(entry_price, 4),
+                "entry":      round(real_entry, 4),
                 "size":       round(size, 6),
                 "cost":       round(total_cost, 4),
                 "stop":       round(stop_loss, 4),
+                "initial_stop": round(stop_loss, 4),
                 "date":       str(datetime.now()),
                 "atr14":      round(atr14, 4),
                 "rsi2_entry": round(rsi2, 2),
+                "alpaca_stop_id": stop_ids.get("stop_id"),
             }
 
             _log(

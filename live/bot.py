@@ -275,14 +275,39 @@ def process_symbol(
     if position and not position.get("scaled_out"):
         risk_per_unit = abs(position["entry"] - position.get("initial_stop", position["stop"]))
         if risk_per_unit > 0 and current_price >= position["entry"] + 1.5 * risk_per_unit:
-            half_size = position["size"] / 2
-            exit_eff = current_price * (1 - config.SLIPPAGE)
-            fee_partial = exit_eff * half_size * config.EXCHANGE_FEE
-            proceeds_partial = exit_eff * half_size - fee_partial
-            state["capital"] += proceeds_partial
-            position["size"] -= half_size
-            position["scaled_out"] = True
-            log(f"{symbol} — Scale-out 50% à +1.5R | Prix: {current_price:.4f}€ | Taille restante: {position['size']:.6f}", "INFO")
+            half_size = round(position["size"] / 2, 6)
+            from live.order_executor import (
+                execute_sell as _exec_sell, cancel_broker_stop, place_broker_stop,
+            )
+            # Cancel le broker stop existant (sinon il couvre encore 100% qty
+            # → over-sell potentiel quand il se déclenchera).
+            old_stop_id = position.get("alpaca_stop_id")
+            if old_stop_id:
+                cancel_broker_stop(symbol, old_stop_id)
+                position["alpaca_stop_id"] = None
+
+            _order = _exec_sell(symbol, half_size, current_price, reason="scale_out")
+            if not _order.success:
+                log(f"{symbol} — Scale-out SELL échoué: {_order.error} — re-place stop original", "WARN")
+                # Re-place le stop annulé pour ne pas laisser la position sans protection
+                ids = place_broker_stop(symbol, position["size"], position["stop"])
+                if ids.get("stop_id"):
+                    position["alpaca_stop_id"] = ids["stop_id"]
+            else:
+                exit_eff = _order.filled_price * (1 - config.EXCHANGE_FEE)
+                fee_partial = exit_eff * half_size * config.EXCHANGE_FEE
+                proceeds_partial = exit_eff * half_size - fee_partial
+                state["capital"] += proceeds_partial
+                position["size"] -= half_size
+                position["scaled_out"] = True
+                log(f"{symbol} — Scale-out 50% à +1.5R [BROKER] | Prix: {_order.filled_price:.4f} | "
+                    f"Taille restante: {position['size']:.6f}", "INFO")
+                # Re-place le stop avec la qty restante (50%)
+                ids = place_broker_stop(symbol, position["size"], position["stop"])
+                if ids.get("stop_id"):
+                    position["alpaca_stop_id"] = ids["stop_id"]
+                else:
+                    log(f"{symbol} — Re-place broker stop après scale-out échoué — bot SL interne uniquement", "WARN")
 
     # ── Vérifier stop-loss / take-profit ──
     if position:
