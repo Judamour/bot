@@ -551,7 +551,7 @@ def process_symbol(
             # Floor 0.70 : avant 0.30 = on étranglait à -12% DD (vu live: ×0.41-0.51).
             # Le freeze hard à -15% (config.MAX_DRAWDOWN) protège le capital, le scale
             # ne doit pas faire le même travail en doublon.
-            dd_scale = max(0.70, 1.0 + dd_ratio * 2)
+            dd_scale = max(0.70, min(1.0, 1.0 + dd_ratio * 2))
         else:
             dd_scale = 1.0
         position_eur = base_eur * vix_factor * vol_exposure * dd_scale
