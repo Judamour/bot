@@ -21,6 +21,7 @@ import os
 import sys
 import threading
 import time
+import urllib.request
 from datetime import datetime, timedelta, timezone
 from colorama import Fore, Style, init
 
@@ -778,11 +779,112 @@ def _close_position_from_broker_fill(state: dict, bot_id: str, symbol: str, fill
            f"Cooldown 12h activé")
 
 
+_RECONCILE_DEDUP_FILE = "logs/bot_z/reconcile_alerts.json"
+_RECONCILE_DEDUP_TTL_SEC = 24 * 3600
+_RECONCILE_DRIFT_PCT_THRESHOLD = 0.01   # 1% écart relatif
+_RECONCILE_VALUE_THRESHOLD_USD = 50     # ignore dust < $50
+
+
+def _reconcile_broker_positions(states_registry: dict) -> None:
+    """
+    Compare les positions Alpaca au cumul des states bot. Alerte Telegram :
+      - DRIFT : symbole où broker_qty ≠ sum(bot_qty) au-delà du seuil (1% / $50)
+      - FANTÔME : position broker absente de tous les states (>$50)
+
+    Détecte les bugs de synchro (cf. cas BAC du 04/05/2026 — position fantôme
+    de 186 actions invisible au bot pendant 8 jours). Dédup 24h/symbole pour
+    éviter de spammer.
+    """
+    from live import alpaca_executor as ax
+    from live.notifier import notify
+    import time as _time
+
+    try:
+        with open(_RECONCILE_DEDUP_FILE) as f:
+            dedup = json.load(f)
+    except Exception:
+        dedup = {}
+    now = _time.time()
+    dedup = {k: v for k, v in dedup.items()
+             if now - v < _RECONCILE_DEDUP_TTL_SEC}
+
+    try:
+        url = ax._base_url() + "/v2/positions"
+        req = urllib.request.Request(url, headers={
+            "APCA-API-KEY-ID": ax._api_key(),
+            "APCA-API-SECRET-KEY": ax._api_secret(),
+        })
+        broker_positions = json.loads(urllib.request.urlopen(req, timeout=10).read())
+    except Exception as e:
+        log(f"[RECONCILE] fetch broker positions échec: {e}", "WARN")
+        return
+
+    bot_totals: dict[str, float] = {}
+    for state in states_registry.values():
+        for sym, p in (state.get("positions") or {}).items():
+            if p and p.get("size"):
+                bot_totals[sym] = bot_totals.get(sym, 0) + float(p["size"])
+
+    broker_symbols = set()
+    drift_count = orphan_count = 0
+    for pos in broker_positions:
+        sym = pos.get("symbol") or ""
+        broker_symbols.add(sym)
+        broker_qty = float(pos.get("qty_available") or pos.get("qty") or 0)
+        bot_qty = bot_totals.get(sym, 0)
+        mv = float(pos.get("market_value") or 0)
+        if broker_qty <= 0:
+            continue
+
+        # Position fantôme : présente côté broker, absente côté bot
+        if bot_qty == 0:
+            if mv >= _RECONCILE_VALUE_THRESHOLD_USD:
+                key = f"orphan:{sym}"
+                if key not in dedup:
+                    notify(
+                        f"🚨 <b>POSITION FANTÔME BROKER</b>\n"
+                        f"{sym}: {broker_qty:.6f} (~{mv:.0f}$)\n"
+                        f"Absente du state bot — inspection manuelle requise"
+                    )
+                    dedup[key] = now
+                log(f"[RECONCILE] ORPHAN {sym}: qty={broker_qty:.6f} mv=${mv:.0f}", "WARN")
+                orphan_count += 1
+            continue
+
+        # Drift : écart relatif > seuil ET valeur de l'écart > seuil
+        diff = abs(broker_qty - bot_qty)
+        rel = diff / broker_qty
+        diff_value = diff * (mv / broker_qty)
+        if rel > _RECONCILE_DRIFT_PCT_THRESHOLD and diff_value > _RECONCILE_VALUE_THRESHOLD_USD:
+            if sym not in dedup:
+                notify(
+                    f"🚨 <b>DRIFT BROKER ↔ BOT</b>\n"
+                    f"{sym}: broker {broker_qty:.4f}, bot {bot_qty:.4f}\n"
+                    f"Écart {diff:.4f} (~{diff_value:.0f}$)\n"
+                    f"→ Inspection manuelle requise"
+                )
+                dedup[sym] = now
+            log(f"[RECONCILE] DRIFT {sym}: broker={broker_qty:.6f} "
+                f"bot={bot_qty:.6f} diff=${diff_value:.0f}", "WARN")
+            drift_count += 1
+
+    if drift_count or orphan_count:
+        log(f"[RECONCILE] {drift_count} drift(s), {orphan_count} fantôme(s) détecté(s)", "WARN")
+
+    try:
+        os.makedirs(os.path.dirname(_RECONCILE_DEDUP_FILE), exist_ok=True)
+        with open(_RECONCILE_DEDUP_FILE, "w") as f:
+            json.dump(dedup, f)
+    except Exception:
+        pass
+
+
 def _stop_monitor_loop(states_registry: dict):
     """
     Daemon : entre les cycles 4h, vérifie toutes les 15min l'état des stops broker.
     - Stop expiré (Alpaca DAY tif sur fractional) → re-place automatiquement
     - Stop fillé (déclenché) → ferme position dans state, cooldown 12h, notify
+    - Réconcilie aussi les positions broker ↔ bot (drift / fantôme) avec alerte
     - Sans ce monitor, une position serait non-protégée jusqu'au prochain cycle 4h.
 
     Lit/mute les positions in-memory partagées avec le main thread. Pas de lock :
@@ -821,6 +923,11 @@ def _stop_monitor_loop(states_registry: dict):
                 log(f"[STOP-MONITOR] {checked} stops vérifiés, "
                     f"{renewed} renouvelés, {adopted} adoptés, "
                     f"{filled} fillés (positions fermées)")
+            # Réconciliation broker↔bot (détecte drift et positions fantômes)
+            try:
+                _reconcile_broker_positions(states_registry)
+            except Exception as e:
+                log(f"[RECONCILE] iteration: {e}", "WARN")
         except Exception as e:
             log(f"[STOP-MONITOR] iteration: {e}", "WARN")
 
