@@ -1,46 +1,52 @@
 #!/usr/bin/env python3
-"""Backtest 3 ans du Shadow Bot (moteur unifié single-loop, daily granularity).
+"""Backtest 3 ans du Shadow Bot v2 (moteur unifié single-loop, 4h granularity).
 
 Réutilise EXACTEMENT les détecteurs et scorer du shadow runner :
   - shadow.strategies.ALL_DETECTORS (5 détecteurs)
   - shadow.scorer.compute_score (score composite 0-100)
-  - Sizing risk parity 1% per trade, max 10% per position
-  - Trailing ATR×4
+  - shadow.sizing.compute_size (score-weighted, top-3 par cycle)
+  - shadow.quality_gate.passes (4 gates méchaniques)
+  - shadow.regime.shield_active (SHIELD VIX/BTC/QQQ)
+  - shadow.risk_guard.RiskGuard (MaxDD halt + cooldowns)
+  - Trailing ATR adaptatif (tight 1.5× → loose 3.0× au-delà +5%)
 
 Sortie : CAGR, Sharpe, MaxDD, trades, win rate, profit factor.
 Comparaison avec backtests prod : Bot A solo (CAGR 49%, Sharpe 2.43) et Bot Z (CAGR 38%).
 """
 import os
 import sys
-import math
 import warnings
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timezone
+
 import pandas as pd
 import numpy as np
-import yfinance as yf
 
 warnings.filterwarnings("ignore")
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from shadow.strategies import ALL_DETECTORS
-from shadow.scorer import compute_score
+from shadow.scorer import compute_score, Signal
+from shadow.constants_v2 import (
+    SCORE_FLOOR, TOP_N_SIGNALS, MAX_OPEN_POSITIONS,
+    ATR_MULT_STOP_INIT, ATR_MULT_TRAIL, PROFIT_LOOSEN_PCT,
+)
+from shadow.regime import shield_active
+from shadow.quality_gate import passes as gate_passes
+from shadow.risk_guard import RiskGuard
+from shadow.sizing import compute_size
 from strategies.supertrend import compute_atr
 from backtest.multi_backtest import compute_metrics, INITIAL
 
 # ── Config ───────────────────────────────────────────────────────────────────
 START = "2023-04-29"
 END = "2026-04-29"
-INITIAL_CAPITAL = INITIAL  # 100K
-MIN_SCORE = 55.0
-TOP_N_SIGNALS = 5
-MAX_OPEN_POSITIONS = 10
-RISK_PER_TRADE_PCT = 0.01
-MAX_POSITION_PCT = 0.10
-ATR_MULT_TRAIL = 4.0
+INITIAL_CAPITAL = INITIAL  # 1000 from multi_backtest
 FEE = 0.0026
 SLIPPAGE = 0.001
-WARMUP_DAYS = 220  # need 200 days for SMA200 in detectors
+
+DAYS_4H = 365 * 3 + 60          # 3 ans 4h + warmup
+DAYS_1D = 365 * 3 + 220         # 3 ans + 220 jours pour SMA200
 
 # Univers identique au prod (21 actifs Alpaca crisis-alpha)
 CRYPTO = {"BTC/USD": "BTC-USD", "ETH/USD": "ETH-USD", "SOL/USD": "SOL-USD",
@@ -50,193 +56,226 @@ STOCKS = ["NVDA", "GOOGL", "META", "PLTR", "CRWD", "LLY", "ABBV", "XOM", "CVX",
 ALL_SYMBOLS = list(CRYPTO.keys()) + STOCKS
 
 
-def fetch_daily(symbol_internal: str) -> pd.DataFrame | None:
-    """Fetch daily OHLCV via yfinance, normalize columns."""
-    yf_ticker = CRYPTO.get(symbol_internal, symbol_internal)
+def fetch_bars(symbol_internal: str, timeframe: str, days: int) -> pd.DataFrame | None:
+    """Fetch OHLCV via prod data.fetcher (Binance crypto / Alpaca-or-yf stocks)."""
+    from data.fetcher import fetch_ohlcv
     try:
-        df = yf.download(yf_ticker, start=START, end=END, interval="1d",
-                         progress=False, auto_adjust=True)
-        if df is None or len(df) < WARMUP_DAYS:
+        df = fetch_ohlcv(symbol_internal, timeframe, days)
+        if df is None or len(df) < 50:
             return None
-        if isinstance(df.columns, pd.MultiIndex):
-            df.columns = df.columns.get_level_values(0)
-        df = df.rename(columns=str.lower)
-        df = df[["open", "high", "low", "close", "volume"]].dropna()
-        return df
+        df.columns = [c.lower() for c in df.columns]
+        return df[["open", "high", "low", "close", "volume"]].dropna()
     except Exception as e:
-        print(f"  [skip] {symbol_internal}: {e}")
+        print(f"  [skip] {symbol_internal} {timeframe}: {e}")
         return None
 
 
 def main():
-    print(f"=== SHADOW BACKTEST {START} → {END} ===\n")
-    print("Chargement OHLCV daily…")
-    cache = {}
+    print(f"=== SHADOW BACKTEST v2 {START} → {END} (4h) ===\n")
+
+    print("Chargement OHLCV 4h (signaux) + 1d (MTF + régime QQQ)…")
+    cache_4h, cache_1d = {}, {}
     for sym in ALL_SYMBOLS:
-        df = fetch_daily(sym)
-        if df is not None:
-            cache[sym] = df
-            print(f"  ✓ {sym:10} : {len(df)} jours ({df.index[0].date()} → {df.index[-1].date()})")
-    if not cache:
-        print("Aucune data chargée")
+        df_4h = fetch_bars(sym, "4h", days=DAYS_4H)
+        df_1d = fetch_bars(sym, "1d", days=DAYS_1D)
+        if df_4h is not None and df_1d is not None:
+            cache_4h[sym] = df_4h
+            cache_1d[sym] = df_1d
+            print(f"  ✓ {sym:10}: {len(df_4h):4} bars 4h / {len(df_1d):4} bars 1d")
+    if not cache_4h:
+        print("Aucune donnée chargée")
         return
 
-    # Date range unifiée (intersection)
-    common_dates = sorted(set.intersection(*[set(df.index) for df in cache.values()]))
-    print(f"\n{len(common_dates)} jours communs à tous les symboles\n")
+    # Date timeline: intersection of all 4h indices
+    common_bars = sorted(set.intersection(*[set(df.index) for df in cache_4h.values()]))
+    print(f"\n{len(common_bars)} barres 4h communes\n")
 
-    # ── State ────────────────────────────────────────────────────────────────
+    # Warmup : need 220 1d bars for SMA200 in detectors → skip first ~330 4h bars
+    WARMUP_BARS_4H = 330
+    if len(common_bars) <= WARMUP_BARS_4H:
+        print(f"Pas assez d'historique ({len(common_bars)} bars)")
+        return
+
     capital = INITIAL_CAPITAL
-    positions = {}  # symbol -> dict
+    positions = {}                       # sym → dict
     trades = []
     equity_curve = []
-    equity_dates = []
+    equity_ts = []
 
-    ctx = {"vix": 18.0, "btc_trend": "bull", "qqq_ok": True}
+    # Risk guard state (in-memory only for backtest — no persistence)
+    rg = RiskGuard(state_path="/tmp/__backtest_risk_state__.json",
+                   peak_equity=INITIAL_CAPITAL,
+                   peak_date=common_bars[WARMUP_BARS_4H])
 
-    # ── Simulation jour par jour ─────────────────────────────────────────────
-    for i, day in enumerate(common_dates[WARMUP_DAYS:], start=WARMUP_DAYS):
-        # 1. Update macro context (approximation simple basée sur SPY trend)
-        if "SPY" in cache:
-            spy_df = cache["SPY"]
-            spy_today = spy_df.loc[:day].iloc[-1]
-            sma_200 = spy_df.loc[:day].iloc[-200:]["close"].mean()
-            ctx["qqq_ok"] = bool(spy_today["close"] > sma_200)
+    ctx_default = {"vix": 18.0, "btc_trend": "bull", "qqq_regime_ok": True}
 
-        # 2. Sur positions ouvertes : check stop touché (low du jour) + trailing update
+    for i, bar_ts in enumerate(common_bars[WARMUP_BARS_4H:], start=WARMUP_BARS_4H):
+        # 1. Macro context (approx via SPY trend on 1d cache)
+        ctx = dict(ctx_default)
+        if "SPY" in cache_1d:
+            spy = cache_1d["SPY"]
+            spy_slice = spy.loc[:bar_ts.normalize()] if hasattr(bar_ts, "normalize") else spy.loc[:bar_ts]
+            if len(spy_slice) >= 200:
+                ctx["qqq_regime_ok"] = bool(spy_slice["close"].iloc[-1] > spy_slice["close"].tail(200).mean())
+
+        # 2. Check halt / SHIELD
+        halted = rg.is_halted(now=bar_ts)
+        shielded = shield_active(ctx)
+        skip_new_entries = halted or shielded
+
+        # 3. Update trailing stops + check stops for open positions
         for sym in list(positions.keys()):
-            df = cache[sym]
-            if day not in df.index:
+            df = cache_4h[sym]
+            if bar_ts not in df.index:
                 continue
-            bar = df.loc[day]
-            low = float(bar["low"])
-            close = float(bar["close"])
+            bar = df.loc[bar_ts]
             pos = positions[sym]
-
-            # Stop touché
+            low, close = float(bar["low"]), float(bar["close"])
+            # Stop hit?
             if low <= pos["stop"]:
                 exit_price = pos["stop"] * (1 - SLIPPAGE)
                 proceeds = exit_price * pos["size"]
-                fee = proceeds * FEE
-                capital += proceeds - fee
-                pnl = (exit_price - pos["entry"]) * pos["size"] - pos["fee_entry"] - fee
+                fee_exit = proceeds * FEE
+                capital += proceeds - fee_exit
+                pnl = (exit_price - pos["entry"]) * pos["size"] - pos["fee_entry"] - fee_exit
                 trades.append({
                     "symbol": sym, "strategy": pos["strategy"],
                     "entry": pos["entry"], "exit": exit_price,
-                    "entry_date": pos["entry_date"], "exit_date": day,
-                    "pnl": round(pnl, 2),
-                    "reason": "stop_loss", "score": pos["score"],
+                    "entry_ts": pos["entry_ts"], "exit_ts": bar_ts,
+                    "pnl": round(pnl, 2), "reason": "stop_loss", "score": pos["score"],
                 })
+                rg.register_stop(sym, pnl, now=bar_ts)
                 del positions[sym]
                 continue
+            # Trailing update (adaptive)
+            df_slice = df.loc[:bar_ts]
+            if len(df_slice) < 15:
+                continue
+            atr = float(compute_atr(df_slice["high"], df_slice["low"], df_slice["close"], 14).iloc[-1] or 0)
+            if atr <= 0:
+                continue
+            pnl_pct = (close - pos["entry"]) / pos["entry"]
+            atr_mult = ATR_MULT_TRAIL if pnl_pct >= PROFIT_LOOSEN_PCT else ATR_MULT_STOP_INIT
+            new_stop = close - atr_mult * atr
+            if new_stop > pos["stop"]:
+                pos["stop"] = new_stop
 
-            # Trailing update
-            df_slice = df.loc[:day]
-            if len(df_slice) >= 15:
-                atr = float(compute_atr(df_slice["high"], df_slice["low"], df_slice["close"], 14).iloc[-1] or 0)
-                if atr > 0:
-                    new_stop = close - ATR_MULT_TRAIL * atr
-                    if new_stop > pos["stop"]:
-                        pos["stop"] = new_stop
+        if skip_new_entries:
+            eq = capital + sum(float(cache_4h[s].loc[bar_ts]["close"]) * p["size"]
+                               for s, p in positions.items() if bar_ts in cache_4h[s].index)
+            equity_curve.append(eq)
+            equity_ts.append(bar_ts)
+            rg.update_equity(eq, now=bar_ts)
+            continue
 
-        # 3. Scan signaux (sur tous les symboles sans position)
+        # 4. Scan signals
         candidates = []
         for sym in ALL_SYMBOLS:
-            if sym in positions or sym not in cache:
+            if sym in positions or sym not in cache_4h:
                 continue
-            df = cache[sym]
-            if day not in df.index:
+            df_4h = cache_4h[sym]
+            df_1d = cache_1d.get(sym)
+            if bar_ts not in df_4h.index:
                 continue
-            df_history = df.loc[:day]
-            if len(df_history) < WARMUP_DAYS:
+            df_4h_hist = df_4h.loc[:bar_ts]
+            if len(df_4h_hist) < 60:
                 continue
-            # En backtest daily, on passe le même df aux deux slots (4h et 1d)
-            # Les détecteurs travaillent sur les données dispo jusqu'au jour t
+            df_1d_hist = df_1d.loc[:bar_ts.normalize()] if (df_1d is not None and hasattr(bar_ts, "normalize")) else df_1d
+            if df_1d_hist is None or len(df_1d_hist) < 220:
+                continue
             for detector in ALL_DETECTORS:
                 try:
-                    sig = detector(sym, df_history, df_history)
+                    sig = detector(sym, df_4h_hist, df_1d_hist)
                     if sig is None:
                         continue
                     sig.score = compute_score(sig, ctx)
-                    if sig.score >= MIN_SCORE:
+                    if sig.score >= SCORE_FLOOR:
                         candidates.append(sig)
                 except Exception:
                     pass
 
-        # 4. Dédup par symbole (plusieurs détecteurs peuvent firer sur le même actif)
-        # Sans ça, le dict positions[sym] = {...} écrase la position précédente
-        # en gardant le capital déduit mais en perdant la trace de la 1re position.
-        best_by_symbol: dict[str, "Signal"] = {}
+        # 5. Dédup by symbol
+        best_by_symbol: dict[str, Signal] = {}
         for sig in candidates:
             if sig.symbol not in best_by_symbol or sig.score > best_by_symbol[sig.symbol].score:
                 best_by_symbol[sig.symbol] = sig
-        candidates = sorted(best_by_symbol.values(), key=lambda s: s.score, reverse=True)
+        sorted_cands = sorted(best_by_symbol.values(), key=lambda s: s.score, reverse=True)
 
-        # 5. Top N → ouvrir positions
-        for sig in candidates[:TOP_N_SIGNALS]:
+        # 6. Quality gate + size by rank
+        accepted = [s for s in sorted_cands if gate_passes(s, rg, now=bar_ts)][:TOP_N_SIGNALS]
+        for rank, sig in enumerate(accepted):
             if len(positions) >= MAX_OPEN_POSITIONS:
                 break
-            # Sizing risk parity
-            stop_dist = abs(sig.entry_price - sig.stop_price)
-            if stop_dist <= 0:
-                continue
-            # Equity = cash + positions (recalcule pour sizing)
-            eq = capital
-            for s, p in positions.items():
-                if day in cache[s].index:
-                    eq += float(cache[s].loc[day]["close"]) * p["size"]
-            risk_eur = eq * RISK_PER_TRADE_PCT
-            size = risk_eur / stop_dist
-            max_size = (eq * MAX_POSITION_PCT) / sig.entry_price
-            size = min(size, max_size)
-            if size <= 0:
+            size_res = compute_size(rank=rank, cash=capital, entry_price=sig.entry_price)
+            if size_res.qty <= 0:
                 continue
             entry_eff = sig.entry_price * (1 + SLIPPAGE)
-            cost = entry_eff * size
+            cost = entry_eff * size_res.qty
             fee = cost * FEE
             total = cost + fee
             if total > capital:
                 continue
             capital -= total
+            stop_initial = entry_eff - ATR_MULT_STOP_INIT * sig.atr
             positions[sig.symbol] = {
                 "strategy": sig.strategy, "score": sig.score,
-                "entry": entry_eff, "size": size,
-                "stop": sig.stop_price, "initial_stop": sig.stop_price,
-                "entry_date": day, "fee_entry": fee,
+                "entry": entry_eff, "size": size_res.qty,
+                "stop": stop_initial, "atr": sig.atr,
+                "entry_ts": bar_ts, "fee_entry": fee,
             }
 
-        # 5. Equity du jour
-        eq = capital
-        for sym, pos in positions.items():
-            if day in cache[sym].index:
-                eq += float(cache[sym].loc[day]["close"]) * pos["size"]
+        # 7. Equity snapshot
+        eq = capital + sum(float(cache_4h[s].loc[bar_ts]["close"]) * p["size"]
+                           for s, p in positions.items() if bar_ts in cache_4h[s].index)
         equity_curve.append(eq)
-        equity_dates.append(day)
+        equity_ts.append(bar_ts)
+        rg.update_equity(eq, now=bar_ts)
 
-    # Force close all à la fin pour comparer fairement
-    last_day = common_dates[-1]
+    # Force close all open positions at the last bar. If a position's symbol has no
+    # bar at last_bar (data hole), use its last known close from earlier in cache
+    # instead of silently dropping it (which would corrupt G4 accounting).
+    last_bar = common_bars[-1]
     for sym in list(positions.keys()):
-        if last_day in cache[sym].index:
-            exit_price = float(cache[sym].loc[last_day]["close"]) * (1 - SLIPPAGE)
-            pos = positions[sym]
-            proceeds = exit_price * pos["size"]
-            fee = proceeds * FEE
-            capital += proceeds - fee
-            pnl = (exit_price - pos["entry"]) * pos["size"] - pos["fee_entry"] - fee
-            trades.append({
-                "symbol": sym, "strategy": pos["strategy"],
-                "entry": pos["entry"], "exit": exit_price,
-                "entry_date": pos["entry_date"], "exit_date": last_day,
-                "pnl": round(pnl, 2), "reason": "end_of_backtest",
-                "score": pos["score"],
-            })
+        df = cache_4h[sym]
+        pos = positions[sym]
+        if last_bar in df.index:
+            exit_price_raw = float(df.loc[last_bar]["close"])
+        else:
+            if len(df) == 0:
+                print(f"  [warn] {sym} has no data at end-of-backtest, recovering at entry price (zero P&L)")
+                exit_price_raw = pos["entry"]
+            else:
+                exit_price_raw = float(df["close"].iloc[-1])
+                print(f"  [warn] {sym} missing last_bar, using last available close {exit_price_raw}")
+        exit_price = exit_price_raw * (1 - SLIPPAGE)
+        proceeds = exit_price * pos["size"]
+        fee_exit = proceeds * FEE
+        capital += proceeds - fee_exit
+        pnl = (exit_price - pos["entry"]) * pos["size"] - pos["fee_entry"] - fee_exit
+        trades.append({
+            "symbol": sym, "strategy": pos["strategy"],
+            "entry": pos["entry"], "exit": exit_price,
+            "entry_ts": pos["entry_ts"], "exit_ts": last_bar,
+            "pnl": round(pnl, 2), "reason": "end_of_backtest", "score": pos["score"],
+        })
         del positions[sym]
 
-    # ── Résultats ────────────────────────────────────────────────────────────
+    # G4 invariant: sum(trade_pnl) ≈ final - initial
+    sum_pnl = sum(t["pnl"] for t in trades)
+    delta_capital = capital - INITIAL_CAPITAL
+    accounting_gap = abs(sum_pnl - delta_capital)
+    gap_pct = (accounting_gap / INITIAL_CAPITAL) * 100
+    assert gap_pct < 1.0, (
+        f"COMPTABILITÉ INCOHÉRENTE: sum(pnl)={sum_pnl:.2f} vs delta_capital={delta_capital:.2f} "
+        f"écart={accounting_gap:.2f} ({gap_pct:.2f}%) — anti-régression bug 7803182"
+    )
+
+    from backtest.multi_backtest import compute_metrics
     metrics = compute_metrics(trades, equity_curve, initial=INITIAL_CAPITAL)
 
+    # ── Résultats ────────────────────────────────────────────────────────────
     print(f"\n{'='*60}")
-    print(f"  SHADOW BOT — Backtest {START} → {END}")
+    print(f"  SHADOW BOT v2 — Backtest {START} → {END} (4h)")
     print(f"{'='*60}")
     print(f"  Capital final  : ${metrics['final']:,.0f}")
     print(f"  CAGR           : {metrics['cagr']:>5.1f} %")
@@ -259,7 +298,7 @@ def main():
         print(f"  {s:18} : {len(ts):4} trades | win {wins/len(ts)*100:.1f}% | PnL ${total_pnl:+,.0f}")
 
     # Comparaison références
-    print(f"\n📊 Références prod :")
+    print(f"\n Références prod :")
     print(f"  Bot A solo (3y)         : +33% CAGR, Sharpe 2.24")
     print(f"  Bot Z PROD Meta v2 (3y) : +27% CAGR, Sharpe 1.71")
     print(f"  Bot Z régime pur (3y)   : +40% CAGR, Sharpe 1.04")
@@ -270,21 +309,22 @@ def main():
     out = {
         "params": {
             "start": START, "end": END,
-            "min_score": MIN_SCORE, "top_n": TOP_N_SIGNALS,
+            "min_score": SCORE_FLOOR, "top_n": TOP_N_SIGNALS,
             "max_open": MAX_OPEN_POSITIONS,
-            "risk_per_trade": RISK_PER_TRADE_PCT,
-            "max_position": MAX_POSITION_PCT,
+            "atr_mult_stop_init": ATR_MULT_STOP_INIT,
+            "atr_mult_trail": ATR_MULT_TRAIL,
+            "profit_loosen_pct": PROFIT_LOOSEN_PCT,
         },
         "metrics": metrics,
         "n_trades": len(trades),
         "by_strategy": {s: {"n": len(ts), "pnl": round(sum(t["pnl"] for t in ts), 2)}
                         for s, ts in by_strat.items()},
-        "equity_dates": [str(d.date()) for d in equity_dates[::30]],  # un point/mois
+        "equity_dates": [str(d.date()) if hasattr(d, "date") else str(d) for d in equity_ts[::30]],
         "equity_curve_monthly": [round(equity_curve[i], 0) for i in range(0, len(equity_curve), 30)],
     }
     with open("backtest/results/shadow_3y.json", "w") as f:
         json.dump(out, f, indent=2, default=str)
-    print(f"\n💾 Sauvegardé : backtest/results/shadow_3y.json")
+    print(f"\n Sauvegardé : backtest/results/shadow_3y.json")
 
 
 if __name__ == "__main__":
