@@ -153,14 +153,13 @@ def run_cycle():
     # 4. Trailing stops update sur positions ouvertes
     from strategies.supertrend import compute_atr
     for sym, p in list(pos_by_sym.items()):
-        df = cache_4h.get(sym) or cache_4h.get(sym[:-3] + "/" + sym[-3:])  # ex: SOLUSD ← SOL/USD
-        # cherche aussi la forme avec slash
-        df_with_slash = None
-        for k, v in cache_4h.items():
-            if k.replace("/", "") == sym:
-                df_with_slash = v
-                break
-        df = df or df_with_slash
+        # Alpaca retourne "BTCUSD" (sans slash) ; notre cache OHLCV utilise "BTC/USD"
+        df = cache_4h.get(sym)
+        if df is None:
+            for k, v in cache_4h.items():
+                if k.replace("/", "") == sym:
+                    df = v
+                    break
         if df is None or len(df) < 15:
             continue
         atr = float(compute_atr(df["high"], df["low"], df["close"], 14).iloc[-1] or 0)
