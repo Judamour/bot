@@ -132,7 +132,13 @@ def _wait_fill(order_id: str, max_wait_s: int = 30) -> dict | None:
 
 
 def market_buy(symbol: str, qty: float) -> dict:
-    """Market buy. Retourne {ok, id, filled_qty, filled_avg, error}."""
+    """Market buy. Retourne {ok, id, filled_qty, filled_avg, status, error}.
+
+    Pour crypto (24/7) : attend le fill (court).
+    Pour stocks hors marché : retourne ok=True dès l'acceptation par Alpaca
+    (l'ordre sera fillé à l'open). filled_qty=0 et filled_avg=0 dans ce cas —
+    le caller doit lire les positions au cycle suivant pour avoir le fill réel.
+    """
     is_crypto = "/" in symbol
     payload = {
         "symbol": symbol,
@@ -144,14 +150,40 @@ def market_buy(symbol: str, qty: float) -> dict:
     try:
         o = _request("POST", "/v2/orders", body=payload)
         oid = o.get("id")
-        filled = _wait_fill(oid, max_wait_s=20)
-        if not filled or filled.get("status") != "filled":
-            return {"ok": False, "error": f"not filled (status={filled.get('status') if filled else 'timeout'})"}
+        # Crypto : on attend le fill (généralement < 2s)
+        if is_crypto:
+            filled = _wait_fill(oid, max_wait_s=15)
+            if not filled or filled.get("status") != "filled":
+                return {"ok": False, "id": oid,
+                        "error": f"not filled (status={filled.get('status') if filled else 'timeout'})"}
+            return {
+                "ok": True, "id": oid,
+                "filled_qty": float(filled.get("filled_qty", qty)),
+                "filled_avg": float(filled.get("filled_avg_price") or 0),
+                "status": "filled",
+            }
+        # Stock : check status immédiat. Si déjà fillé (marché ouvert), prendre le prix.
+        # Sinon (queued/accepted), retour ok mais filled=0 — caller lit positions au prochain cycle.
+        time.sleep(0.5)
+        try:
+            check = _request("GET", f"/v2/orders/{oid}")
+            status = check.get("status", "")
+        except Exception:
+            status = "pending"
+        if status in ("rejected", "canceled", "expired"):
+            return {"ok": False, "id": oid, "error": f"rejected: status={status}"}
+        if status == "filled":
+            return {
+                "ok": True, "id": oid,
+                "filled_qty": float(check.get("filled_qty", qty)),
+                "filled_avg": float(check.get("filled_avg_price") or 0),
+                "status": "filled",
+            }
+        # Ordre en queue (accepted/pending_new/new/etc.) : OK, fill plus tard
         return {
-            "ok": True,
-            "id": oid,
-            "filled_qty": float(filled.get("filled_qty", qty)),
-            "filled_avg": float(filled.get("filled_avg_price") or 0),
+            "ok": True, "id": oid,
+            "filled_qty": 0.0, "filled_avg": 0.0,
+            "status": status or "queued",
         }
     except Exception as e:
         return {"ok": False, "error": str(e)[:200]}

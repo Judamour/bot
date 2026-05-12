@@ -247,26 +247,38 @@ def run_cycle():
             print(f"[SHADOW] BUY {sig.symbol} échec: {res.get('error')}", flush=True)
             continue
 
-        fill_price = res["filled_avg"]
-        fill_qty = res["filled_qty"]
-        # Place stop loss immédiat
-        stop_res = broker.place_stop(sig.symbol, fill_qty, sig.stop_price)
+        fill_price = res.get("filled_avg") or sig.entry_price
+        fill_qty = res.get("filled_qty") or size
+        status = res.get("status", "filled")
+        queued = (status != "filled")
+
         alp_sym = _alpaca_symbol(sig.symbol)
         pos_meta[alp_sym] = {
             "strategy": sig.strategy,
             "score": sig.score,
-            "entry_price": fill_price,
+            "entry_price": fill_price if not queued else None,
             "stop": sig.stop_price,
-            "stop_order_id": stop_res.get("id") if stop_res.get("ok") else None,
+            "stop_order_id": None,
+            "buy_order_id": res.get("id"),
+            "queued": queued,
             "entry_date": datetime.now(timezone.utc).isoformat(),
             "rationale": sig.rationale,
         }
+        # Si ordre fillé immédiatement (crypto ou marché stock ouvert), placer le stop maintenant.
+        # Sinon (queued après market close), le stop sera placé au prochain cycle quand on
+        # verra la position effective dans /v2/positions.
+        if not queued:
+            stop_res = broker.place_stop(sig.symbol, fill_qty, sig.stop_price)
+            pos_meta[alp_sym]["stop_order_id"] = stop_res.get("id") if stop_res.get("ok") else None
+
         log_event("entry", {
             "symbol": sig.symbol, "strategy": sig.strategy, "score": round(sig.score, 1),
             "size": fill_qty, "price": fill_price, "stop": sig.stop_price,
+            "status": status,
             "risk_eur": round(risk_eur, 2), "rationale": sig.rationale,
         })
-        print(f"[SHADOW] BUY {sig.symbol} ({sig.strategy}) score={sig.score:.1f} @ {fill_price:.4f} qty={fill_qty:.6f} stop={sig.stop_price:.4f}", flush=True)
+        suffix = f" [QUEUED — fill prochaine session]" if queued else ""
+        print(f"[SHADOW] BUY {sig.symbol} ({sig.strategy}) score={sig.score:.1f} @ {fill_price:.4f} qty={fill_qty:.6f} stop={sig.stop_price:.4f}{suffix}", flush=True)
         n_open += 1
 
     # 7. Sauve meta + log equity
