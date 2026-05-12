@@ -189,11 +189,24 @@ def run_cycle():
                     log_event("trail", {"symbol": sym, "new_stop": new_stop, "qty": qty})
                     print(f"[SHADOW] TRAIL {sym} → {new_stop}", flush=True)
 
-    # 5. Scan signaux pour symboles sans position
+    # 5. Récupère les ordres BUY en cours (queued/accepted) pour ne pas re-trigger
+    # sur des actifs dont l'ordre est déjà placé mais pas encore fillé (typique pour
+    # stocks hors marché : entry placée à 20h UTC, fill au lendemain 13:30 UTC ;
+    # entre les deux on aurait une position fantôme et le scan refirait le signal).
+    try:
+        open_orders = broker.get_open_orders()
+        pending_buy_syms = {_alpaca_symbol(o["symbol"]) for o in open_orders
+                            if o.get("side") == "buy" and
+                            o.get("status") in ("accepted", "new", "pending_new", "partially_filled")}
+    except Exception as e:
+        print(f"[SHADOW] open_orders fetch échec: {e} — skip cycle pour éviter doublons", flush=True)
+        return
+
+    # 6. Scan signaux pour symboles sans position et sans ordre buy en cours
     candidates = []
     for sym in symbols:
         alp_sym = _alpaca_symbol(sym)
-        if alp_sym in pos_by_sym:
+        if alp_sym in pos_by_sym or alp_sym in pending_buy_syms:
             continue
         df_4h = cache_4h.get(sym)
         df_1d = cache_1d.get(sym)
@@ -210,16 +223,20 @@ def run_cycle():
             except Exception as e:
                 print(f"[SHADOW] detector {detector.__name__} {sym}: {e}", flush=True)
 
-    candidates.sort(key=lambda s: s.score, reverse=True)
-    print(f"[SHADOW] {len(candidates)} signaux ≥ {MIN_SCORE}", flush=True)
-
-    # 6. Ouvrir positions top N
-    n_open = len(pos_by_sym)
+    # Dédup intra-cycle par symbole : un actif ne peut générer qu'UN seul ordre par cycle
+    # même si plusieurs détecteurs firent dessus. On garde le meilleur score.
+    best_by_symbol: dict[str, "Signal"] = {}
     for sig in candidates:
+        if sig.symbol not in best_by_symbol or sig.score > best_by_symbol[sig.symbol].score:
+            best_by_symbol[sig.symbol] = sig
+    candidates = sorted(best_by_symbol.values(), key=lambda s: s.score, reverse=True)
+    print(f"[SHADOW] {len(candidates)} signaux ≥ {MIN_SCORE} (dédup, pending_buys exclus={len(pending_buy_syms)})", flush=True)
+
+    # 7. Ouvrir positions top N
+    n_open = len(pos_by_sym)
+    for sig in candidates[:TOP_N_SIGNALS]:
         if n_open >= MAX_OPEN_POSITIONS:
             break
-        if len([s for s in candidates[:TOP_N_SIGNALS] if s == sig]) == 0:
-            continue
         # Sizing risk parity
         stop_dist = abs(sig.entry_price - sig.stop_price)
         if stop_dist <= 0:
