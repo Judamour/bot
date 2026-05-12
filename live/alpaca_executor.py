@@ -406,11 +406,15 @@ def _fetch_position_qty(symbol: str, retries: int = 3, wait_s: float = 0.3) -> f
     GET /v2/positions/{symbol} → qty disponible côté broker (qty_available).
     None si pas de position ouverte ou erreur.
 
+    Alpaca attend le symbole SANS slash dans le path pour les crypto :
+      BTC/USD → /v2/positions/BTCUSD  (et non BTC%2FUSD qui renvoie 404).
+    Les stocks (NVDA, JPM…) ne contiennent pas de slash → comportement inchangé.
+
     Retry sur 404 : juste après un fill ou un SELL partiel, /v2/positions peut
     renvoyer 404 ou un état pas encore consistant (lag Alpaca interne). On retry
     quelques fois pour laisser l'état se propager avant de renoncer.
     """
-    sym_encoded = urllib.parse.quote(symbol, safe="")
+    sym_encoded = urllib.parse.quote(symbol.replace("/", ""), safe="")
     last_err = None
     for attempt in range(retries):
         try:
