@@ -647,18 +647,53 @@ def replace_stop_loss(stop_order_id: str, new_stop_price: float,
     """
     Update un ordre stop existant (trailing). Si Alpaca refuse PATCH, fallback
     cancel + recreate. Retourne le nouvel order_id ou None si échec.
+
+    Retry sur "insufficient balance" : si la qty bot est supérieure à la balance
+    broker réelle (cas fee crypto 25 bps en base asset), parse le message Alpaca
+    et retry une fois avec la qty effectivement disponible. Évite le double appel
+    API du fallback cancel+recreate dans ce cas connu.
     """
-    try:
+    import math
+
+    def _try_patch(q):
         body = {"stop_price": str(round(new_stop_price, 2))}
-        if qty is not None:
-            body["qty"] = str(qty)
+        if q is not None:
+            body["qty"] = str(q)
         o = _request("PATCH", f"/v2/orders/{stop_order_id}", body=body)
         return o.get("id") or stop_order_id
-    except Exception as e:
-        logger.warning(f"[ALPACA] PATCH stop {stop_order_id} échec ({e}) — fallback cancel+recreate")
-        # Fallback : cancel old + recreate (perd l'id, le caller doit récupérer)
-        cancel_order(stop_order_id)
-        return None  # caller doit appeler place_stop_loss à nouveau
+
+    current_qty = qty
+    for attempt in (1, 2):
+        try:
+            return _try_patch(current_qty)
+        except Exception as e:
+            err_msg = str(e)
+            if (attempt == 1 and current_qty is not None
+                    and "insufficient balance" in err_msg.lower()):
+                m = _INSUFFICIENT_BALANCE_RE.search(err_msg)
+                if m:
+                    avail = float(m.group(1))
+                    # Détermine les décimales selon le symbole de l'ordre
+                    try:
+                        order_info = _request("GET", f"/v2/orders/{stop_order_id}")
+                        sym = order_info.get("symbol", "") or ""
+                        decimals = 6 if "/" in sym else 5
+                    except Exception:
+                        decimals = 6  # default crypto-safe
+                    factor = 10 ** decimals
+                    new_qty = math.floor(avail * factor) / factor
+                    if 0 < new_qty < current_qty:
+                        logger.warning(
+                            f"[ALPACA] PATCH stop {stop_order_id} clamp qty "
+                            f"{current_qty:.6f}→{new_qty:.6f} (broker available)"
+                        )
+                        current_qty = new_qty
+                        continue
+            logger.warning(f"[ALPACA] PATCH stop {stop_order_id} échec ({e}) — fallback cancel+recreate")
+            # Fallback : cancel old + recreate (perd l'id, le caller doit récupérer)
+            cancel_order(stop_order_id)
+            return None  # caller doit appeler place_stop_loss à nouveau
+    return None
 
 
 # ── Startup check ────────────────────────────────────────────────────────────
