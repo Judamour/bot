@@ -1008,18 +1008,23 @@ def run():
     state_i = load_rsl()
     state_j = load_mr()
 
-    # ── Sync states fraîches avec capital dynamique (issu du broker) ────────
-    # Chaque strategy a son INITIAL_CAPITAL hardcodé (1000) — on override pour
-    # les states fraîches (sans trades, sans positions) avec INITIAL_CAPITAL_PER_BOT
-    # calculé dynamiquement depuis Alpaca au boot. Préserve les states évolués.
+    # ── Sync states fraîches (premier boot uniquement) ───────────────────────
+    # Premier boot : capital initial via config (.env). Boots suivants : laisse
+    # les states évoluer organiquement — Bot Z dispatche les vrais budgets via
+    # _apply_z_budget au cycle suivant selon les Omega weights.
+    #
+    # Ancien comportement (supprimé) : reset capital de chaque bot fresh à
+    # broker_equity / nb_actifs → double-comptage car A et G avaient déjà leur
+    # part via leurs positions. Provoquait le drift "states sum > broker equity"
+    # ~20% au boot, lissé ensuite par _apply_z_budget mais cosmétiquement faux.
     for _label, _st in [("B", state_b), ("C", state_c), ("G", state_g),
                          ("H", state_h), ("I", state_i), ("J", state_j)]:
         is_fresh = not _st.get("positions") and not _st.get("trades")
-        if is_fresh:
-            old_cap = _st.get("capital", 0)
+        if is_fresh and _st.get("capital", 0) <= 0 and _st.get("initial_capital", 0) <= 0:
+            # Premier boot pour ce bot : initialise au capital config (.env)
             _st["capital"] = INITIAL_CAPITAL_PER_BOT
             _st["initial_capital"] = INITIAL_CAPITAL_PER_BOT
-            log(f"[CAPITAL] Bot {_label} fresh state : {old_cap:.2f}$ → {INITIAL_CAPITAL_PER_BOT:.2f}$ (broker sync)")
+            log(f"[CAPITAL] Bot {_label} initialisé au premier boot : {INITIAL_CAPITAL_PER_BOT:.2f}$")
 
     # ── Startup checks ──────────────────────────────────────────────────────
     if not config.PAPER_TRADING:
