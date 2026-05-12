@@ -819,19 +819,27 @@ def _reconcile_broker_positions(states_registry: dict) -> None:
         log(f"[RECONCILE] fetch broker positions échec: {e}", "WARN")
         return
 
+    # Bot interne : "SOL/USD" / "BTC/USD" ; Alpaca liste retourne "SOLUSD" / "BTCUSD"
+    # → normaliser sur la forme sans slash pour comparer.
+    def _norm(s: str) -> str:
+        return (s or "").replace("/", "")
+
     bot_totals: dict[str, float] = {}
     for state in states_registry.values():
         for sym, p in (state.get("positions") or {}).items():
             if p and p.get("size"):
-                bot_totals[sym] = bot_totals.get(sym, 0) + float(p["size"])
+                key = _norm(sym)
+                bot_totals[key] = bot_totals.get(key, 0) + float(p["size"])
 
-    broker_symbols = set()
     drift_count = orphan_count = 0
     for pos in broker_positions:
         sym = pos.get("symbol") or ""
-        broker_symbols.add(sym)
-        broker_qty = float(pos.get("qty_available") or pos.get("qty") or 0)
-        bot_qty = bot_totals.get(sym, 0)
+        key = _norm(sym)
+        # qty = position totale (incluant ce qui est réservé par les stops actifs).
+        # qty_available est piégeux ici : quand un stop broker couvre 100% de la
+        # position, qty_available ≈ 0 → comparaison faussement < bot_qty.
+        broker_qty = float(pos.get("qty") or pos.get("qty_available") or 0)
+        bot_qty = bot_totals.get(key, 0)
         mv = float(pos.get("market_value") or 0)
         if broker_qty <= 0:
             continue
@@ -839,14 +847,14 @@ def _reconcile_broker_positions(states_registry: dict) -> None:
         # Position fantôme : présente côté broker, absente côté bot
         if bot_qty == 0:
             if mv >= _RECONCILE_VALUE_THRESHOLD_USD:
-                key = f"orphan:{sym}"
-                if key not in dedup:
+                dkey = f"orphan:{key}"
+                if dkey not in dedup:
                     notify(
                         f"🚨 <b>POSITION FANTÔME BROKER</b>\n"
                         f"{sym}: {broker_qty:.6f} (~{mv:.0f}$)\n"
                         f"Absente du state bot — inspection manuelle requise"
                     )
-                    dedup[key] = now
+                    dedup[dkey] = now
                 log(f"[RECONCILE] ORPHAN {sym}: qty={broker_qty:.6f} mv=${mv:.0f}", "WARN")
                 orphan_count += 1
             continue
@@ -856,14 +864,14 @@ def _reconcile_broker_positions(states_registry: dict) -> None:
         rel = diff / broker_qty
         diff_value = diff * (mv / broker_qty)
         if rel > _RECONCILE_DRIFT_PCT_THRESHOLD and diff_value > _RECONCILE_VALUE_THRESHOLD_USD:
-            if sym not in dedup:
+            if key not in dedup:
                 notify(
                     f"🚨 <b>DRIFT BROKER ↔ BOT</b>\n"
                     f"{sym}: broker {broker_qty:.4f}, bot {bot_qty:.4f}\n"
                     f"Écart {diff:.4f} (~{diff_value:.0f}$)\n"
                     f"→ Inspection manuelle requise"
                 )
-                dedup[sym] = now
+                dedup[key] = now
             log(f"[RECONCILE] DRIFT {sym}: broker={broker_qty:.6f} "
                 f"bot={bot_qty:.6f} diff=${diff_value:.0f}", "WARN")
             drift_count += 1
