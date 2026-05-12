@@ -796,18 +796,22 @@ def _stop_monitor_loop(states_registry: dict):
         if _stop_monitor_stop.wait(_STOP_MONITOR_INTERVAL_SEC):
             break
         try:
-            checked = renewed = filled = 0
+            checked = renewed = adopted = filled = 0
             for bot_id, state in states_registry.items():
                 positions = state.get("positions") or {}
                 for symbol in list(positions.keys()):
                     position = positions.get(symbol)
-                    if not position or not position.get("alpaca_stop_id"):
+                    if not position:
                         continue
+                    # Compte aussi les orphelines (alpaca_stop_id manquant) :
+                    # reconcile_broker_stop tentera de placer un stop pour rattraper.
                     checked += 1
                     try:
                         action, data = reconcile_broker_stop(symbol, position)
                         if action == "renewed":
                             renewed += 1
+                        elif action == "adopted":
+                            adopted += 1
                         elif action == "filled":
                             _close_position_from_broker_fill(state, bot_id, symbol, float(data))
                             filled += 1
@@ -815,7 +819,8 @@ def _stop_monitor_loop(states_registry: dict):
                         log(f"[STOP-MONITOR] {bot_id}/{symbol} échec: {e}", "WARN")
             if checked > 0:
                 log(f"[STOP-MONITOR] {checked} stops vérifiés, "
-                    f"{renewed} renouvelés, {filled} fillés (positions fermées)")
+                    f"{renewed} renouvelés, {adopted} adoptés, "
+                    f"{filled} fillés (positions fermées)")
         except Exception as e:
             log(f"[STOP-MONITOR] iteration: {e}", "WARN")
 

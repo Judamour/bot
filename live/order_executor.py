@@ -339,6 +339,7 @@ def reconcile_broker_stop(symbol: str, position: dict) -> tuple[str, object]:
     (action, data) :
 
       ("ok", None)             — stop actif ou pas de stop_id (no-op)
+      ("adopted", new_id)      — position orpheline (alpaca_stop_id absent) protégée
       ("renewed", new_id)      — stop expired/canceled re-placé (position muté)
       ("filled", filled_price) — stop déclenché → caller doit fermer la position
       ("error", err_msg)       — réseau/api error
@@ -348,12 +349,23 @@ def reconcile_broker_stop(symbol: str, position: dict) -> tuple[str, object]:
     la position (PnL, capital, trades, suppression). Permet aux différentes
     stratégies de gérer le close à leur façon.
     """
-    sid = position.get("alpaca_stop_id")
-    if not sid:
-        return ("ok", None)
-
     from live import alpaca_executor
     if not alpaca_executor.is_alpaca_routed(symbol):
+        return ("ok", None)
+
+    sid = position.get("alpaca_stop_id")
+    if not sid:
+        # Position orpheline : créée sans stop broker (échec initial au BUY/scale-out).
+        # On tente de placer le stop maintenant — utile pour rattraper les positions
+        # crypto qui ont échoué à cause du fee en base asset au moment du BUY.
+        if not position.get("size") or not position.get("stop"):
+            return ("ok", None)
+        ids = place_broker_stop(symbol, position["size"], position["stop"])
+        new_id = ids.get("stop_id")
+        if new_id:
+            position["alpaca_stop_id"] = new_id
+            logger.info(f"[STOP-ADOPT] {symbol} stop broker placé pour position orpheline @ {position['stop']:.4f}")
+            return ("adopted", new_id)
         return ("ok", None)
 
     order = alpaca_executor.get_order(sid)
