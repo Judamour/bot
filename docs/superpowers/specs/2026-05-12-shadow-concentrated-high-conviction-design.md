@@ -45,7 +45,7 @@ Sources d'underperformance identifiées :
 
 - **G1** : CAGR backtest 3y ≥ **30%** (gate de validation, vise 43%+)
 - **G2** : Sharpe ≥ 1.0
-- **G3** : MaxDD ≥ -25% (cap dur)
+- **G3** : MaxDD **mieux que -25%** (drawdown moins sévère, ex : -20% pass, -30% fail)
 - **G4** : Comptabilité cohérente : `|sum(trade_pnl) − (final − initial)| < 1% × initial` (vérification anti-régression bug fix de ce jour)
 - **G5** : Zéro appel LLM (contrainte budget : pas de clés API)
 - **G6** : Garde l'identité shadow : single-engine scan-all + score composite
@@ -105,9 +105,11 @@ User contrainte : pas de clés API LLM. On remplace le Claude Haiku veto initial
 | Gate | Règle | Implémentation |
 |---|---|---|
 | G1 Score plancher | `score ≥ 65` | comparaison directe |
-| G2 MTF alignment | `sig.rationale["mtf_aligned"] == True` | déjà calculé par détecteurs |
-| G3 Volume réel | `sig.rationale["volume_ratio"] ≥ 1.0` | déjà calculé par détecteurs |
+| G2 MTF alignment | `sig.rationale["mtf_aligned"] == True` | déjà calculé par 4 détecteurs sur 5 — voir note ci-dessous |
+| G3 Volume réel | `sig.rationale["volume_ratio"] ≥ 1.0` | déjà calculé par les 5 détecteurs |
 | G4 Cooldown stop | `symbol not in risk_guard.cooldowns OR cooldowns[symbol] < now` | lookup dict |
+
+**Pré-requis détecteurs** : la phase d'implémentation doit vérifier que les 5 détecteurs (`supertrend`, `donchian`, `mean_reversion`, `momentum`, `trend_multi_asset`) populent bien `rationale["mtf_aligned"]` et `rationale["volume_ratio"]`. Si manquant (ex : un détecteur où MTF n'a pas de sens), définir le comportement explicitement (auto-pass ou auto-fail), pas de silence.
 
 Le cooldown G4 dure **5 jours après un stop loss** sur le même symbole. Empêche le revenge trading sur un signal qui vient de casser.
 
@@ -194,10 +196,15 @@ Cycle 4h start (heartbeat 03/07/11/15/19/23 UTC + 3 min)
   │    → regime.shield_active(macro) ?
   │    → si SHIELD : skip step 5-8 (gestion positions seulement)
   │
-  ├─ 4. Fetch OHLCV 4h (60j) + 1d (220j) pour 21 symboles
+  ├─ 4. Fetch OHLCV 4h (60j, signaux principaux) + 1d (220j, MTF + SMA200 régime QQQ)
   │
   ├─ 5. Manage existing positions : trailing stop adaptatif (1.5 ou 3×ATR selon gain)
-  │    → si stop déclenché côté Alpaca depuis dernier cycle : risk_guard.register_stop()
+  │    → détection stop déclenché : comparer `meta.json` (cycle précédent) vs
+  │      `broker.get_positions()` (cycle actuel). Si un symbole présent en meta
+  │      mais absent des positions Alpaca → stop touché entre-temps. PnL réalisé
+  │      via `broker.get_account()` history ou via dernier prix marché ×
+  │      qty connue dans meta. → risk_guard.register_stop(sym, pnl, ts).
+  │      Nettoyer l'entrée orpheline dans meta.
   │
   ├─ 6. Scan signaux (symboles sans position et sans pending_buy)
   │    → dedup intra-cycle par symbole (best score), sort desc
@@ -248,7 +255,7 @@ Defensive, not destructive. Un échec partiel ne tue jamais un cycle entier.
 - Critère de viabilité (gate pour passer en prod) :
   - CAGR 3y ≥ **30%** (vise 43%+)
   - Sharpe ≥ 1.0
-  - MaxDD ≥ -25%
+  - MaxDD **mieux que** -25% (ex : -20% pass, -30% fail)
   - Comptabilité : `|sum(trade_pnl) − (final − initial)| < 1% × initial`
 
 ### 7.3 Smoke prod
@@ -275,11 +282,31 @@ Après deploy VPS :
 6. Observer 30 jours live shadow
 7. Si validation paper OK : décider migration ou non vers prod (orthogonal à ce design)
 
+## 8.bis Constants tunables (consolidées)
+
+Toutes les constantes paramétrables doivent vivre dans un seul bloc en tête de `shadow/runner.py` (ou un nouveau `shadow/config_v2.py` si on préfère séparer) pour éviter les magic numbers dispersés :
+
+```python
+# Tunables v2
+SCORE_FLOOR        = 65          # G1 quality gate
+COOLDOWN_DAYS      = 5           # G4 cooldown post-stop
+HALT_DD_PCT        = -0.15       # MaxDD halt threshold
+HALT_DURATION_DAYS = 7           # durée halt après déclenchement
+WEIGHT_BY_RANK     = [0.30, 0.20, 0.15]   # sizing par rang du top-3
+TOP_N_SIGNALS      = 3           # concentration
+ATR_MULT_STOP_INIT = 1.5         # stop initial
+ATR_MULT_TRAIL     = 3.0         # trailing après +5% gain
+PROFIT_LOOSEN_PCT  = 0.05        # seuil pour passer trailing tight → loose
+VIX_SHIELD_THRESHOLD = 30.0
+```
+
+Le backtest et le runner DOIVENT lire ces mêmes constantes (import partagé) pour garantir cohérence backtest ↔ prod.
+
 ## 9. Risks & mitigations
 
 | Risque | Mitigation |
 |---|---|
-| Backtest plafonne <30% CAGR | Revue : tester hybride avec leverage 1.5× sur top-1 (alt B). Si toujours <30% : passer à v3 |
+| Backtest plafonne <30% CAGR | Revue : tester hybride avec leverage 1.5× sur top-1 (alt B). Si toujours <30% : passer à v3 (réservé, hors scope v2) |
 | Hard quality gate trop strict → zéro signal | Logger combien de signals échouent par gate. Ajuster score plancher si nécessaire (65 → 60) |
 | Cooldown 5j trop long sur marché volatile | Paramétrable, tester 3/5/7 en backtest |
 | Sizing par rang trop concentré → MaxDD > 25% | Réduire 30/20/15 → 25/18/12 si MaxDD critique en backtest |
@@ -292,3 +319,5 @@ Après deploy VPS :
 - **Q2** : que faire si la 1ère position du jour tape son stop dans la même session 4h ? Compte-t-on ça comme un cooldown (5j) ou exception ? **Réponse v2** : cooldown standard. Pas d'exception, prédictibilité prime.
 
 - **Q3** : la persistance `risk_state.json` est lue chaque cycle ; doit-on backup périodique pour éviter corruption ? **Réponse v2** : write-temp-then-rename pour atomicité, pas de backup explicite (un reset fresh est acceptable).
+
+- **Q4** : `logs/shadow/` est-il dans `.gitignore` ? **Réponse v2** : OUI (cf `.gitignore` racine, `logs/` est ignored). Donc `risk_state.json` survit aux `git pull` côté VPS. Vérifier en phase impl.
