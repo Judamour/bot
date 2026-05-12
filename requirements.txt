@@ -14,3 +14,4 @@ psutil>=5.9.0
 requests>=2.31.0
 yfinance>=0.2.40
 openai>=1.0.0
+pytest>=8.0.0
