@@ -25,6 +25,7 @@ import time
 import logging
 import sys
 import os
+import re
 import json
 import urllib.request
 import urllib.parse
@@ -400,22 +401,33 @@ def execute_sell(symbol: str, size: float, price_estimate: float,
 
 # ── Stop-loss broker-side (protection même si bot down) ──────────────────────
 
-def _fetch_position_qty(symbol: str) -> float | None:
+def _fetch_position_qty(symbol: str, retries: int = 3, wait_s: float = 0.3) -> float | None:
     """
     GET /v2/positions/{symbol} → qty disponible côté broker (qty_available).
     None si pas de position ouverte ou erreur.
 
-    Permet de clamp la qty d'un stop pour éviter "insufficient qty" quand
-    le state.json a un arrondi légèrement supérieur à la position Alpaca réelle.
+    Retry sur 404 : juste après un fill ou un SELL partiel, /v2/positions peut
+    renvoyer 404 ou un état pas encore consistant (lag Alpaca interne). On retry
+    quelques fois pour laisser l'état se propager avant de renoncer.
     """
-    try:
-        sym_encoded = urllib.parse.quote(symbol, safe="")
-        p = _request("GET", f"/v2/positions/{sym_encoded}")
-        # qty_available = qty - qty bloquée par d'autres ordres ouverts
-        avail = p.get("qty_available") or p.get("qty") or 0
-        return float(avail)
-    except Exception:
-        return None
+    sym_encoded = urllib.parse.quote(symbol, safe="")
+    last_err = None
+    for attempt in range(retries):
+        try:
+            p = _request("GET", f"/v2/positions/{sym_encoded}")
+            # qty_available = qty - qty bloquée par d'autres ordres ouverts
+            avail = p.get("qty_available") or p.get("qty") or 0
+            return float(avail)
+        except Exception as e:
+            last_err = str(e)
+            if "404" in last_err and attempt < retries - 1:
+                time.sleep(wait_s)
+                continue
+            return None
+    return None
+
+
+_INSUFFICIENT_BALANCE_RE = re.compile(r"available:\s*([\d.]+)", re.IGNORECASE)
 
 
 def get_spread_pct(symbol: str) -> float | None:
@@ -497,22 +509,22 @@ def place_stop_loss(symbol: str, qty: float, stop_price: float,
     decimals = 6 if is_crypto else 5
     factor = 10 ** decimals
     qty = math.floor(float(qty) * factor) / factor
-    is_fractional = qty != int(qty)
 
     # Stocks fractionnaires Alpaca exigent time_in_force=day (gtc refusé)
     # Crypto Alpaca : gtc OK
     tif = "gtc" if is_crypto else "day"
 
-    # OCO refusé sur fractional shares ET sur crypto paper → stop seul si l'un des deux
-    use_oco = (take_profit_price is not None
+    def _build_payload(q: float, allow_oco: bool) -> tuple[dict, str]:
+        """Retourne (payload, kind_label) pour la qty donnée."""
+        is_frac = q != int(q)
+        oco = (allow_oco
+               and take_profit_price is not None
                and not is_crypto
-               and not is_fractional)
-
-    try:
-        if use_oco:
-            payload = {
+               and not is_frac)
+        if oco:
+            return {
                 "symbol": symbol,
-                "qty": str(qty),
+                "qty": str(q),
                 "side": "sell",
                 "type": "limit",
                 "limit_price": str(round(take_profit_price, 2)),
@@ -520,43 +532,58 @@ def place_stop_loss(symbol: str, qty: float, stop_price: float,
                 "order_class": "oco",
                 "stop_loss": {"stop_price": str(round(stop_price, 2))},
                 "take_profit": {"limit_price": str(round(take_profit_price, 2))},
-            }
-            o = _request("POST", "/v2/orders", body=payload)
-            legs = o.get("legs") or []
-            stop_id = next((l["id"] for l in legs if l.get("type") == "stop"), o.get("id"))
-            tp_id   = next((l["id"] for l in legs if l.get("type") == "limit"), None)
-            logger.info(f"[ALPACA] OCO {symbol} stop={stop_price:.2f} tp={take_profit_price:.2f}")
-            return {"stop_id": stop_id, "tp_id": tp_id, "parent_id": o.get("id")}
-
-        # Crypto Alpaca refuse type=stop simple → stop_limit avec limit 1% sous
-        # le stop_price (sécurise le fill malgré la volatilité crypto).
+            }, "OCO"
         if is_crypto:
-            limit_price = round(stop_price * 0.99, 2)
-            payload = {
+            # Crypto Alpaca refuse type=stop simple → stop_limit avec limit 1%
+            # sous le stop_price (sécurise le fill malgré la volatilité).
+            return {
                 "symbol": symbol,
-                "qty": str(qty),
+                "qty": str(q),
                 "side": "sell",
                 "type": "stop_limit",
                 "stop_price": str(round(stop_price, 2)),
-                "limit_price": str(limit_price),
+                "limit_price": str(round(stop_price * 0.99, 2)),
                 "time_in_force": tif,
-            }
-        else:
-            payload = {
-                "symbol": symbol,
-                "qty": str(qty),
-                "side": "sell",
-                "type": "stop",
-                "stop_price": str(round(stop_price, 2)),
-                "time_in_force": tif,
-            }
-        o = _request("POST", "/v2/orders", body=payload)
-        kind = "STOP-LIMIT" if is_crypto else "STOP"
-        logger.info(f"[ALPACA] {kind} {symbol} qty={qty:.6f} @ {stop_price:.2f}$")
-        return {"stop_id": o.get("id")}
-    except Exception as e:
-        logger.warning(f"[ALPACA] place_stop_loss {symbol} échec: {e} — bot SL interne reste actif")
-        return {}
+            }, "STOP-LIMIT"
+        return {
+            "symbol": symbol,
+            "qty": str(q),
+            "side": "sell",
+            "type": "stop",
+            "stop_price": str(round(stop_price, 2)),
+            "time_in_force": tif,
+        }, "STOP"
+
+    # 2 tentatives max : si la 1re échoue avec "insufficient balance", on extrait
+    # la qty réellement disponible du message Alpaca et on retry une fois.
+    for attempt in (1, 2):
+        payload, kind = _build_payload(qty, allow_oco=True)
+        try:
+            o = _request("POST", "/v2/orders", body=payload)
+            if kind == "OCO":
+                legs = o.get("legs") or []
+                stop_id = next((l["id"] for l in legs if l.get("type") == "stop"), o.get("id"))
+                tp_id = next((l["id"] for l in legs if l.get("type") == "limit"), None)
+                logger.info(f"[ALPACA] OCO {symbol} stop={stop_price:.2f} tp={take_profit_price:.2f}")
+                return {"stop_id": stop_id, "tp_id": tp_id, "parent_id": o.get("id")}
+            logger.info(f"[ALPACA] {kind} {symbol} qty={qty:.6f} @ {stop_price:.2f}$")
+            return {"stop_id": o.get("id")}
+        except Exception as e:
+            err_msg = str(e)
+            if attempt == 1 and "insufficient balance" in err_msg.lower():
+                m = _INSUFFICIENT_BALANCE_RE.search(err_msg)
+                if m:
+                    avail = math.floor(float(m.group(1)) * factor) / factor
+                    if 0 < avail < qty:
+                        logger.warning(
+                            f"[ALPACA] place_stop_loss {symbol} clamp {qty:.6f}→{avail:.6f} "
+                            f"(broker available, fee crypto en base asset probable)"
+                        )
+                        qty = avail
+                        continue
+            logger.warning(f"[ALPACA] place_stop_loss {symbol} échec: {e} — bot SL interne reste actif")
+            return {}
+    return {}
 
 
 def cancel_order(order_id: str) -> bool:
