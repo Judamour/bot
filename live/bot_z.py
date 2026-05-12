@@ -53,8 +53,9 @@ SHADOW_LOG  = "logs/bot_z/shadow.jsonl"
 # Capital-agnostic : lu depuis config (env var INITIAL_CAPITAL).
 # Paper par défaut : 10000€. Live : matche solde Kraken (ex: 91€).
 INITIAL_CAP       = config.INITIAL_CAPITAL
-PAPER_START_DATE  = "2026-03-06"
-PAPER_REVIEW_DATE = "2026-04-30"
+PAPER_START_DATE   = "2026-03-06"   # début Kraken paper (sert au ramp-up vol_factor 14j)
+PAPER_REVIEW_DATE  = "2026-04-30"
+ALPACA_RESTART_DATE = "2026-05-01"  # bascule Alpaca paper unifié (univers crisis-alpha 21 actifs)
 
 # ── Calibration BEAR v2 (validée backtest 2020-2026) ─────────────────────────
 # Bot Z dispatche budget aux bots ACTIFS uniquement (config.ACTIVE_BOTS).
@@ -1259,7 +1260,10 @@ def run_bot_z_cycle(macro: dict, ohlcv: dict = None, broker_equity: float = None
 
     # 9. Métriques de performance
     perf_pct = (new_z_capital - INITIAL_CAP) / INITIAL_CAP * 100
-    days_running = (datetime.now() - datetime.fromisoformat(PAPER_START_DATE)).days
+    # days_running compté depuis la bascule Alpaca (2026-05-01) — l'univers paper
+    # avant cette date était Kraken/xStocks, abandonné depuis. Le ramp-up vol
+    # continue d'utiliser PAPER_START_DATE (sans effet aujourd'hui car > 14j).
+    days_running = (datetime.now() - datetime.fromisoformat(ALPACA_RESTART_DATE)).days
 
     # 10. Construction du résumé
     summary = {
