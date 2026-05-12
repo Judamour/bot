@@ -119,30 +119,45 @@ def _count_recent_trades(trades: list, days: int = 30) -> int:
     return n
 
 
-def _activity_factor(sub_state: dict) -> float:
-    """Pénalise les bots qui ne déploient pas leur capital (positions=0 + trades récents=0).
+def _activity_factor(sub_state: dict, budget_eur: float = 0.0) -> float:
+    """Pénalise les bots qui ne déploient pas leur capital.
 
-    Évite le capital fantôme : un bot dormant ne doit pas conserver 14-28%
-    du portfolio en cash inutilisé. Sa part se redéploie vers les bots actifs.
-    Quand le bot reprend l'activité (positions ≥ 1), factor = 1.0 → réallocation
-    automatique au cycle suivant.
+    Deux niveaux de pénalité :
 
-    Mesure l'activité sur les **30 derniers jours** (lookback temporel) au lieu
-    du cumul historique : un bot qui a fait 20 trades l'an dernier mais 0 ce mois-ci
-    est traité comme dormant, pas comme actif.
+    1. **Bot vraiment dormant** (0 position ouverte) : pénalité forte selon trades 30j
+       Évite le capital fantôme : 0 position + 0 trade = factor 0.10.
+
+    2. **Bot sous-investi** (positions ouvertes mais cash inutilisé > 70% du budget) :
+       pénalité modérée si peu de trades récents. Cible le cas Bot G qui a 4
+       positions mais 86% du capital dort, alors qu'un autre bot pourrait
+       en faire un meilleur usage.
+
+    Quand le bot reprend l'activité, factor remonte à 1.0 → réallocation au cycle
+    suivant.
     """
     n_positions = len(sub_state.get("positions", {}) or {})
-    if n_positions >= 1:
-        return 1.0
-
     trades = sub_state.get("trades", []) or []
     n_recent = _count_recent_trades(trades, days=30)
-    if n_recent == 0:
-        return 0.10
-    if n_recent < 5:
-        return 0.30
-    if n_recent < 15:
-        return 0.60
+
+    # Cas 1 : bot vraiment dormant (aucune position)
+    if n_positions == 0:
+        if n_recent == 0:
+            return 0.10
+        if n_recent < 5:
+            return 0.30
+        if n_recent < 15:
+            return 0.60
+        return 1.0
+
+    # Cas 2 : bot sous-investi (positions ouvertes mais cash dort)
+    if budget_eur > 0:
+        cash = float(sub_state.get("capital", 0) or 0)
+        # Utilisation = part du budget réellement déployée en positions
+        utilization = max(0.0, 1.0 - (cash / budget_eur))
+        if utilization < 0.30 and n_recent < 5:
+            # < 30% du budget utilisé ET < 5 trades 30j → bot peu actif
+            return 0.50
+
     return 1.0
 
 
@@ -278,12 +293,39 @@ def compute_omega_allocation(
     weights = {k: exp_s[k] / total_e for k in valid_bots}
 
     # ── Activity factor : pénalise les bots qui ne déploient pas leur capital ─
+    # Inclut une pénalité d'utilisation (cash dormant > 70% du budget alloué).
+    # Le budget par bot vient du cycle précédent (state["allocation"][k]["budget_eur"]).
     if sub_states:
-        adjusted = {k: weights[k] * _activity_factor(sub_states.get(k, {})) for k in valid_bots}
+        prev_alloc = state.get("allocation", {}) or {}
+        adjusted = {}
+        for k in valid_bots:
+            budget = float(prev_alloc.get(k, {}).get("budget_eur", 0) or 0)
+            adjusted[k] = weights[k] * _activity_factor(sub_states.get(k, {}), budget)
         total_adj = sum(adjusted.values()) or 1.0
         weights = {k: v / total_adj for k, v in adjusted.items()}
 
     return weights
+
+
+def compute_activity_factors(state: dict, valid_bots: list,
+                              sub_states: dict | None = None) -> dict:
+    """
+    Calcule les activity factors par bot (utilisé en complément des caps).
+
+    Permet de moduler le cap max d'un bot selon son activité : bot dormant
+    avec factor 0.5 voit son cap effectif divisé par 2, libérant ainsi du capital
+    pour les bots actifs au lieu d'être bloqué par le cap max statique.
+
+    Retourne {bot_id: float} avec valeurs dans [0, 1].
+    """
+    if not sub_states:
+        return {k: 1.0 for k in valid_bots}
+    prev_alloc = state.get("allocation", {}) or {}
+    out = {}
+    for k in valid_bots:
+        budget = float(prev_alloc.get(k, {}).get("budget_eur", 0) or 0)
+        out[k] = _activity_factor(sub_states.get(k, {}), budget)
+    return out
 
 
 def update_circuit_breaker(state: dict, current_capital: float) -> float:

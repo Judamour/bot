@@ -305,12 +305,19 @@ def _write_budget(budget: dict):
         json.dump({"ts": datetime.now(timezone.utc).isoformat(), "budget": budget}, f, indent=2)
 
 
-def _apply_weight_caps(weights: dict) -> dict:
+def _apply_weight_caps(weights: dict, activity_factors: dict | None = None) -> dict:
     """
     Applique les caps min/max avec algorithme itératif jusqu'à convergence.
     Nécessaire car clipper un bot redistribue son poids sur les autres,
     qui peuvent alors dépasser leur propre cap — d'où les itérations.
     Converge en 3-5 itérations pour 4 bots.
+
+    Si `activity_factors` fourni (dict bot_id -> float [0,1]), module le cap max
+    de chaque bot par son facteur d'activité. Exemple : Bot G avec factor 0.5
+    voit son cap max effectif réduit (60% × 0.5 = 30%), permettant au capital
+    de migrer vers les bots actifs au lieu d'être bloqué par le cap statique.
+    Quand le bot reprend l'activité (factor → 1.0), son cap retrouve sa valeur
+    pleine au cycle suivant.
     """
     w = {b: weights.get(b, 0.0) for b in VALID_BOTS}
     for _ in range(15):
@@ -319,7 +326,14 @@ def _apply_weight_caps(weights: dict) -> dict:
         changed = False
         for b in VALID_BOTS:
             cap = WEIGHT_CAPS.get(b, {})
-            lo, hi = cap.get("min", 0.0), cap.get("max", 1.0)
+            lo = cap.get("min", 0.0)
+            hi = cap.get("max", 1.0)
+            if activity_factors and b in activity_factors:
+                af = float(activity_factors[b])
+                if 0.0 <= af < 1.0:
+                    # Cap max réduit proportionnellement à l'inactivité,
+                    # mais jamais en dessous du cap min (le bot reste éligible).
+                    hi = max(lo, hi * af)
             new_w = max(lo, min(hi, w[b]))
             if abs(new_w - w[b]) > 1e-6:
                 changed = True
@@ -1203,12 +1217,22 @@ def run_bot_z_cycle(macro: dict, ohlcv: dict = None, broker_equity: float = None
             if omega_weights and abs(sum(omega_weights.values()) - 1.0) < 0.01:
                 blended = omega_weights  # override
                 print(f"[BOT Z] Omega weights actifs : {omega_weights}")
+            # Activity factors aussi utilisés pour moduler les caps (cf. _apply_weight_caps)
+            from live.bot_z_omega import compute_activity_factors
+            activity_factors = (compute_activity_factors(state, VALID_BOTS, sub_states_arg)
+                                if apply_activity else None)
         except Exception as _ome:
             import logging
             logging.warning(f"[BOT Z] Omega allocation failed ({_ome}) — fallback Meta v2")
+            activity_factors = None
+    else:
+        activity_factors = None
 
     # 6a. Weight caps — évite sur-concentration (ex: Bot C à 64% en SHIELD)
-    blended = _apply_weight_caps(blended)
+    # En mode offensif (BULL/BALANCED) avec Omega actif, le cap max est modulé
+    # par l'activity factor : bot sous-utilisé voit son cap baisser → capital
+    # migre vers les bots actifs au lieu d'être bloqué.
+    blended = _apply_weight_caps(blended, activity_factors=activity_factors)
     # Sauvegarder la cible APRÈS caps (avant smooth) → dashboard transition exacte
     state["target_capped_weights"] = dict(blended)
 
