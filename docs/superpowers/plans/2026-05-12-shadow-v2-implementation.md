@@ -485,7 +485,7 @@ Run:
 ```bash
 venv/bin/pytest tests/shadow/test_risk_guard.py -v
 ```
-Expected: All 10 tests FAIL (module missing).
+Expected: All 11 tests FAIL (module missing).
 
 - [ ] **Step 3: Implement `shadow/risk_guard.py`**
 
@@ -626,7 +626,7 @@ Run:
 ```bash
 venv/bin/pytest tests/shadow/test_risk_guard.py -v
 ```
-Expected: All 10 tests PASS.
+Expected: All 11 tests PASS.
 
 - [ ] **Step 5: Commit**
 
@@ -1503,7 +1503,7 @@ if size <= 0:
     continue
 ```
 
-**About `cash`**: introduce `cash = float(account.get("cash", 0))` just after the existing `equity = float(account.get("equity", 0))` line (around line 117). The sizing uses cash (not equity) because the bot can only buy what it can currently spend.
+**About `cash`**: verify `cash = float(account.get("cash", 0))` is defined just after the existing `equity = float(account.get("equity", 0))` line. It should already exist at line 118 of the current runner.py — if so, nothing to add. If absent, add it. The sizing uses cash (not equity) because the bot can only buy what it can currently spend.
 
 Verify the rank variable is in scope (it comes from `enumerate(accepted)`).
 
