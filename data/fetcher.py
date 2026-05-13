@@ -294,21 +294,24 @@ def fetch_news_macro_rss(limit: int = 6) -> list:
 def fetch_qqq_regime() -> tuple:
     """
     Régime de marché actions US : QQQ > SMA200 = Risk-ON, sinon Risk-OFF.
-    Retourne (ok: bool, description: str).
-    Permissif (True) si données indisponibles.
+    Retourne (ok: bool, description: str, full_uptrend: bool).
+    full_uptrend = price > SMA50 > SMA200 (utilisé pour hystérésis equity_bear).
+    Permissif (True, ..., True) si données indisponibles.
     """
     try:
         import yfinance as yf
         df = yf.Ticker("QQQ").history(period="1y", interval="1d")
         if df.empty or len(df) < 200:
-            return True, "N/A (historique insuffisant)"
+            return True, "N/A (historique insuffisant)", True
         price = float(df["Close"].iloc[-1])
         sma200 = float(df["Close"].rolling(200).mean().iloc[-1])
+        sma50 = float(df["Close"].rolling(50).mean().iloc[-1])
         ok = price > sma200
+        full_uptrend = price > sma50 > sma200
         pct = (price - sma200) / sma200 * 100
-        return ok, f"QQQ {'>' if ok else '<'} SMA200 ({pct:+.1f}%)"
+        return ok, f"QQQ {'>' if ok else '<'} SMA200 ({pct:+.1f}%)", full_uptrend
     except Exception as e:
-        return True, f"N/A ({e})"
+        return True, f"N/A ({e})", True
 
 
 def fetch_fear_greed() -> dict:

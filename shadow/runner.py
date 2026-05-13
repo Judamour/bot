@@ -160,13 +160,15 @@ def run_cycle():
         "vix": macro.get("vix", 18),
         "btc_trend": macro.get("btc_trend", "bull"),
         "qqq_ok": macro.get("qqq_regime_ok", True),
+        "qqq_full_uptrend": macro.get("qqq_full_uptrend", True),
     }
-    print(f"[SHADOW] VIX={ctx['vix']:.1f} BTC={ctx['btc_trend']} QQQ_ok={ctx['qqq_ok']}", flush=True)
+    print(f"[SHADOW] VIX={ctx['vix']:.1f} BTC={ctx['btc_trend']} QQQ_ok={ctx['qqq_ok']} full_uptrend={ctx['qqq_full_uptrend']}", flush=True)
 
     # 2b. SHIELD regime + halt check — skip new entries if either active.
     # equity_bear (lighter trigger: just SPY/QQQ < SMA200) rotates to defensives.
     macro_ctx = {"vix": ctx["vix"], "btc_trend": ctx["btc_trend"],
-                 "qqq_regime_ok": ctx["qqq_ok"]}
+                 "qqq_regime_ok": ctx["qqq_ok"],
+                 "qqq_full_uptrend": ctx["qqq_full_uptrend"]}
     shielded = shield_active(macro_ctx)
     halted = rg.is_halted(now=now)
     skip_new_entries = shielded or halted
@@ -207,9 +209,12 @@ def run_cycle():
         close = float(df["close"].iloc[-1])
         if atr <= 0:
             continue
-        # Adaptive trailing: tight (3.0x) until +5% profit, then loosen to 5.0x
+        # Macro-aware exits removed: trends need room to run, trailing stops
+        # handle drawdowns. Force-closing at +5% on SHIELD activation killed
+        # the bull-period CAGR (-22 pts in 3y backtest).
         m = pos_meta.get(sym, {})
         entry = float(m.get("entry_price") or 0)
+        # Adaptive trailing: tight (4.0x) until +5% profit, then loosen to 5.0x
         if entry > 0:
             pnl_pct = (close - entry) / entry
             atr_mult = ATR_MULT_TRAIL if pnl_pct >= PROFIT_LOOSEN_PCT else ATR_MULT_STOP_INIT
@@ -298,8 +303,9 @@ def run_cycle():
         for rank, sig in enumerate(accepted):
             if n_open >= MAX_OPEN_POSITIONS:
                 break
-            # Score-weighted sizing : WEIGHT_BY_RANK[rank] × cash dispo × size_factor
-            size_res = compute_size(rank=rank, cash=cash, entry_price=sig.entry_price)
+            # Score-weighted sizing × size_factor (vol-adjust disabled live too)
+            size_res = compute_size(rank=rank, cash=cash,
+                                    entry_price=sig.entry_price)
             if size_factor != 1.0:
                 size_res = type(size_res)(qty=size_res.qty * size_factor,
                                           notional=size_res.notional * size_factor)

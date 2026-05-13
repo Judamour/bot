@@ -90,6 +90,23 @@ def main():
         print("Aucune donnée chargée")
         return
 
+    # VIX cache for real SHIELD activation in backtest
+    print("Chargement VIX (régime SHIELD)…")
+    try:
+        import yfinance as yf
+        vix_df = yf.download("^VIX", period=f"{int(DAYS_1D)}d", interval="1d",
+                             progress=False, auto_adjust=False)
+        if vix_df is not None and len(vix_df) > 0:
+            # Flatten potential MultiIndex columns from yfinance
+            if hasattr(vix_df.columns, 'levels'):
+                vix_df.columns = vix_df.columns.get_level_values(0)
+            vix_df.columns = [c.lower() for c in vix_df.columns]
+            vix_df.index = vix_df.index.tz_localize(None) if vix_df.index.tz else vix_df.index
+            cache_1d["VIX"] = vix_df[["close"]]
+            print(f"  ✓ VIX       : {len(vix_df)} bars 1d ({vix_df.index[0].date()} → {vix_df.index[-1].date()})")
+    except Exception as e:
+        print(f"  [skip] VIX fetch failed: {e} — backtest will use vix=18 stub")
+
     # Date timeline: intersection of all 4h indices
     common_bars = sorted(set.intersection(*[set(df.index) for df in cache_4h.values()]))
     print(f"\n{len(common_bars)} barres 4h communes\n")
@@ -120,13 +137,38 @@ def main():
     ctx_default = {"vix": 18.0, "btc_trend": "bull", "qqq_regime_ok": True}
 
     for i, bar_ts in enumerate(common_bars[WARMUP_BARS_4H:], start=WARMUP_BARS_4H):
-        # 1. Macro context (approx via SPY trend on 1d cache)
+        # 1. Macro context (real VIX + BTC trend + SPY full uptrend)
         ctx = dict(ctx_default)
         if "SPY" in cache_1d:
             spy = cache_1d["SPY"]
             spy_slice = spy.loc[:bar_ts.normalize()] if hasattr(bar_ts, "normalize") else spy.loc[:bar_ts]
             if len(spy_slice) >= 200:
-                ctx["qqq_regime_ok"] = bool(spy_slice["close"].iloc[-1] > spy_slice["close"].tail(200).mean())
+                spy_close = float(spy_slice["close"].iloc[-1])
+                sma_200 = float(spy_slice["close"].tail(200).mean())
+                sma_50 = float(spy_slice["close"].tail(50).mean())
+                ctx["qqq_regime_ok"] = spy_close > sma_200
+                # Full uptrend: required to exit equity_bear (hysteresis)
+                ctx["qqq_full_uptrend"] = spy_close > sma_50 > sma_200
+        # Real BTC trend (drives SHIELD)
+        if "BTC/USD" in cache_1d:
+            btc = cache_1d["BTC/USD"]
+            btc_slice = btc.loc[:bar_ts.normalize()] if hasattr(bar_ts, "normalize") else btc.loc[:bar_ts]
+            if len(btc_slice) >= 200:
+                btc_close = float(btc_slice["close"].iloc[-1])
+                btc_sma_200 = float(btc_slice["close"].tail(200).mean())
+                ctx["btc_trend"] = "bull" if btc_close > btc_sma_200 else "bear"
+        # Real VIX (drives SHIELD) — fetched from cache_1d_vix if available
+        if "VIX" in cache_1d:
+            vix_df = cache_1d["VIX"]
+            # Normalize timezone — both sides must be tz-naive
+            bar_ts_naive = bar_ts.tz_localize(None) if getattr(bar_ts, "tz", None) else bar_ts
+            cutoff = bar_ts_naive.normalize() if hasattr(bar_ts_naive, "normalize") else bar_ts_naive
+            try:
+                vix_slice = vix_df.loc[:cutoff]
+                if len(vix_slice) >= 1:
+                    ctx["vix"] = float(vix_slice["close"].iloc[-1])
+            except (KeyError, TypeError):
+                pass  # fall back to default vix=18
 
         # 2. Check halt / SHIELD / equity_bear rotation
         halted = rg.is_halted(now=bar_ts)
@@ -144,6 +186,9 @@ def main():
             n_cycles_rotation += 1
 
         # 3. Update trailing stops + check stops for open positions
+        # Macro-aware exits removed: at +5% threshold they killed bull rallies
+        # (force-closed at peak of VIX spikes that were just normal pullbacks).
+        # Trends need to run to capture +33-43% CAGR (Bot A / Z reference).
         for sym in list(positions.keys()):
             df = cache_4h[sym]
             if bar_ts not in df.index:
@@ -233,7 +278,9 @@ def main():
         for rank, sig in enumerate(accepted):
             if len(positions) >= MAX_OPEN_POSITIONS:
                 break
-            size_res = compute_size(rank=rank, cash=capital, entry_price=sig.entry_price)
+            # Score-weighted sizing (vol-adjust disabled: dampened bull CAGR -21pt)
+            size_res = compute_size(rank=rank, cash=capital,
+                                    entry_price=sig.entry_price)
             if size_factor != 1.0:
                 size_res = type(size_res)(qty=size_res.qty * size_factor,
                                           notional=size_res.notional * size_factor)

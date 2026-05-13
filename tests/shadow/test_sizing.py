@@ -4,7 +4,7 @@ Tests are parameterized on WEIGHT_BY_RANK so they survive tuning changes.
 """
 import pytest
 from shadow.sizing import compute_size, SizeResult
-from shadow.constants_v2 import WEIGHT_BY_RANK
+from shadow.constants_v2 import WEIGHT_BY_RANK, TARGET_DAILY_VOL
 
 
 @pytest.mark.parametrize("rank", range(len(WEIGHT_BY_RANK)))
@@ -38,3 +38,29 @@ def test_total_top_n_leaves_cash_buffer():
     total_notional = sum(compute_size(r, 100_000.0, 100.0).notional for r in range(len(WEIGHT_BY_RANK)))
     assert total_notional == pytest.approx(100_000.0 * total_pct)
     assert total_pct < 1.0, f"WEIGHT_BY_RANK total {total_pct:.2f} leaves no cash buffer"
+
+
+# ── Vol-adjusted sizing (iter-5) ─────────────────────────────────────────────
+def test_vol_adjust_high_vol_asset_gets_smaller_position():
+    """ATR/price = 3% (BTC-like) → scale by 1.5/3.0 = 0.5 → half the position."""
+    base = compute_size(rank=0, cash=100_000.0, entry_price=100.0)
+    # ATR = 3.0 on $100 price → asset_vol_pct = 3.0% (high)
+    scaled = compute_size(rank=0, cash=100_000.0, entry_price=100.0, atr=3.0)
+    assert scaled.notional < base.notional
+    expected_factor = TARGET_DAILY_VOL / 0.03  # 1.5% / 3.0% = 0.5
+    assert scaled.notional == pytest.approx(base.notional * expected_factor)
+
+
+def test_vol_adjust_low_vol_asset_capped_at_1():
+    """ATR/price = 0.5% (GLD-like) → would scale to 3x, but capped at 1.0 (no leverage)."""
+    base = compute_size(rank=0, cash=100_000.0, entry_price=100.0)
+    # ATR = 0.5 on $100 price → asset_vol_pct = 0.5% (low)
+    scaled = compute_size(rank=0, cash=100_000.0, entry_price=100.0, atr=0.5)
+    assert scaled.notional == pytest.approx(base.notional)  # no upscale beyond 1.0
+
+
+def test_vol_adjust_pass_through_when_atr_none():
+    """atr=None → behaves like the original score-weighted sizing."""
+    base = compute_size(rank=0, cash=100_000.0, entry_price=100.0)
+    with_none = compute_size(rank=0, cash=100_000.0, entry_price=100.0, atr=None)
+    assert with_none.notional == base.notional

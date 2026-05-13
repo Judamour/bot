@@ -44,18 +44,30 @@ def test_missing_keys_safe_defaults():
     assert shield_active({"vix": 18}) is False
 
 
-# ── equity_bear_active ──────────────────────────────────────────────────────
-def test_equity_bear_fires_when_qqq_bad():
-    """QQQ below SMA200 → equity bear (rotate to defensives)."""
+# ── equity_bear_active (asymmetric hysteresis) ──────────────────────────────
+def test_equity_bear_fires_when_qqq_below_sma200():
+    """SPY below SMA200 → enter equity bear (rotate to defensives)."""
     assert equity_bear_active({"qqq_regime_ok": False}) is True
 
 
-def test_equity_bear_silent_when_qqq_ok():
-    """QQQ above SMA200 → no equity bear, scan full universe."""
-    assert equity_bear_active({"qqq_regime_ok": True}) is False
+def test_equity_bear_clears_only_on_full_uptrend():
+    """SPY above SMA200 AND SPY > SMA50 > SMA200 → exit equity bear."""
+    macro = {"qqq_regime_ok": True, "qqq_full_uptrend": True}
+    assert equity_bear_active(macro) is False
+
+
+def test_equity_bear_sticks_on_partial_recovery():
+    """SPY above SMA200 but SMA50 still below SMA200 → stay in bear (hysteresis).
+
+    This is the key anti-whipsaw: in 2022, SPY briefly crossed back above
+    SMA200 in April / August / November but the SMA50 stayed below SMA200
+    (downtrend not yet broken). Hysteresis keeps the rotation active.
+    """
+    macro = {"qqq_regime_ok": True, "qqq_full_uptrend": False}
+    assert equity_bear_active(macro) is True
 
 
 def test_equity_bear_default_no_trigger():
-    """Missing qqq_regime_ok → default True (no bear), prevents false-positive rotation."""
+    """Missing keys → assume bull, prevents false-positive rotation."""
     assert equity_bear_active({}) is False
     assert equity_bear_active({"vix": 22, "btc_trend": "bull"}) is False

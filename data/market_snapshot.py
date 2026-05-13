@@ -64,7 +64,7 @@ def fetch_macro_context() -> dict:
     fear_greed = fetch_fear_greed()
     funding_rates = fetch_funding_rates(config.CRYPTO)
     macro_news = fetch_news_macro_rss(limit=4)
-    qqq_regime_ok, qqq_description = fetch_qqq_regime()
+    qqq_regime_ok, qqq_description, qqq_full_uptrend = fetch_qqq_regime()
     btc_dom = fetch_btc_dominance()
 
     return {
@@ -75,6 +75,7 @@ def fetch_macro_context() -> dict:
         "funding_rates": funding_rates,
         "macro_news": macro_news,
         "qqq_regime_ok": qqq_regime_ok,
+        "qqq_full_uptrend": qqq_full_uptrend,
         "qqq_description": qqq_description,
         "btc_dominance": btc_dom,
     }

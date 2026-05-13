@@ -1028,7 +1028,7 @@ def run():
             if macro_news:
                 log(f"News macro: {len(macro_news)} headlines chargés", "INFO")
 
-            qqq_ok, qqq_desc = fetch_qqq_regime()
+            qqq_ok, qqq_desc, _qqq_full_uptrend = fetch_qqq_regime()
             log(
                 f"Régime QQQ: {qqq_desc} {'✓ Risk-ON' if qqq_ok else '⚠ Risk-OFF — xStocks bloqués'}",
                 "INFO" if qqq_ok else "WARN",

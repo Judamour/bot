@@ -32,11 +32,24 @@ def shield_active(macro: dict) -> bool:
 def equity_bear_active(macro: dict) -> bool:
     """Return True if broad equity is in bear regime → rotate to defensives.
 
-    Lighter trigger than SHIELD: fires on SPY/QQQ below its 200-day SMA alone.
-    Used to switch from full-universe scan to DEFENSIVE_SYMBOLS-only scan,
-    not to halt entries entirely.
+    Asymmetric (hysteresis) to avoid whipsaw on dead-cat bounces:
+      - Enter equity_bear: SPY closes below its 200-day SMA (qqq_regime_ok=False)
+      - Exit equity_bear: SPY > SMA50 > SMA200 (full uptrend reconfirmed)
 
-    Disjoint from shield_active in practice: if both are true, SHIELD wins
-    (no new entries). If only equity_bear, we scan the defensive subset.
+    Without hysteresis, a 3-day SPY > SMA200 blip during a bear (April,
+    August, November 2022 each had such blips) would flip the system back
+    to full-universe scan, where it then caught faux dawn breakouts and
+    bled (-$132 on AVAX/GOOGL/PLTR in iter-4 backtest).
+
+    Disjoint from shield_active: if both true, SHIELD wins (no entries).
+    If only equity_bear, we scan the defensive subset with 0.5× sizing.
+
+    Missing keys: default to bull (qqq_regime_ok=True, qqq_full_uptrend=True)
+    → returns False (no false-positive rotation).
     """
-    return not macro.get("qqq_regime_ok", True)
+    qqq_ok = macro.get("qqq_regime_ok", True)
+    if not qqq_ok:
+        return True                              # below SMA200: enter bear
+    # Above SMA200 but not yet full uptrend → stay in bear (sticky exit)
+    full_uptrend = macro.get("qqq_full_uptrend", True)
+    return not full_uptrend

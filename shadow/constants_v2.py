@@ -13,10 +13,11 @@ SCORE_FLOOR = 65              # G1: signal must score ≥ this
 COOLDOWN_DAYS = 5             # G4: forbid re-entry on a symbol N days after a stop
 
 # Active detectors (subset of shadow.strategies.ALL_DETECTORS).
-# v2 iter-1: dropping supertrend + mean_reversion which bleed on 4h
-# (300 trades 27% win -$38, 128 trades 24% win -$21). Keep trend_multi_asset
-# (89 trades 34% win +$68), donchian, momentum.
-ACTIVE_DETECTORS = ("trend_multi_asset", "donchian", "momentum")
+# v2 iter-1: dropped supertrend + mean_reversion (4h bleeders, -$38 / -$21).
+# v2 iter-5: dropped momentum (bear bleeder: 6 trades, win 17%, -$41 PnL).
+# Kept: trend_multi_asset (workhorse, +$1,211 in bull / -$46 in bear) and
+# donchian (small but positive +$11 in bear, decorrelated breakout).
+ACTIVE_DETECTORS = ("trend_multi_asset", "donchian")
 
 # ── Concentration / sizing ───────────────────────────────────────────────────
 TOP_N_SIGNALS = 2             # number of candidates considered per cycle (top by score)
@@ -25,13 +26,22 @@ WEIGHT_BY_RANK = [0.60, 0.30]  # % of available cash by rank in the cycle's top-
                                 # total 90%, leaves 10% cash buffer
 RISK_PARITY_PCT_FALLBACK = 0.01      # fallback if score-weighted sizing not applicable
 
+# Vol-adjusted sizing (iter-5): scale position size by inverse of asset vol.
+# weight_adjusted = weight × min(TARGET_DAILY_VOL / asset_vol_pct, 1.0)
+# Caps at 1.0 → no leverage on low-vol. Penalizes high-vol (BTC, AVAX) which
+# get smaller positions for same risk budget. Pass-through if atr unknown.
+TARGET_DAILY_VOL = 0.015      # 1.5% daily vol target (matches mid-cap stocks)
+
 # ── Trailing stop adaptatif ──────────────────────────────────────────────────
 ATR_MULT_STOP_INIT = 4.0      # initial stop = entry - 4.0 × ATR(14) (wider, trend trades need room)
 ATR_MULT_TRAIL = 5.0          # trailing widens to 5.0 × ATR once position is up > +5%
 PROFIT_LOOSEN_PCT = 0.05      # threshold to switch from tight → loose trailing
 
 # ── Régime SHIELD ────────────────────────────────────────────────────────────
-VIX_SHIELD_THRESHOLD = 30.0   # VIX > this → SHIELD active (no new entries)
+# Raised 30 → 35 in iter-5: with real VIX in backtest, 30 fires too often on
+# regular pullbacks (44 cycles in 3y bull, dampening CAGR by ~15 pts).
+# 35+ is "real crisis" territory (2020 covid, 2022 Q4, 2024 carry unwind).
+VIX_SHIELD_THRESHOLD = 35.0   # VIX > this → SHIELD active (no new entries)
 
 # ── Defensive rotation (iter-4) ──────────────────────────────────────────────
 # When broad equity is in bear (SPY < SMA200 or QQQ < SMA200), instead of
