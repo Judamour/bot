@@ -164,9 +164,26 @@ def market_buy(symbol: str, qty: float) -> dict:
             if not filled or filled.get("status") != "filled":
                 return {"ok": False, "id": oid,
                         "error": f"not filled (status={filled.get('status') if filled else 'timeout'})"}
+            filled_qty = float(filled.get("filled_qty", qty))
+            # POST-FILL CLAMP: Alpaca déduit fees en base asset (25 bps).
+            # Refetch /v2/positions/{sym} pour avoir la qty réellement dispo,
+            # évite mismatch state vs broker (cf incident AVAX 2026-05-13 sur Z).
+            time.sleep(0.5)
+            try:
+                pos = get_position(symbol)
+                if pos:
+                    broker_qty = float(pos.get("qty_available") or pos.get("qty") or 0)
+                    if 0 < broker_qty < filled_qty:
+                        decimals = 6
+                        factor = 10 ** decimals
+                        clamped = math.floor(broker_qty * factor) / factor
+                        print(f"[SHADOW] post-fill clamp {symbol} {filled_qty:.6f}→{clamped:.6f} (fee crypto)", flush=True)
+                        filled_qty = clamped
+            except Exception:
+                pass
             return {
                 "ok": True, "id": oid,
-                "filled_qty": float(filled.get("filled_qty", qty)),
+                "filled_qty": filled_qty,
                 "filled_avg": float(filled.get("filled_avg_price") or 0),
                 "status": "filled",
             }

@@ -343,6 +343,29 @@ def execute_buy(symbol: str, size: float, price_estimate: float,
 
         filled_qty = float(filled.get("filled_qty", size))
         filled_avg = float(filled.get("filled_avg_price") or price_estimate)
+
+        # POST-FILL CLAMP (iter-9): pour crypto, Alpaca déduit les fees en base
+        # asset (25 bps). La qty fillée est NOMINALE — la qty disponible côté
+        # broker est inférieure. Sans ce clamp, le bot stocke 1479.12 AVAX dans
+        # son state alors que /v2/positions n'a que 1476.03 → SELL ultérieur
+        # échoue "insufficient balance" (incident AVAX 2026-05-13, -€494).
+        # Fix : refetch /v2/positions juste après fill et utiliser cette qty.
+        if is_crypto:
+            time.sleep(0.5)  # laisser Alpaca propager le fill vers /v2/positions
+            try:
+                broker_qty = _fetch_position_qty(symbol)
+                if broker_qty is not None and broker_qty > 0 and broker_qty < filled_qty:
+                    decimals = 6
+                    factor = 10 ** decimals
+                    clamped = math.floor(broker_qty * factor) / factor
+                    logger.warning(
+                        f"[ALPACA] BUY {symbol} post-fill clamp {filled_qty:.6f}→{clamped:.6f} "
+                        f"(fee crypto en base asset)"
+                    )
+                    filled_qty = clamped
+            except Exception as e:
+                logger.warning(f"[ALPACA] post-fill clamp {symbol} skip: {e}")
+
         notify(f"✅ <b>LIVE BUY</b> {symbol} (Alpaca)\n"
                f"Taille: {filled_qty:.6f} @ {filled_avg:.4f}$\nOrdre: {order_id}")
         return OrderResult(success=True, order_id=order_id,
