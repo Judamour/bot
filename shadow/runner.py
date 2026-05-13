@@ -15,6 +15,7 @@ import os
 import json
 import time
 import signal as sig_module
+import threading
 from datetime import datetime, timezone, timedelta
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -66,10 +67,15 @@ CYCLE_HOURS_UTC = [3, 7, 11, 15, 19, 23]
 
 _stop = False
 
+# Stop monitor (port of Bot Z's _stop_monitor_loop in live/multi_runner.py)
+_STOP_MONITOR_INTERVAL_SEC = 900  # 15 min — same as Bot Z
+_stop_monitor_stop = threading.Event()
+
 
 def _sig_handler(signum, frame):
     global _stop
     _stop = True
+    _stop_monitor_stop.set()
     print(f"[SHADOW] signal {signum} reçu — arrêt propre…", flush=True)
 
 
@@ -119,6 +125,123 @@ def _next_cycle_dt() -> datetime:
 def _alpaca_symbol(sym: str) -> str:
     """Forme normalisée Alpaca pour les positions/orders."""
     return sym.replace("/", "")
+
+
+def _reconcile_stops_once() -> None:
+    """One iteration of stop reconciliation (called by monitor thread every 15min).
+
+    For each open Alpaca position:
+      - If no stop_order_id in pos_meta → place one (orphan recovery, e.g. fill
+        between cycles or queued stock that just filled)
+      - If stop_order_id exists, fetch status:
+        * expired/canceled/rejected → re-place
+        * filled → record cooldown + clean pos_meta (broker fired the stop)
+        * filled/open → no-op
+
+    Mirror of Bot Z's reconcile_broker_stop logic but adapted to shadow's
+    single-state pos_meta + shadow.broker. No lock with main cycle: races
+    rare (15min vs 4h) and non-fatal (duplicate stop canceled next cycle).
+    """
+    now = datetime.now(timezone.utc)
+    try:
+        positions = broker.get_positions()
+    except Exception as e:
+        print(f"[STOP-MONITOR] account fetch échec: {e}", flush=True)
+        return
+
+    pos_by_sym = {_alpaca_symbol(p["symbol"]): p for p in positions}
+    meta = load_meta()
+    pos_meta = meta.setdefault("positions_meta", {})
+
+    rg = RiskGuard.load(state_path=RISK_STATE,
+                        initial_equity=100_000.0, now=now)
+
+    checked = adopted = renewed = filled = 0
+    mutated = False
+
+    for alp_sym, alp_pos in pos_by_sym.items():
+        m = pos_meta.get(alp_sym)
+        if not m:
+            continue  # no metadata (legacy v1 position) — skip
+        checked += 1
+        sid = m.get("stop_order_id")
+        qty = float(alp_pos.get("qty_available") or alp_pos.get("qty") or 0)
+        stop_level = float(m.get("stop") or 0)
+        if qty <= 0 or stop_level <= 0:
+            continue
+
+        orig_sym = alp_pos["symbol"]
+        if any(c in orig_sym for c in ["BTC", "ETH", "SOL", "AVAX", "LINK"]) and "/" not in orig_sym:
+            orig_sym = orig_sym[:-3] + "/" + orig_sym[-3:]
+
+        if not sid:
+            # Orphan: position without server-side stop → place one
+            res = broker.place_stop(orig_sym, qty, stop_level)
+            if res.get("ok"):
+                m["stop_order_id"] = res["id"]
+                pos_meta[alp_sym] = m
+                mutated = True
+                adopted += 1
+                log_event("stop_adopt", {"symbol": alp_sym, "stop": stop_level, "qty": qty})
+                print(f"[STOP-MONITOR] ADOPT {alp_sym} → {stop_level}", flush=True)
+            continue
+
+        # Check current status
+        order = broker.get_order(sid)
+        if order is None:
+            continue
+        status = order.get("status")
+
+        if status in ("expired", "canceled", "rejected"):
+            res = broker.place_stop(orig_sym, qty, stop_level)
+            if res.get("ok"):
+                m["stop_order_id"] = res["id"]
+                pos_meta[alp_sym] = m
+                mutated = True
+                renewed += 1
+                log_event("stop_renew", {"symbol": alp_sym, "from_status": status, "stop": stop_level, "qty": qty})
+                print(f"[STOP-MONITOR] RENEW {alp_sym} (was {status}) → {stop_level}", flush=True)
+            else:
+                m["stop_order_id"] = None  # mark orphan for next iteration retry
+                pos_meta[alp_sym] = m
+                mutated = True
+
+        elif status == "filled":
+            # Stop fired — broker closed the position. Register cooldown + cleanup.
+            filled_price = float(order.get("filled_avg_price") or stop_level)
+            rg.register_stop(alp_sym, pnl=0.0, now=now)
+            log_event("stop_filled", {
+                "symbol": alp_sym, "filled_price": filled_price,
+                "stop_level": stop_level,
+            })
+            print(f"[STOP-MONITOR] FILLED {alp_sym} @ {filled_price} (cooldown 5j)", flush=True)
+            pos_meta.pop(alp_sym, None)
+            mutated = True
+            filled += 1
+
+    if mutated:
+        save_meta(meta)
+        rg.save()
+
+    if checked > 0:
+        print(f"[STOP-MONITOR] {checked} stops vérifiés, {adopted} adoptés, {renewed} renouvelés, {filled} fillés", flush=True)
+
+
+def _stop_monitor_loop() -> None:
+    """Daemon thread: runs _reconcile_stops_once() every 15 min.
+
+    Wait FIRST so the main 4h cycle runs at startup before the monitor.
+    Stops gracefully when _stop_monitor_stop event is set (SIGTERM handler).
+    """
+    print(f"[STOP-MONITOR] démarré (interval {_STOP_MONITOR_INTERVAL_SEC}s = 15min)", flush=True)
+    while not _stop_monitor_stop.is_set():
+        if _stop_monitor_stop.wait(_STOP_MONITOR_INTERVAL_SEC):
+            break
+        try:
+            _reconcile_stops_once()
+        except Exception as e:
+            print(f"[STOP-MONITOR] iteration échec: {e}", flush=True)
+    print("[STOP-MONITOR] arrêté.", flush=True)
 
 
 def run_cycle():
@@ -475,6 +598,10 @@ def main():
     except Exception as e:
         print(f"[SHADOW] cycle initial échec: {e}", flush=True)
         import traceback; traceback.print_exc()
+
+    # Start stop-monitor daemon thread (15-min reconcile between 4h cycles)
+    _stop_monitor_thread = threading.Thread(target=_stop_monitor_loop, daemon=True)
+    _stop_monitor_thread.start()
 
     while not _stop:
         next_dt = _next_cycle_dt()

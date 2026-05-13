@@ -115,6 +115,14 @@ def get_open_orders() -> list:
     return _request("GET", "/v2/orders?status=open&limit=100")
 
 
+def get_order(order_id: str) -> dict | None:
+    """Fetch one order by id. Returns None on fetch failure or 404."""
+    try:
+        return _request("GET", f"/v2/orders/{order_id}")
+    except Exception:
+        return None
+
+
 # ── Orders ───────────────────────────────────────────────────────────────────
 
 def _wait_fill(order_id: str, max_wait_s: int = 30) -> dict | None:
