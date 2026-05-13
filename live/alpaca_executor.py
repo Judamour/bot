@@ -366,15 +366,14 @@ def execute_buy(symbol: str, size: float, price_estimate: float,
             except Exception as e:
                 logger.warning(f"[ALPACA] post-fill clamp {symbol} skip: {e}")
 
-        notify(f"✅ <b>LIVE BUY</b> {symbol} (Alpaca)\n"
-               f"Taille: {filled_qty:.6f} @ {filled_avg:.4f}$\nOrdre: {order_id}")
+        notify(f"✅ BUY {symbol} {filled_qty:.4f}@{filled_avg:.2f}$")
         return OrderResult(success=True, order_id=order_id,
                            filled_size=filled_qty, filled_price=filled_avg)
 
     except Exception as e:
         err_msg = str(e)
         logger.error(f"[ALPACA] BUY {symbol} ÉCHOUÉ: {err_msg}")
-        notify(f"⛔ <b>LIVE BUY ÉCHOUÉ</b> {symbol} (Alpaca)\nErreur: {err_msg[:200]}")
+        notify(f"❌ BUY {symbol} échec: {err_msg[:80]}")
         return OrderResult(success=False, error=err_msg)
 
 
@@ -417,24 +416,21 @@ def execute_sell(symbol: str, size: float, price_estimate: float,
         filled = _wait_for_fill(order_id, max_wait_sec)
         if filled is None:
             logger.error(f"[ALPACA] SELL {order_id} non rempli après {max_wait_sec}s")
-            notify(f"🚨 <b>LIVE SELL NON REMPLI</b> {symbol} (Alpaca)\n"
-                   f"Ordre {order_id}\n⚠️ Intervention manuelle requise")
+            notify(f"🚨 SELL {symbol} non rempli ({max_wait_sec}s) — manuel requis")
             return OrderResult(success=False, order_id=order_id,
                                error=f"Timeout {max_wait_sec}s")
 
         filled_qty = float(filled.get("filled_qty", size))
         filled_avg = float(filled.get("filled_avg_price") or price_estimate)
         icon = "🔴" if "stop" in reason else "⏹"
-        notify(f"{icon} <b>LIVE SELL</b> {symbol} (Alpaca) [{reason}]\n"
-               f"Taille: {filled_qty:.6f} @ {filled_avg:.4f}$")
+        notify(f"{icon} SELL {symbol} {filled_qty:.4f}@{filled_avg:.2f}$ [{reason}]")
         return OrderResult(success=True, order_id=order_id,
                            filled_size=filled_qty, filled_price=filled_avg)
 
     except Exception as e:
         err_msg = str(e)
         logger.error(f"[ALPACA] SELL {symbol} ÉCHOUÉ: {err_msg}")
-        notify(f"🚨 <b>LIVE SELL ÉCHOUÉ</b> {symbol} (Alpaca) [{reason}]\n"
-               f"Erreur: {err_msg}\n⚠️ Position ouverte — intervention manuelle requise")
+        notify(f"🚨 SELL {symbol} échec [{reason}]: {err_msg[:80]} — manuel requis")
         return OrderResult(success=False, error=err_msg)
 
 
@@ -738,20 +734,22 @@ def replace_stop_loss(stop_order_id: str, new_stop_price: float,
 # ── Startup check ────────────────────────────────────────────────────────────
 
 def startup_check() -> bool:
-    """Sanity check au démarrage : connexion + status compte. Indépendant de PAPER_TRADING."""
+    """Sanity check démarrage. Notify seulement si problème (skip OK routine)."""
     try:
         acct = _request("GET", "/v2/account")
         if acct.get("trading_blocked") or acct.get("account_blocked"):
-            notify(f"⛔ <b>Alpaca STARTUP BLOQUÉ</b>\nstatus={acct.get('status')} "
-                   f"trading_blocked={acct.get('trading_blocked')}")
+            notify(f"⛔ Alpaca BLOQUÉ status={acct.get('status')} trading_blocked={acct.get('trading_blocked')}")
             return False
         cash = float(acct.get("cash", 0))
         equity = float(acct.get("equity", 0))
         endpoint = "paper" if _is_paper_endpoint() else "LIVE"
+        # Log seulement, pas de notify si OK (réduit le spam au restart)
         logger.info(f"[ALPACA] Startup {endpoint} OK — cash={cash:.2f}$ equity={equity:.2f}$")
-        notify(f"🟢 <b>Alpaca {endpoint} OK</b>\nCash: {cash:.2f}$ | Equity: {equity:.2f}$")
+        # Notify uniquement si bascule vers LIVE (événement rare et important)
+        if endpoint == "LIVE":
+            notify(f"🟢 Alpaca LIVE startup OK — equity {equity:.0f}$")
         return True
     except Exception as e:
         logger.error(f"[ALPACA] startup_check ÉCHOUÉ: {e}")
-        notify(f"⛔ <b>Alpaca startup ÉCHOUÉ</b>\nErreur: {e}")
+        notify(f"⛔ Alpaca startup échec: {str(e)[:80]}")
         return False

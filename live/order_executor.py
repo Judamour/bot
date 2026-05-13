@@ -441,7 +441,7 @@ def execute_buy(symbol: str, size: float, price_estimate: float,
         logger.info(f"[ORDER] BUY {symbol} (xStock raw) size={size:.6f} @ ~{price_estimate:.4f}$ ({order_value:.2f}$)")
         result = _execute_xstock_order(symbol, "buy", size, price_estimate)
         if result.success:
-            notify(f"✅ <b>LIVE BUY</b> {symbol}\nTaille: {size:.6f} @ ~{price_estimate:.4f}$\nOrdre: {result.order_id}")
+            notify(f"✅ BUY {symbol} {size:.4f}@{price_estimate:.2f}$")
         return result
 
     try:
@@ -469,9 +469,7 @@ def execute_buy(symbol: str, size: float, price_estimate: float,
             return OrderResult(success=False, order_id=order_id,
                                error=f"Timeout {max_wait_sec}s — ordre annulé")
 
-        notify(f"✅ <b>LIVE BUY</b> {symbol}\n"
-               f"Taille: {filled['filled']:.6f} @ {filled['average']:.4f}€\n"
-               f"Ordre: {order_id}")
+        notify(f"✅ BUY {symbol} {filled['filled']:.4f}@{filled['average']:.2f}€")
 
         return OrderResult(
             success=True,
@@ -484,7 +482,7 @@ def execute_buy(symbol: str, size: float, price_estimate: float,
         err_msg = str(e)
         logger.error(f"[ORDER] BUY {symbol} ÉCHOUÉ: {err_msg}")
         if not _is_silent_kraken_error(err_msg):
-            notify(f"⛔ <b>LIVE BUY ÉCHOUÉ</b> {symbol}\nErreur: {err_msg[:200]}")
+            notify(f"❌ BUY {symbol} échec: {err_msg[:80]}")
         return OrderResult(success=False, error=err_msg)
 
 
@@ -524,7 +522,7 @@ def execute_sell(symbol: str, size: float, price_estimate: float,
         result = _execute_xstock_order(symbol, "sell", size, price_estimate)
         if result.success:
             icon = "🔴" if "stop" in reason else "⏹"
-            notify(f"{icon} <b>LIVE SELL</b> {symbol} [{reason}]\nTaille: {size:.6f} @ ~{price_estimate:.4f}$")
+            notify(f"{icon} SELL {symbol} {size:.4f}@{price_estimate:.2f}$ [{reason}]")
         return result
 
     try:
@@ -544,15 +542,12 @@ def execute_sell(symbol: str, size: float, price_estimate: float,
             # Pour un SELL (exit), on log l'échec mais on ne ré-essaie pas automatiquement
             # L'opérateur doit intervenir manuellement
             logger.error(f"[ORDER] SELL {order_id} non rempli après {max_wait_sec}s — intervention manuelle requise")
-            notify(f"🚨 <b>LIVE SELL NON REMPLI</b> {symbol}\n"
-                   f"Ordre {order_id} en attente depuis {max_wait_sec}s\n"
-                   f"⚠️ Intervention manuelle requise")
+            notify(f"🚨 SELL {symbol} non rempli ({max_wait_sec}s) — manuel Kraken")
             return OrderResult(success=False, order_id=order_id,
                                error=f"Timeout — vérifier Kraken manuellement")
 
         icon = "🔴" if "stop" in reason else "⏹"
-        notify(f"{icon} <b>LIVE SELL</b> {symbol} [{reason}]\n"
-               f"Taille: {filled['filled']:.6f} @ {filled['average']:.4f}€")
+        notify(f"{icon} SELL {symbol} {filled['filled']:.4f}@{filled['average']:.2f}€ [{reason}]")
 
         return OrderResult(
             success=True,

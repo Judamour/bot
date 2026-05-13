@@ -29,6 +29,7 @@ except Exception:
 
 import config
 from data.market_snapshot import fetch_macro_context, fetch_ohlcv_cache
+from live.notifier import notify  # shared Telegram channel with Bot Z
 from shadow.scorer import compute_score
 from shadow.strategies import ALL_DETECTORS as _ALL_DETECTORS
 from shadow import broker
@@ -159,6 +160,21 @@ def _reconcile_stops_once() -> None:
     checked = adopted = renewed = filled = 0
     mutated = False
 
+    # DRIFT CHECK (iter-9): detect bot/broker divergence
+    # - PHANTOM = position on broker but NOT in pos_meta (orphan, bot doesn't track)
+    # - DRIFT_CLOSE = symbol in pos_meta but NOT on broker (closed unexpectedly)
+    broker_syms = set(pos_by_sym.keys())
+    meta_syms = set(pos_meta.keys())
+    phantoms = [s for s in broker_syms - meta_syms
+                if float(pos_by_sym[s].get("qty") or 0) > 1e-5]  # exclude dust
+    drift_closed = list(meta_syms - broker_syms)
+    if phantoms:
+        log_event("drift_phantom", {"symbols": phantoms})
+        notify(f"⚠️ Shadow drift PHANTOM positions broker hors pos_meta: {phantoms}")
+    if drift_closed:
+        log_event("drift_close", {"symbols": drift_closed})
+        # No notify ici — drift_close = closed entre cycles, déjà géré par scan loop
+
     for alp_sym, alp_pos in pos_by_sym.items():
         m = pos_meta.get(alp_sym)
         if not m:
@@ -209,12 +225,15 @@ def _reconcile_stops_once() -> None:
         elif status == "filled":
             # Stop fired — broker closed the position. Register cooldown + cleanup.
             filled_price = float(order.get("filled_avg_price") or stop_level)
+            entry = float(m.get("entry_price") or 0)
+            pnl_pct = ((filled_price - entry) / entry * 100) if entry > 0 else 0.0
             rg.register_stop(alp_sym, pnl=0.0, now=now)
             log_event("stop_filled", {
                 "symbol": alp_sym, "filled_price": filled_price,
                 "stop_level": stop_level,
             })
             print(f"[STOP-MONITOR] FILLED {alp_sym} @ {filled_price} (cooldown 5j)", flush=True)
+            notify(f"🔴 Shadow STOP {alp_sym} @{filled_price:.2f}$ ({pnl_pct:+.1f}%)")
             pos_meta.pop(alp_sym, None)
             mutated = True
             filled += 1
@@ -308,6 +327,20 @@ def run_cycle():
     if rotate_defensives:
         print(f"[SHADOW] EQUITY_BEAR — rotation défensive: scan restreint à {DEFENSIVE_SYMBOLS}, sizing × {size_factor}", flush=True)
 
+    # Notify Telegram seulement sur TRANSITION de régime (pas à chaque cycle)
+    current_regime = "HALT" if halted else "SHIELD" if shielded else "EQUITY_BEAR" if rotate_defensives else "NORMAL"
+    last_regime = meta.get("last_regime", "NORMAL")
+    if current_regime != last_regime:
+        if current_regime == "SHIELD":
+            notify(f"🔴 Shadow → SHIELD (VIX {ctx['vix']:.1f}, BTC {ctx['btc_trend']})")
+        elif current_regime == "HALT":
+            notify(f"⛔ Shadow → HALT (MaxDD breach, until {rg.halt_until.strftime('%m-%d %H:%M') if rg.halt_until else '?'})")
+        elif current_regime == "EQUITY_BEAR":
+            notify(f"🟡 Shadow → EQUITY_BEAR (SPY<SMA200, rotation défensive)")
+        elif current_regime == "NORMAL" and last_regime != "NORMAL":
+            notify(f"🟢 Shadow → NORMAL (sortie {last_regime})")
+        meta["last_regime"] = current_regime
+
     # 3. Fetch OHLCV
     symbols = list(getattr(config, "SYMBOLS", []) or
                    (list(getattr(config, "CRYPTO", [])) + list(getattr(config, "STOCKS", []))))
@@ -352,16 +385,18 @@ def run_cycle():
                 sell_res = broker.market_sell(orig_sym, qty_avail)
                 if sell_res.get("ok"):
                     pnl_pct = (close - entry) / entry
+                    exit_p = sell_res.get("filled_avg", close)
                     log_event("macro_take_profit", {
                         "symbol": sym, "reason": "SHIELD" if shielded else "HALT",
-                        "entry": entry, "exit": sell_res.get("filled_avg", close),
-                        "pnl_pct": pnl_pct,
+                        "entry": entry, "exit": exit_p, "pnl_pct": pnl_pct,
                     })
                     print(f"[SHADOW] MACRO_TP {sym} ({'SHIELD' if shielded else 'HALT'}) entry={entry:.4f} exit≈{close:.4f} pnl=+{pnl_pct*100:.1f}%", flush=True)
+                    notify(f"⏹ Shadow EXIT {sym} {entry:.2f}→{exit_p:.2f}$ +{pnl_pct*100:.1f}% [{'SHIELD' if shielded else 'HALT'}]")
                     pos_meta.pop(sym, None)
                     continue
                 else:
                     print(f"[SHADOW] MACRO_TP {sym} échec: {sell_res.get('error')}", flush=True)
+                    notify(f"🚨 Shadow EXIT {sym} échec: {sell_res.get('error', '?')[:60]}")
         # Chandelier Exit (Bot Z's system, iter-6 #5):
         #   stop = max(high[-22:]) - atr_mult × atr
         # Anchors to recent high instead of current close → tighter on rallies,
@@ -614,6 +649,9 @@ def run_cycle():
             })
             suffix = f" [QUEUED — fill prochaine session]" if queued else ""
             print(f"[SHADOW] BUY rank={rank} {sig.symbol} ({sig.strategy}) score={sig.score:.1f} @ {fill_price:.4f} qty={fill_qty:.6f} stop={stop_initial:.4f} notional=${size_res.notional:.0f}{suffix}", flush=True)
+            # Notify Telegram (concise — 1 ligne)
+            q_tag = " [Q]" if queued else ""
+            notify(f"🟦 Shadow BUY {sig.symbol} {fill_qty:.4f}@{fill_price:.2f}$ score={sig.score:.0f} stop={stop_initial:.2f}{q_tag}")
             n_open += 1
 
     # 8. Sauve meta + persiste risk guard (prune expired entries pour garder l'état compact)
@@ -626,6 +664,13 @@ def run_cycle():
         cash = float(account.get("cash", 0))
         log_equity(equity, cash, n_open)
         print(f"[SHADOW] Final: equity ${equity:.2f} ({(equity-100000)/1000:.2f}%) | cash ${cash:.2f} | positions {n_open}", flush=True)
+        # Daily snapshot Telegram — fire seulement au cycle 19:03 UTC (post US close)
+        # 1 notif/jour max, contient: equity, perf, positions, regime
+        if now.hour == 19 and now.minute < 30:
+            perf_pct = (equity - 100_000) / 1_000  # %  from $100K seed
+            regime_str = "SHIELD" if shielded else "HALT" if halted else "BEAR" if equity_bear else "NORMAL"
+            pos_str = f"{n_open}pos" if n_open > 0 else "no pos"
+            notify(f"📊 Shadow daily | ${equity:,.0f} ({perf_pct:+.2f}%) | {pos_str} | {regime_str}".replace(",", " "))
     except Exception as e:
         print(f"[SHADOW] final account fetch échec: {e}", flush=True)
 

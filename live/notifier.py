@@ -150,58 +150,22 @@ def notify_z_dispatch(budget: dict, z_capital: float, engine: str,
                       prev_weights: dict = None, target_weights: dict = None,
                       weight_caps_hit: list = None, prev_budget: dict = None,
                       perf_pct: float = None):
-    """Notifie le dispatch de budget Bot Z vers les sub-bots A/B/C/G."""
-    total_dispatched = sum(budget.values())
+    """Dispatch Z compact (2 lignes). Suppression: barres ASCII, transition,
+    total redondant. Garde: engine, capital, perf, allocation par bot."""
     engine_icons = {"BULL": "🟢", "BALANCED": "🔵", "PARITY": "🟡", "SHIELD": "🔴"}
     icon = engine_icons.get(engine, "⚪")
+    perf_str = f" ({'+' if (perf_pct or 0) >= 0 else ''}{perf_pct:.1f}%)" if perf_pct is not None else ""
 
-    perf_str = ""
-    if perf_pct is not None:
-        sign = "+" if perf_pct >= 0 else ""
-        perf_str = f" ({sign}{perf_pct:.2f}%)"
-
-    lines = [
-        f"{icon} <b>Bot Z — Dispatch budget</b>",
-        f"Engine: <b>{engine}</b> | Capital: <b>{z_capital:,.0f}€</b>{perf_str}".replace(",", " "),
-        "",
-    ]
-
-    for bot_id, amount in sorted(budget.items()):
-        name, emoji = BOT_INFO.get(bot_id.lower(), (bot_id.upper(), "•"))
+    alloc_parts = []
+    for bot_id in sorted(budget.keys()):
+        amount = budget[bot_id]
         pct = amount / z_capital * 100 if z_capital > 0 else 0
-        filled = min(10, max(0, int(pct / 10)))
-        bar = "█" * filled + "░" * (10 - filled)
+        if pct < 0.5:  # skip near-zero allocations (B/C usuellement à 0%)
+            continue
+        cap = "*" if weight_caps_hit and bot_id in weight_caps_hit else ""
+        alloc_parts.append(f"{bot_id.upper()}:{pct:.0f}%{cap}")
 
-        # Delta vs cycle précédent
-        delta_str = ""
-        if prev_budget:
-            prev_amt = prev_budget.get(bot_id, 0)
-            delta = amount - prev_amt
-            if abs(delta) >= 5:
-                arrow = "↗" if delta > 0 else "↘"
-                delta_str = f" {arrow}{abs(delta):.0f}€"
-
-        cap_marker = " <b>[CAP]</b>" if weight_caps_hit and bot_id in weight_caps_hit else ""
-        lines.append(
-            f"{emoji} {name}: <b>{amount:.0f}€</b> ({pct:.0f}%){delta_str}{cap_marker}\n"
-            f"   {bar}"
-        )
-
-    # Transition info si les poids bougent encore vers la cible
-    if prev_weights and target_weights:
-        transitioning = []
-        for b in sorted(prev_weights.keys()):
-            prev = prev_weights.get(b, 0) * 100
-            tgt  = target_weights.get(b, 0) * 100
-            diff = tgt - prev
-            if abs(diff) >= 1.5:
-                arrow = "↗" if diff > 0 else "↘"
-                transitioning.append(f"{b.upper()}: {prev:.0f}%→{tgt:.0f}% {arrow}")
-        if transitioning:
-            lines.append(f"\n🔄 <i>Transition: {' | '.join(transitioning)}</i>")
-
-    lines.append(f"\n💰 Total: <b>{total_dispatched:,.0f}€</b> / {z_capital:,.0f}€".replace(",", " "))
-    notify("\n".join(lines))
+    notify(f"{icon} Z {engine} €{z_capital:,.0f}{perf_str} | {' '.join(alloc_parts)}".replace(",", " "))
 
 
 # ── Cycle summary ────────────────────────────────────────────────────────────
@@ -209,58 +173,44 @@ def notify_z_dispatch(budget: dict, z_capital: float, engine: str,
 def notify_cycle_summary(engine: str, vix: float, regime: str, z_capital: float,
                          perf_pct: float, budget: dict,
                          obs_bots: dict = None, main_bots: dict = None):
+    """Cycle summary Z compact (2-3 lignes max).
+
+    Format:
+        🔵 Z BALANCED €101.5K (+1.5%) | VIX 17.9 🐂
+        A:2pos G:1pos B:gelé | H:5tr I:0tr J:2tr
     """
-    Résumé compact envoyé à chaque cycle Bot Z.
-    main_bots : {a: {positions, capital, dd_frozen}, b: {...}, ...}
-    obs_bots  : {h: {trades, positions, blocked}, i: {...}, j: {...}}
-    """
-    perf_sign = "+" if perf_pct >= 0 else ""
+    perf_sign = "+" if (perf_pct or 0) >= 0 else ""
     engine_icons = {"BULL": "🟢", "BALANCED": "🔵", "PARITY": "🟡", "SHIELD": "🔴"}
     icon = engine_icons.get(engine, "⚪")
+    regime_icon = {"BULL": "🐂", "BEAR": "🐻", "NEUTRAL": "➡️"}.get((regime or "").upper(), "")
 
-    # Indicateur de régime market
-    regime_icon = ""
-    if regime:
-        regime_icon = {"BULL": "🐂", "BEAR": "🐻", "NEUTRAL": "➡️"}.get(regime.upper(), "")
+    line1 = f"{icon} Z {engine} €{z_capital:,.0f} ({perf_sign}{perf_pct:.1f}%) | VIX {vix:.1f} {regime_icon}".replace(",", " ")
 
-    lines = [
-        f"{icon} <b>Bot Z — Cycle</b> [{engine}]",
-        f"Capital: <b>{z_capital:,.0f}€</b> ({perf_sign}{perf_pct:.2f}%)".replace(",", " "),
-        f"Marché: VIX <b>{vix:.1f}</b> {regime_icon} {regime}",
-    ]
+    # Compact contest line: only bots that have positions or are frozen
+    parts = []
+    if main_bots:
+        for bid in sorted(main_bots.keys()):
+            info = main_bots[bid]
+            pos = info.get("positions", 0)
+            if info.get("dd_frozen"):
+                parts.append(f"{bid.upper()}:🧊")
+            elif pos > 0:
+                parts.append(f"{bid.upper()}:{pos}pos")
 
-    # Contest A/B/C/G
-    if budget:
-        lines.append("\n<b>Contest (Bot Z) :</b>")
-        for bid in sorted(budget.keys()):
-            name, emoji = BOT_INFO.get(bid.lower(), (bid.upper(), "•"))
-            amt = budget[bid]
-            extras = []
-            if main_bots and bid in main_bots:
-                info = main_bots[bid]
-                pos = info.get("positions", 0)
-                if info.get("dd_frozen"):
-                    extras.append("🧊 gelé")
-                if pos > 0:
-                    extras.append(f"{pos} pos")
-            extra_str = f" — {' | '.join(extras)}" if extras else ""
-            lines.append(f"  {emoji} {name}: {amt:.0f}€{extra_str}")
-
-    # Bots H/I/J (expérimentaux, hors Bot Z dispatch)
     if obs_bots:
-        lines.append("\n<b>Expérimental (1000€ fixes) :</b>")
         for bid in sorted(obs_bots.keys()):
             info = obs_bots[bid]
-            name, emoji = BOT_INFO.get(bid.lower(), (bid.upper(), "•"))
-            blocked = info.get("blocked", False)
-            trades = info.get("total_trades", 0)
-            positions = info.get("open_trades", 0)
-            if blocked:
-                lines.append(f"  {emoji} {name}: ⛔ bloqué ({engine})")
-            else:
-                lines.append(f"  {emoji} {name}: {positions} pos | {trades} trades")
+            if info.get("blocked"):
+                continue  # silence: bots bloqués pas intéressants chaque cycle
+            tr = info.get("total_trades", 0)
+            po = info.get("open_trades", 0)
+            if po > 0 or tr > 0:
+                parts.append(f"{bid.upper()}:{po}p/{tr}tr")
 
-    notify("\n".join(lines))
+    msg = line1
+    if parts:
+        msg += "\n" + " ".join(parts)
+    notify(msg)
 
 
 # ── Évènements de bot ────────────────────────────────────────────────────────
