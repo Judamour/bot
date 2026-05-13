@@ -62,6 +62,10 @@ CRYPTO = {"BTC/USD": "BTC-USD", "ETH/USD": "ETH-USD", "SOL/USD": "SOL-USD",
 STOCKS = ["NVDA", "GOOGL", "META", "PLTR", "CRWD", "LLY", "ABBV", "XOM", "CVX",
           "JPM", "BAC", "KO", "PG", "SPY", "QQQ", "GLD"]
 ALL_SYMBOLS = list(CRYPTO.keys()) + STOCKS
+# Note: SQQQ/SH inverse ETFs tested iter-6 #4 — only 1 SH trade fired in 2y3m bear
+# with -$5 PnL. Trigger price>SMA50>SMA200 too strict given inverse ETF volatility.
+# Dropped to keep universe simple. Detector code stays in shadow/strategies.py
+# for potential re-activation with a different trigger (e.g. RSI breakdown).
 
 
 # ── OHLCV cache (iter-5 #16) ────────────────────────────────────────────────
@@ -308,10 +312,8 @@ def main():
             rg.update_equity(eq, now=bar_ts)
             continue
 
-        # 4. Scan signals
-        # In equity_bear regime, restrict scan to DEFENSIVE_SYMBOLS subset
-        # (gold, healthcare, defensive consumer, energy) — these historically
-        # perform when broad equity is in bear.
+        # 4. Scan signals — equity_bear: restrict to DEFENSIVE subset
+        # (gold, healthcare, defensive consumer, energy) for rotation.
         scan_universe = (
             [s for s in ALL_SYMBOLS if s in DEFENSIVE_SYMBOLS]
             if rotate_defensives else ALL_SYMBOLS

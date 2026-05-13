@@ -17,7 +17,7 @@ COOLDOWN_DAYS = 5             # G4: forbid re-entry on a symbol N days after a s
 # v2 iter-5: dropped momentum (bear bleeder: 6 trades, win 17%, -$41 PnL).
 # Kept: trend_multi_asset (workhorse, +$1,211 in bull / -$46 in bear) and
 # donchian (small but positive +$11 in bear, decorrelated breakout).
-ACTIVE_DETECTORS = ("trend_multi_asset", "donchian", "inverse_bear")
+ACTIVE_DETECTORS = ("trend_multi_asset", "donchian")
 
 # ── Concentration / sizing ───────────────────────────────────────────────────
 TOP_N_SIGNALS = 2             # number of candidates considered per cycle (top by score)
