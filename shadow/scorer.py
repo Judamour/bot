@@ -88,6 +88,7 @@ def compute_score(sig: Signal, ctx: dict) -> float:
         "donchian": 6,           # peu de signaux mais bons
         "momentum": 4,           # rotation lente
         "mean_reversion": 5,     # défensif
+        "inverse_bear": 7,       # iter-6 #4: ne fire qu'en bear, profit asymétrique
     }
     score += edge_bonus.get(sig.strategy, 0)
 

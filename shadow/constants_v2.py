@@ -17,7 +17,7 @@ COOLDOWN_DAYS = 5             # G4: forbid re-entry on a symbol N days after a s
 # v2 iter-5: dropped momentum (bear bleeder: 6 trades, win 17%, -$41 PnL).
 # Kept: trend_multi_asset (workhorse, +$1,211 in bull / -$46 in bear) and
 # donchian (small but positive +$11 in bear, decorrelated breakout).
-ACTIVE_DETECTORS = ("trend_multi_asset", "donchian")
+ACTIVE_DETECTORS = ("trend_multi_asset", "donchian", "inverse_bear")
 
 # ── Concentration / sizing ───────────────────────────────────────────────────
 TOP_N_SIGNALS = 2             # number of candidates considered per cycle (top by score)
@@ -47,9 +47,51 @@ VIX_SHIELD_THRESHOLD = 35.0   # VIX > this → SHIELD active (no new entries)
 # When broad equity is in bear (SPY < SMA200 or QQQ < SMA200), instead of
 # going fully dormant we restrict scanning to assets that historically
 # perform in bear/crisis regimes (gold, healthcare, defensive consumer, energy)
-# and reduce sizing as a prudent measure.
+# plus INVERSE_ETFS (SQQQ = -3× QQQ, SH = -1× SPY) which profit from declines.
 DEFENSIVE_SYMBOLS = ("GLD", "KO", "PG", "LLY", "ABBV", "XOM", "CVX")
+# Inverse ETFs (iter-6 #4): only tradeable in equity_bear (handled by detector).
+# SQQQ = -3× QQQ daily, SH = -1× SPY daily. KNOWN RISK: volatility decay on
+# long holds. Trailing stops + cooldowns limit exposure window.
+INVERSE_ETFS = ("SQQQ", "SH")
+DEFENSIVE_AND_INVERSE = DEFENSIVE_SYMBOLS + INVERSE_ETFS  # equity_bear scan universe
 EQUITY_BEAR_SIZE_FACTOR = 0.5  # half-position when in equity-bear scan mode
+
+# ── Diversification (iter-6 #2) ──────────────────────────────────────────────
+# Constrain top-N to come from different sectors. Avoids concentrating
+# capital on highly correlated assets (e.g. BTC + ETH both rallying together,
+# or NVDA + GOOGL both on tech earnings beat). Hard cap = 1 position per
+# sector per cycle.
+SECTOR_MAP = {
+    # Crypto (highly correlated, treat as single sector)
+    "BTC/USD": "crypto", "ETH/USD": "crypto", "SOL/USD": "crypto",
+    "AVAX/USD": "crypto", "LINK/USD": "crypto",
+    # Tech mega-cap
+    "NVDA": "tech", "GOOGL": "tech", "META": "tech",
+    # AI/Cloud (correlated with tech but distinct)
+    "PLTR": "ai", "CRWD": "ai",
+    # Healthcare
+    "LLY": "healthcare", "ABBV": "healthcare",
+    # Energy
+    "XOM": "energy", "CVX": "energy",
+    # Financials
+    "JPM": "financials", "BAC": "financials",
+    # Defensive consumer
+    "KO": "consumer", "PG": "consumer",
+    # Broad index
+    "SPY": "index", "QQQ": "index",
+    # Gold (true diversifier)
+    "GLD": "gold",
+    # Inverse ETFs (iter-6 #4): own sector to allow 1 inverse position alongside defensives
+    "SQQQ": "inverse",
+    "SH": "inverse",
+}
+MAX_PER_SECTOR = 1  # max 1 position per sector per cycle
+
+# ── Macro-aware exits (iter-6 #3) ────────────────────────────────────────────
+# When SHIELD or HALT activates with a position already at +N%, lock in
+# the gain (force exit at market). +5% was too tight (cut bull rallies short),
+# +15% protects only "strong winners" while letting normal trends run.
+MACRO_EXIT_PROFIT_PCT = 0.15   # take profit if SHIELD/HALT + pnl ≥ +15%
 
 # ── Risk guard (MaxDD halt) ──────────────────────────────────────────────────
 HALT_DD_PCT = -0.15           # rolling DD ≤ this → halt new entries

@@ -32,7 +32,9 @@ from shadow.scorer import compute_score, Signal
 from shadow.constants_v2 import (
     SCORE_FLOOR, TOP_N_SIGNALS, MAX_OPEN_POSITIONS,
     ATR_MULT_STOP_INIT, ATR_MULT_TRAIL, PROFIT_LOOSEN_PCT,
-    ACTIVE_DETECTORS, DEFENSIVE_SYMBOLS, EQUITY_BEAR_SIZE_FACTOR,
+    ACTIVE_DETECTORS, DEFENSIVE_SYMBOLS, DEFENSIVE_AND_INVERSE,
+    INVERSE_ETFS, EQUITY_BEAR_SIZE_FACTOR,
+    SECTOR_MAP, MAX_PER_SECTOR, MACRO_EXIT_PROFIT_PCT,
 )
 
 # Filter detectors to the active subset (drops noisy 4h detectors per v2 iter-1)
@@ -240,9 +242,10 @@ def main():
             n_cycles_rotation += 1
 
         # 3. Update trailing stops + check stops for open positions
-        # Macro-aware exits removed: at +5% threshold they killed bull rallies
-        # (force-closed at peak of VIX spikes that were just normal pullbacks).
-        # Trends need to run to capture +33-43% CAGR (Bot A / Z reference).
+        # Macro-aware exit (iter-6 #3): when SHIELD/HALT activates AND position
+        # is already at +MACRO_EXIT_PROFIT_PCT (15%), lock in the gain. Higher
+        # threshold than iter-5's +5% (which cut bull rallies). Only protects
+        # already-strong winners.
         for sym in list(positions.keys()):
             df = cache_4h[sym]
             if bar_ts not in df.index:
@@ -250,6 +253,22 @@ def main():
             bar = df.loc[bar_ts]
             pos = positions[sym]
             low, close = float(bar["low"]), float(bar["close"])
+            pnl_pct = (close - pos["entry"]) / pos["entry"]
+            if (shielded or halted) and pnl_pct >= MACRO_EXIT_PROFIT_PCT:
+                exit_price = close * (1 - SLIPPAGE)
+                proceeds = exit_price * pos["size"]
+                fee_exit = proceeds * FEE
+                capital += proceeds - fee_exit
+                pnl = (exit_price - pos["entry"]) * pos["size"] - pos["fee_entry"] - fee_exit
+                trades.append({
+                    "symbol": sym, "strategy": pos["strategy"],
+                    "entry": pos["entry"], "exit": exit_price,
+                    "entry_ts": pos["entry_ts"], "exit_ts": bar_ts,
+                    "pnl": round(pnl, 2), "reason": "macro_take_profit", "score": pos["score"],
+                })
+                rg.register_stop(sym, pnl, now=bar_ts)
+                del positions[sym]
+                continue
             # Stop hit?
             if low <= pos["stop"]:
                 exit_price = pos["stop"] * (1 - SLIPPAGE)
@@ -327,8 +346,22 @@ def main():
                 best_by_symbol[sig.symbol] = sig
         sorted_cands = sorted(best_by_symbol.values(), key=lambda s: s.score, reverse=True)
 
-        # 6. Quality gate + size by rank (× size_factor when in defensive rotation)
-        accepted = [s for s in sorted_cands if gate_passes(s, rg, now=bar_ts)][:TOP_N_SIGNALS]
+        # 6. Quality gate + sector diversification (max 1 per sector per cycle)
+        # Already-open positions count against their sector's quota.
+        gate_passed = [s for s in sorted_cands if gate_passes(s, rg, now=bar_ts)]
+        sector_count: dict[str, int] = {}
+        for sym in positions.keys():
+            sec = SECTOR_MAP.get(sym, "other")
+            sector_count[sec] = sector_count.get(sec, 0) + 1
+        accepted = []
+        for sig in gate_passed:
+            sec = SECTOR_MAP.get(sig.symbol, "other")
+            if sector_count.get(sec, 0) >= MAX_PER_SECTOR:
+                continue
+            accepted.append(sig)
+            sector_count[sec] = sector_count.get(sec, 0) + 1
+            if len(accepted) >= TOP_N_SIGNALS:
+                break
         for rank, sig in enumerate(accepted):
             if len(positions) >= MAX_OPEN_POSITIONS:
                 break

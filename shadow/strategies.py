@@ -236,6 +236,58 @@ def detect_trend_multi_asset(symbol: str, df_4h, df_1d=None) -> Signal | None:
     )
 
 
+def detect_inverse_bear(symbol: str, df_4h, df_1d=None) -> Signal | None:
+    """Inverse ETF signal (iter-6 #4) — fires ONLY on SQQQ/SH and only when
+    the inverse itself is trending up (= underlying in confirmed downtrend).
+
+    Same structure as detect_trend_multi_asset (price > SMA50 > SMA200 on 1d)
+    but restricted to SQQQ/SH. The cycle's equity_bear gate further protects:
+    these symbols only end up in the scan universe when equity_bear is active.
+
+    Volatility decay risk: trailing stops at 4×/5× ATR limit hold time when
+    underlying recovers (inverse ETF would drop fast on QQQ/SPY bounce).
+    """
+    if symbol not in ("SQQQ", "SH"):
+        return None
+    if df_1d is None or len(df_1d) < 200:
+        return None
+    sma_50 = float(df_1d["close"].tail(50).mean())
+    sma_200 = float(df_1d["close"].tail(200).mean())
+    last_1d = float(df_1d["close"].iloc[-1])
+
+    # Inverse must itself be in uptrend (= underlying breaking down)
+    if not (last_1d > sma_50 > sma_200):
+        return None
+
+    if df_4h is None or len(df_4h) < 20:
+        return None
+    df = add_indicators(df_4h.copy())
+    last = df.iloc[-1]
+    atr = float(last.get("atr", 0) or 0)
+    adx = float(last.get("adx", 0) or 0)
+    rsi = float(last.get("rsi", 50) or 50)
+
+    if atr <= 0 or adx < 22:  # require stronger trend than regular trend_multi (20)
+        return None
+
+    vol_avg = df["volume"].tail(20).mean()
+    vol_ratio = float(last["volume"]) / vol_avg if vol_avg > 0 else 1.0
+
+    return Signal(
+        symbol=symbol,
+        strategy="inverse_bear",
+        side="long",  # buying SQQQ/SH (which is conceptually short underlying)
+        entry_price=float(last["close"]),
+        atr=atr,
+        stop_price=float(last["close"]) - 4 * atr,
+        rationale={
+            "adx": adx, "rsi": rsi, "volume_ratio": vol_ratio,
+            "mtf_aligned": True,
+            "inverse_underlying": "QQQ" if symbol == "SQQQ" else "SPY",
+        },
+    )
+
+
 def _rsi(series, length: int = 14):
     """RSI standard."""
     delta = series.diff()
@@ -251,4 +303,5 @@ ALL_DETECTORS = [
     detect_mean_reversion,
     detect_momentum,
     detect_trend_multi_asset,
+    detect_inverse_bear,
 ]
