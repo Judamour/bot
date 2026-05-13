@@ -294,7 +294,9 @@ def main():
                 continue
             pnl_pct = (close - pos["entry"]) / pos["entry"]
             atr_mult = ATR_MULT_TRAIL if pnl_pct >= PROFIT_LOOSEN_PCT else ATR_MULT_STOP_INIT
-            new_stop = close - atr_mult * atr
+            # Chandelier Exit (Bot Z's system): anchor to recent high not current close
+            chandelier_high = float(df_slice["high"].tail(22).max()) if len(df_slice) >= 22 else close
+            new_stop = chandelier_high - atr_mult * atr
             if new_stop > pos["stop"]:
                 pos["stop"] = new_stop
 

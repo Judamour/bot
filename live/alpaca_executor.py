@@ -23,6 +23,7 @@ PAPER_TRADING=false + ALPACA_PAPER=false → ordres LIVE Alpaca.
 
 import time
 import logging
+import math
 import sys
 import os
 import re
@@ -363,6 +364,21 @@ def execute_sell(symbol: str, size: float, price_estimate: float,
 
     is_crypto = "/" in symbol
     tif = "gtc" if is_crypto else "day"
+
+    # Pre-clamp via qty_available — évite "insufficient balance" sur crypto
+    # (fees Alpaca déduites en base asset : achat 1479 AVAX, balance réelle 1476)
+    if is_crypto:
+        broker_qty = _fetch_position_qty(symbol)
+        if broker_qty is not None and broker_qty > 0 and size > broker_qty:
+            decimals = 6
+            factor = 10 ** decimals
+            new_qty = math.floor(broker_qty * factor) / factor
+            logger.warning(
+                f"[ALPACA] SELL {symbol} clamp {size:.6f}→{new_qty:.6f} "
+                f"(broker available, fee crypto en base asset)"
+            )
+            size = new_qty
+
     payload = {
         "symbol": symbol,
         "qty": str(size),

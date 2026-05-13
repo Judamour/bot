@@ -264,6 +264,20 @@ def place_stop(symbol: str, qty: float, stop_price: float) -> dict:
         return {"ok": False, "error": str(e)[:200]}
 
 
+def replace_stop(order_id: str, new_stop_price: float) -> dict:
+    """PATCH existing stop order's price. Fewer API calls than cancel+replace.
+    Falls back to cancel+create_new via caller logic when PATCH fails.
+
+    Returns {"ok": True, "id": <new_or_same_id>} or {"ok": False, "error": ...}.
+    """
+    body = {"stop_price": str(round(new_stop_price, 2))}
+    try:
+        o = _request("PATCH", f"/v2/orders/{order_id}", body=body)
+        return {"ok": True, "id": o.get("id", order_id)}
+    except Exception as e:
+        return {"ok": False, "error": str(e)[:200]}
+
+
 def cancel_order(order_id: str) -> bool:
     if not order_id:
         return True

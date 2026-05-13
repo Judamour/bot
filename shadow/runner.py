@@ -239,13 +239,19 @@ def run_cycle():
                     continue
                 else:
                     print(f"[SHADOW] MACRO_TP {sym} échec: {sell_res.get('error')}", flush=True)
-        # Adaptive trailing: tight (4.0x) until +5% profit, then loosen to 5.0x
+        # Chandelier Exit (Bot Z's system, iter-6 #5):
+        #   stop = max(high[-22:]) - atr_mult × atr
+        # Anchors to recent high instead of current close → tighter on rallies,
+        # less prone to whipsaw on intra-bar pullbacks. Adaptive mult: tight
+        # (4.0×) until +5% profit, then loose (5.0×) to let winners run.
         if entry > 0:
             pnl_pct = (close - entry) / entry
             atr_mult = ATR_MULT_TRAIL if pnl_pct >= PROFIT_LOOSEN_PCT else ATR_MULT_STOP_INIT
         else:
             atr_mult = ATR_MULT_STOP_INIT  # entry unknown (queued) → use init
-        new_stop = round(close - atr_mult * atr, 2)
+        # Chandelier anchor: highest high of last 22 bars (~ 4 days on 4h)
+        chandelier_high = float(df["high"].tail(22).max()) if len(df) >= 22 else close
+        new_stop = round(chandelier_high - atr_mult * atr, 2)
         old_stop = m.get("stop", 0)
         existing_stop_id = m.get("stop_order_id")
 
@@ -256,14 +262,10 @@ def run_cycle():
         should_update = needs_initial_stop or (new_stop > old_stop)
 
         if should_update:
-            # Annuler ancien stop si présent + replacer
-            if existing_stop_id:
-                broker.cancel_order(existing_stop_id)
             qty = float(p.get("qty_available") or p.get("qty") or 0)
             if qty > 0:
                 # Cherche le symbole original (avec slash si crypto)
                 orig_sym = p["symbol"]
-                # Alpaca retourne BTCUSD sans slash — pour les ordres, accepte BTC/USD avec slash
                 if any(c in orig_sym for c in ["BTC", "ETH", "SOL", "AVAX", "LINK"]) and "/" not in orig_sym:
                     orig_sym = orig_sym[:-3] + "/" + orig_sym[-3:]
                 # For "needs_initial_stop" case, anchor to entry - ATR_MULT_STOP_INIT
@@ -272,16 +274,28 @@ def run_cycle():
                 if needs_initial_stop and entry > 0:
                     initial_anchor = round(entry - ATR_MULT_STOP_INIT * atr, 2)
                     target_stop = max(new_stop, initial_anchor)
+                # PATCH first (Z's approach — single API call), fallback to cancel+create.
+                if existing_stop_id:
+                    patch_res = broker.replace_stop(existing_stop_id, target_stop)
+                    if patch_res.get("ok"):
+                        m["stop"] = target_stop
+                        m["stop_order_id"] = patch_res["id"]
+                        pos_meta[sym] = m
+                        log_event("trail", {"symbol": sym, "new_stop": target_stop, "qty": qty, "method": "patch"})
+                        print(f"[SHADOW] TRAIL {sym} → {target_stop} (patch)", flush=True)
+                        continue
+                    # PATCH failed → cancel + recreate
+                    broker.cancel_order(existing_stop_id)
                 res = broker.place_stop(orig_sym, qty, target_stop)
                 if res.get("ok"):
                     m["stop"] = target_stop
                     m["stop_order_id"] = res["id"]
                     pos_meta[sym] = m
                     reason = "INIT" if needs_initial_stop else "TRAIL"
-                    log_event(reason.lower(), {"symbol": sym, "new_stop": target_stop, "qty": qty})
-                    print(f"[SHADOW] {reason} {sym} → {target_stop}", flush=True)
+                    log_event(reason.lower(), {"symbol": sym, "new_stop": target_stop, "qty": qty, "method": "create"})
+                    print(f"[SHADOW] {reason} {sym} → {target_stop} (create)", flush=True)
                 else:
-                    print(f"[SHADOW] {('INIT_STOP' if needs_initial_stop else 'TRAIL')} {sym} échec: {res.get('error')}", flush=True)
+                    print(f"[SHADOW] {('INIT' if needs_initial_stop else 'TRAIL')} {sym} échec: {res.get('error')}", flush=True)
 
     # 5. Récupère les ordres BUY en cours (queued/accepted) pour ne pas re-trigger
     # sur des actifs dont l'ordre est déjà placé mais pas encore fillé (typique pour
