@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 import pytest
 
 from shadow.scorer import Signal
-from shadow.quality_gate import passes
+from shadow.quality_gate import passes, reject_reason
 from shadow.risk_guard import RiskGuard
 
 
@@ -78,3 +78,33 @@ def test_missing_rationale_keys_fail_safe(rg, t0):
         score=80,
     )
     assert passes(sig, rg, now=t0) is False
+
+
+# ── reject_reason (iter-8 audit) ────────────────────────────────────────────
+def test_reject_reason_returns_none_on_pass(rg, t0):
+    """Passing signal → None (no reason to reject)."""
+    assert reject_reason(_sig(), rg, now=t0) is None
+
+
+def test_reject_reason_g1_score(rg, t0):
+    assert reject_reason(_sig(score=60), rg, now=t0) == "G1_score"
+
+
+def test_reject_reason_g2_mtf(rg, t0):
+    assert reject_reason(_sig(mtf=False), rg, now=t0) == "G2_mtf"
+
+
+def test_reject_reason_g3_volume(rg, t0):
+    assert reject_reason(_sig(vol=0.5), rg, now=t0) == "G3_volume"
+
+
+def test_reject_reason_g4_cooldown(rg, t0):
+    rg.register_stop("NVDA", pnl=-200, now=t0)
+    assert reject_reason(_sig(symbol="NVDA"), rg, now=t0) == "G4_cooldown"
+
+
+def test_reject_reason_g1_priority(rg, t0):
+    """Multiple failures → G1 (score) reported first."""
+    rg.register_stop("NVDA", pnl=-200, now=t0)
+    sig = _sig(score=50, mtf=False, vol=0.5, symbol="NVDA")
+    assert reject_reason(sig, rg, now=t0) == "G1_score"

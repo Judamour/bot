@@ -20,17 +20,22 @@ def passes(sig: Signal, risk_guard: RiskGuard, now: datetime) -> bool:
 
     Missing rationale keys → fail (defensive default).
     """
-    # G1
+    return reject_reason(sig, risk_guard, now) is None
+
+
+def reject_reason(sig: Signal, risk_guard: RiskGuard, now: datetime) -> str | None:
+    """Return the first failing gate code, or None if all 4 pass.
+
+    Used for audit logging — same logic as passes() but exposes WHY a signal
+    was rejected. Codes: G1_score, G2_mtf, G3_volume, G4_cooldown.
+    """
     if sig.score < SCORE_FLOOR:
-        return False
-    # G2: explicit True check; missing key → fail
+        return "G1_score"
     if not sig.rationale.get("mtf_aligned"):
-        return False
-    # G3: missing key → fail
+        return "G2_mtf"
     vol = sig.rationale.get("volume_ratio")
     if vol is None or vol < 1.0:
-        return False
-    # G4
+        return "G3_volume"
     if risk_guard.is_in_cooldown(sig.symbol, now=now):
-        return False
-    return True
+        return "G4_cooldown"
+    return None

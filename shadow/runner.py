@@ -47,7 +47,7 @@ from shadow.constants_v2 import (
     MACRO_EXIT_PROFIT_PCT,
 )
 from shadow.regime import shield_active, equity_bear_active
-from shadow.quality_gate import passes as gate_passes
+from shadow.quality_gate import passes as gate_passes, reject_reason as _gate_reject_reason
 from shadow.risk_guard import RiskGuard
 from shadow.sizing import compute_size
 
@@ -434,7 +434,16 @@ def run_cycle():
         return
 
     # 6. Skip scan if SHIELD or HALT active (v2)
+    # Cycle regime decision logged for audit
+    log_event("regime", {
+        "shielded": shielded, "halted": halted, "equity_bear": equity_bear,
+        "rotate_defensives": rotate_defensives, "size_factor": size_factor,
+        "vix": ctx["vix"], "btc_trend": ctx["btc_trend"],
+        "qqq_ok": ctx["qqq_ok"], "qqq_full_uptrend": ctx["qqq_full_uptrend"],
+    })
     if skip_new_entries:
+        log_event("scan_skip", {"reason": "shielded" if shielded else "halted",
+                                "shielded": shielded, "halted": halted})
         print(f"[SHADOW] skip scan (shielded={shielded} halted={halted})", flush=True)
     else:
         # 6a. Scan signaux pour symboles sans position et sans ordre buy en cours
@@ -444,23 +453,40 @@ def run_cycle():
             if rotate_defensives else symbols
         )
         candidates = []
+        scan_stats = {"evaluated": 0, "fired": 0, "below_floor": 0}
         for sym in scan_universe:
             alp_sym = _alpaca_symbol(sym)
             if alp_sym in pos_by_sym or alp_sym in pending_buy_syms:
+                log_event("scan_skip_held", {"symbol": sym,
+                          "reason": "already_open" if alp_sym in pos_by_sym else "pending_buy"})
                 continue
             df_4h = cache_4h.get(sym)
             df_1d = cache_1d.get(sym)
             if df_4h is None:
                 continue
             for detector in ALL_DETECTORS:
+                scan_stats["evaluated"] += 1
                 try:
                     sig = detector(sym, df_4h, df_1d)
                     if sig is None:
                         continue
+                    scan_stats["fired"] += 1
                     sig.score = compute_score(sig, ctx)
+                    # Audit log: every signal that fired (even below SCORE_FLOOR)
+                    log_event("signal", {
+                        "symbol": sig.symbol, "strategy": sig.strategy,
+                        "score": round(sig.score, 1),
+                        "entry": round(sig.entry_price, 4), "atr": round(sig.atr, 4),
+                        "passed_floor": sig.score >= SCORE_FLOOR,
+                        "rationale": sig.rationale,
+                    })
                     if sig.score >= SCORE_FLOOR:
                         candidates.append(sig)
+                    else:
+                        scan_stats["below_floor"] += 1
                 except Exception as e:
+                    log_event("detector_error", {"symbol": sym, "detector": detector.__name__,
+                                                 "error": str(e)[:200]})
                     print(f"[SHADOW] detector {detector.__name__} {sym}: {e}", flush=True)
 
         # Dédup intra-cycle par symbole : un actif ne peut générer qu'UN seul ordre par cycle.
@@ -472,11 +498,20 @@ def run_cycle():
         sorted_cands = sorted(best_by_symbol.values(), key=lambda s: s.score, reverse=True)
 
         # 6b. Quality gate (G1 score, G2 MTF, G3 volume, G4 cooldown) + sector diversification
-        gate_passed = [s for s in sorted_cands if gate_passes(s, rg, now=now)]
+        # Audit each rejection with its reason for post-mortem analysis
+        gate_passed = []
+        for sig in sorted_cands:
+            reason = _gate_reject_reason(sig, rg, now)
+            if reason is None:
+                gate_passed.append(sig)
+            else:
+                log_event("gate_reject", {
+                    "symbol": sig.symbol, "strategy": sig.strategy,
+                    "score": round(sig.score, 1), "reason": reason,
+                })
         # Already-open positions count against their sector's quota
         sector_count: dict[str, int] = {}
         for sym_alp in pos_by_sym.keys():
-            # Reverse-map Alpaca symbol (BTCUSD) back to our internal format (BTC/USD)
             internal = sym_alp
             for s in SECTOR_MAP:
                 if s.replace("/", "") == sym_alp:
@@ -488,6 +523,9 @@ def run_cycle():
         for sig in gate_passed:
             sec = SECTOR_MAP.get(sig.symbol, "other")
             if sector_count.get(sec, 0) >= MAX_PER_SECTOR:
+                log_event("sector_reject", {
+                    "symbol": sig.symbol, "sector": sec, "score": round(sig.score, 1),
+                })
                 continue
             accepted.append(sig)
             sector_count[sec] = sector_count.get(sec, 0) + 1
@@ -495,6 +533,18 @@ def run_cycle():
                 break
         rejected_n = len(sorted_cands) - len(gate_passed)
         sector_skipped = len(gate_passed) - len(accepted)
+        # Cycle scan summary (top-level audit)
+        log_event("scan_summary", {
+            "evaluated": scan_stats["evaluated"],
+            "fired": scan_stats["fired"],
+            "below_floor": scan_stats["below_floor"],
+            "above_floor": len(sorted_cands),
+            "gate_passed": len(gate_passed),
+            "gate_rejected": rejected_n,
+            "sector_skipped": sector_skipped,
+            "accepted": len(accepted),
+            "scan_universe_size": len(scan_universe),
+        })
         print(f"[SHADOW] {len(sorted_cands)} signaux ≥ {SCORE_FLOOR} → quality_gate {len(gate_passed)} (rejetés {rejected_n}) → sector_filter {len(accepted)} (skipped {sector_skipped})", flush=True)
 
         # 7. Ouvrir positions — score-weighted sizing (v2) × size_factor (rotation)
