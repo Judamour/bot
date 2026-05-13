@@ -12,16 +12,22 @@ from __future__ import annotations
 SCORE_FLOOR = 65              # G1: signal must score ≥ this
 COOLDOWN_DAYS = 5             # G4: forbid re-entry on a symbol N days after a stop
 
+# Active detectors (subset of shadow.strategies.ALL_DETECTORS).
+# v2 iter-1: dropping supertrend + mean_reversion which bleed on 4h
+# (300 trades 27% win -$38, 128 trades 24% win -$21). Keep trend_multi_asset
+# (89 trades 34% win +$68), donchian, momentum.
+ACTIVE_DETECTORS = ("trend_multi_asset", "donchian", "momentum")
+
 # ── Concentration / sizing ───────────────────────────────────────────────────
 TOP_N_SIGNALS = 3             # number of candidates considered per cycle (top by score)
 MAX_OPEN_POSITIONS = 10       # hard cap on concurrent positions across cycles
-WEIGHT_BY_RANK = [0.30, 0.20, 0.15]  # % of available cash by rank in the cycle's top-3
-                                      # remainder ≥35% stays as cash buffer
+WEIGHT_BY_RANK = [0.45, 0.30, 0.15]  # % of available cash by rank in the cycle's top-3
+                                      # total 90%, leaves 10% cash buffer
 RISK_PARITY_PCT_FALLBACK = 0.01      # fallback if score-weighted sizing not applicable
 
 # ── Trailing stop adaptatif ──────────────────────────────────────────────────
-ATR_MULT_STOP_INIT = 1.5      # initial stop = entry - 1.5 × ATR(14)
-ATR_MULT_TRAIL = 3.0          # trailing widens to 3.0 × ATR once position is up > +5%
+ATR_MULT_STOP_INIT = 3.0      # initial stop = entry - 3.0 × ATR(14) (wider, matches Bot A)
+ATR_MULT_TRAIL = 4.0          # trailing widens to 4.0 × ATR once position is up > +5%
 PROFIT_LOOSEN_PCT = 0.05      # threshold to switch from tight → loose trailing
 
 # ── Régime SHIELD ────────────────────────────────────────────────────────────

@@ -1,27 +1,34 @@
-"""Tests for shadow/sizing.py — score-weighted position sizing."""
+"""Tests for shadow/sizing.py — score-weighted position sizing.
+
+Tests are parameterized on WEIGHT_BY_RANK so they survive tuning changes.
+"""
 import pytest
 from shadow.sizing import compute_size, SizeResult
+from shadow.constants_v2 import WEIGHT_BY_RANK
 
 
-def test_top_1_gets_30_pct():
+def test_top_1_uses_rank_0_weight():
+    expected_notional = 100_000.0 * WEIGHT_BY_RANK[0]
     res = compute_size(rank=0, cash=100_000.0, entry_price=100.0)
-    assert res.notional == pytest.approx(30_000.0)
-    assert res.qty == pytest.approx(300.0)
+    assert res.notional == pytest.approx(expected_notional)
+    assert res.qty == pytest.approx(expected_notional / 100.0)
 
 
-def test_top_2_gets_20_pct():
+def test_top_2_uses_rank_1_weight():
+    expected_notional = 100_000.0 * WEIGHT_BY_RANK[1]
     res = compute_size(rank=1, cash=100_000.0, entry_price=100.0)
-    assert res.notional == pytest.approx(20_000.0)
+    assert res.notional == pytest.approx(expected_notional)
 
 
-def test_top_3_gets_15_pct():
+def test_top_3_uses_rank_2_weight():
+    expected_notional = 100_000.0 * WEIGHT_BY_RANK[2]
     res = compute_size(rank=2, cash=100_000.0, entry_price=100.0)
-    assert res.notional == pytest.approx(15_000.0)
+    assert res.notional == pytest.approx(expected_notional)
 
 
 def test_rank_out_of_range_returns_zero():
-    """rank >= 3 → no position."""
-    res = compute_size(rank=3, cash=100_000.0, entry_price=100.0)
+    """rank >= len(WEIGHT_BY_RANK) → no position."""
+    res = compute_size(rank=len(WEIGHT_BY_RANK), cash=100_000.0, entry_price=100.0)
     assert res.qty == 0.0
 
 
@@ -36,7 +43,9 @@ def test_zero_entry_price_returns_zero():
     assert res.qty == 0.0
 
 
-def test_total_top_3_capped_at_65_pct():
-    """Sum of top-3 weights = 30 + 20 + 15 = 65, leaves 35% cash buffer."""
-    total = sum(compute_size(r, 100_000.0, 100.0).notional for r in range(3))
-    assert total == pytest.approx(65_000.0)
+def test_total_top_n_leaves_cash_buffer():
+    """Sum of top-N weights should be < 1.0 (cash buffer for fees + slippage)."""
+    total_pct = sum(WEIGHT_BY_RANK)
+    total_notional = sum(compute_size(r, 100_000.0, 100.0).notional for r in range(len(WEIGHT_BY_RANK)))
+    assert total_notional == pytest.approx(100_000.0 * total_pct)
+    assert total_pct < 1.0, f"WEIGHT_BY_RANK total {total_pct:.2f} leaves no cash buffer"

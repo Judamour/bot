@@ -30,7 +30,11 @@ from shadow.scorer import compute_score, Signal
 from shadow.constants_v2 import (
     SCORE_FLOOR, TOP_N_SIGNALS, MAX_OPEN_POSITIONS,
     ATR_MULT_STOP_INIT, ATR_MULT_TRAIL, PROFIT_LOOSEN_PCT,
+    ACTIVE_DETECTORS,
 )
+
+# Filter detectors to the active subset (drops noisy 4h detectors per v2 iter-1)
+ALL_DETECTORS = [d for d in ALL_DETECTORS if d.__name__.replace("detect_", "") in ACTIVE_DETECTORS]
 from shadow.regime import shield_active
 from shadow.quality_gate import passes as gate_passes
 from shadow.risk_guard import RiskGuard
