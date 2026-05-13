@@ -32,8 +32,7 @@ from shadow.scorer import compute_score, Signal
 from shadow.constants_v2 import (
     SCORE_FLOOR, TOP_N_SIGNALS, MAX_OPEN_POSITIONS,
     ATR_MULT_STOP_INIT, ATR_MULT_TRAIL, PROFIT_LOOSEN_PCT,
-    ACTIVE_DETECTORS, DEFENSIVE_SYMBOLS, DEFENSIVE_AND_INVERSE,
-    INVERSE_ETFS, EQUITY_BEAR_SIZE_FACTOR,
+    ACTIVE_DETECTORS, DEFENSIVE_SYMBOLS, EQUITY_BEAR_SIZE_FACTOR,
     SECTOR_MAP, MAX_PER_SECTOR, MACRO_EXIT_PROFIT_PCT,
 )
 
@@ -62,10 +61,6 @@ CRYPTO = {"BTC/USD": "BTC-USD", "ETH/USD": "ETH-USD", "SOL/USD": "SOL-USD",
 STOCKS = ["NVDA", "GOOGL", "META", "PLTR", "CRWD", "LLY", "ABBV", "XOM", "CVX",
           "JPM", "BAC", "KO", "PG", "SPY", "QQQ", "GLD"]
 ALL_SYMBOLS = list(CRYPTO.keys()) + STOCKS
-# Note: SQQQ/SH inverse ETFs tested iter-6 #4 — only 1 SH trade fired in 2y3m bear
-# with -$5 PnL. Trigger price>SMA50>SMA200 too strict given inverse ETF volatility.
-# Dropped to keep universe simple. Detector code stays in shadow/strategies.py
-# for potential re-activation with a different trigger (e.g. RSI breakdown).
 
 
 # ── OHLCV cache (iter-5 #16) ────────────────────────────────────────────────

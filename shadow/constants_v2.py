@@ -46,14 +46,17 @@ VIX_SHIELD_THRESHOLD = 35.0   # VIX > this → SHIELD active (no new entries)
 # ── Defensive rotation (iter-4) ──────────────────────────────────────────────
 # When broad equity is in bear (SPY < SMA200 or QQQ < SMA200), instead of
 # going fully dormant we restrict scanning to assets that historically
-# perform in bear/crisis regimes (gold, healthcare, defensive consumer, energy)
-# plus INVERSE_ETFS (SQQQ = -3× QQQ, SH = -1× SPY) which profit from declines.
+# perform in bear/crisis regimes:
+#   GLD          — gold, flight-to-safety
+#   KO, PG       — defensive consumer (low beta, stable earnings)
+#   LLY, ABBV    — healthcare (defensive, structural demand)
+#   XOM, CVX     — energy (inflation hedge)
+#
+# iter-7 cleanup: SQQQ/SH inverse ETFs dropped (decay + non-profitable).
+# TLT tested but dropped: displaced crypto/tech slots in bull (-$615
+# indirectly), no help in bear. Trend filter doesn't capture bond macro.
+# Long-only design preferred for simplicity + bounded loss.
 DEFENSIVE_SYMBOLS = ("GLD", "KO", "PG", "LLY", "ABBV", "XOM", "CVX")
-# Inverse ETFs (iter-6 #4): only tradeable in equity_bear (handled by detector).
-# SQQQ = -3× QQQ daily, SH = -1× SPY daily. KNOWN RISK: volatility decay on
-# long holds. Trailing stops + cooldowns limit exposure window.
-INVERSE_ETFS = ("SQQQ", "SH")
-DEFENSIVE_AND_INVERSE = DEFENSIVE_SYMBOLS + INVERSE_ETFS  # equity_bear scan universe
 EQUITY_BEAR_SIZE_FACTOR = 0.5  # half-position when in equity-bear scan mode
 
 # ── Diversification (iter-6 #2) ──────────────────────────────────────────────
@@ -81,9 +84,6 @@ SECTOR_MAP = {
     "SPY": "index", "QQQ": "index",
     # Gold (true diversifier)
     "GLD": "gold",
-    # Inverse ETFs (iter-6 #4): own sector to allow 1 inverse position alongside defensives
-    "SQQQ": "inverse",
-    "SH": "inverse",
 }
 MAX_PER_SECTOR = 1  # max 1 position per sector per cycle
 
