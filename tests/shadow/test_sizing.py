@@ -7,23 +7,12 @@ from shadow.sizing import compute_size, SizeResult
 from shadow.constants_v2 import WEIGHT_BY_RANK
 
 
-def test_top_1_uses_rank_0_weight():
-    expected_notional = 100_000.0 * WEIGHT_BY_RANK[0]
-    res = compute_size(rank=0, cash=100_000.0, entry_price=100.0)
+@pytest.mark.parametrize("rank", range(len(WEIGHT_BY_RANK)))
+def test_each_rank_uses_its_weight(rank: int):
+    expected_notional = 100_000.0 * WEIGHT_BY_RANK[rank]
+    res = compute_size(rank=rank, cash=100_000.0, entry_price=100.0)
     assert res.notional == pytest.approx(expected_notional)
     assert res.qty == pytest.approx(expected_notional / 100.0)
-
-
-def test_top_2_uses_rank_1_weight():
-    expected_notional = 100_000.0 * WEIGHT_BY_RANK[1]
-    res = compute_size(rank=1, cash=100_000.0, entry_price=100.0)
-    assert res.notional == pytest.approx(expected_notional)
-
-
-def test_top_3_uses_rank_2_weight():
-    expected_notional = 100_000.0 * WEIGHT_BY_RANK[2]
-    res = compute_size(rank=2, cash=100_000.0, entry_price=100.0)
-    assert res.notional == pytest.approx(expected_notional)
 
 
 def test_rank_out_of_range_returns_zero():
