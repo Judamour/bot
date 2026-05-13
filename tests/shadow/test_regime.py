@@ -1,5 +1,5 @@
-"""Tests for shadow/regime.py — SHIELD truth table."""
-from shadow.regime import shield_active
+"""Tests for shadow/regime.py — SHIELD + equity_bear truth tables."""
+from shadow.regime import shield_active, equity_bear_active
 
 
 def test_normal_market_no_shield():
@@ -42,3 +42,20 @@ def test_missing_keys_safe_defaults():
     """Missing macro keys → assume neutre (no SHIELD)."""
     assert shield_active({}) is False
     assert shield_active({"vix": 18}) is False
+
+
+# ── equity_bear_active ──────────────────────────────────────────────────────
+def test_equity_bear_fires_when_qqq_bad():
+    """QQQ below SMA200 → equity bear (rotate to defensives)."""
+    assert equity_bear_active({"qqq_regime_ok": False}) is True
+
+
+def test_equity_bear_silent_when_qqq_ok():
+    """QQQ above SMA200 → no equity bear, scan full universe."""
+    assert equity_bear_active({"qqq_regime_ok": True}) is False
+
+
+def test_equity_bear_default_no_trigger():
+    """Missing qqq_regime_ok → default True (no bear), prevents false-positive rotation."""
+    assert equity_bear_active({}) is False
+    assert equity_bear_active({"vix": 22, "btc_trend": "bull"}) is False

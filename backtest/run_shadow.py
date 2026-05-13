@@ -30,12 +30,12 @@ from shadow.scorer import compute_score, Signal
 from shadow.constants_v2 import (
     SCORE_FLOOR, TOP_N_SIGNALS, MAX_OPEN_POSITIONS,
     ATR_MULT_STOP_INIT, ATR_MULT_TRAIL, PROFIT_LOOSEN_PCT,
-    ACTIVE_DETECTORS,
+    ACTIVE_DETECTORS, DEFENSIVE_SYMBOLS, EQUITY_BEAR_SIZE_FACTOR,
 )
 
 # Filter detectors to the active subset (drops noisy 4h detectors per v2 iter-1)
 ALL_DETECTORS = [d for d in ALL_DETECTORS if d.__name__.replace("detect_", "") in ACTIVE_DETECTORS]
-from shadow.regime import shield_active
+from shadow.regime import shield_active, equity_bear_active
 from shadow.quality_gate import passes as gate_passes
 from shadow.risk_guard import RiskGuard
 from shadow.sizing import compute_size
@@ -43,14 +43,14 @@ from strategies.supertrend import compute_atr
 from backtest.multi_backtest import compute_metrics, INITIAL
 
 # ── Config ───────────────────────────────────────────────────────────────────
-START = "2023-04-29"
+START = "2022-01-03"            # extended to include 2022 tech bear (QQQ -33%)
 END = "2026-04-29"
 INITIAL_CAPITAL = INITIAL  # 1000 from multi_backtest
 FEE = 0.0026
 SLIPPAGE = 0.001
 
-DAYS_4H = 365 * 3 + 60          # 3 ans 4h + warmup
-DAYS_1D = 365 * 3 + 220         # 3 ans + 220 jours pour SMA200
+DAYS_4H = 365 * 5               # 5 ans 4h + warmup pour couvrir 2022-01 → 2026-04
+DAYS_1D = 365 * 5 + 220         # 5 ans + 220 jours pour SMA200 warmup
 
 # Univers identique au prod (21 actifs Alpaca crisis-alpha)
 CRYPTO = {"BTC/USD": "BTC-USD", "ETH/USD": "ETH-USD", "SOL/USD": "SOL-USD",
@@ -106,6 +106,12 @@ def main():
     equity_curve = []
     equity_ts = []
 
+    # Diagnostic counters (iter-4)
+    n_cycles_total = 0
+    n_cycles_shielded = 0
+    n_cycles_rotation = 0
+    n_trades_in_rotation = 0
+
     # Risk guard state (in-memory only for backtest — no persistence)
     rg = RiskGuard(state_path="/tmp/__backtest_risk_state__.json",
                    peak_equity=INITIAL_CAPITAL,
@@ -122,10 +128,20 @@ def main():
             if len(spy_slice) >= 200:
                 ctx["qqq_regime_ok"] = bool(spy_slice["close"].iloc[-1] > spy_slice["close"].tail(200).mean())
 
-        # 2. Check halt / SHIELD
+        # 2. Check halt / SHIELD / equity_bear rotation
         halted = rg.is_halted(now=bar_ts)
         shielded = shield_active(ctx)
+        equity_bear = equity_bear_active(ctx)
         skip_new_entries = halted or shielded
+        # When in equity bear (and not in full SHIELD), rotate to defensives only
+        # with reduced sizing — instead of going fully dormant.
+        rotate_defensives = equity_bear and not skip_new_entries
+        size_factor = EQUITY_BEAR_SIZE_FACTOR if rotate_defensives else 1.0
+        n_cycles_total += 1
+        if shielded:
+            n_cycles_shielded += 1
+        if rotate_defensives:
+            n_cycles_rotation += 1
 
         # 3. Update trailing stops + check stops for open positions
         for sym in list(positions.keys()):
@@ -173,8 +189,15 @@ def main():
             continue
 
         # 4. Scan signals
+        # In equity_bear regime, restrict scan to DEFENSIVE_SYMBOLS subset
+        # (gold, healthcare, defensive consumer, energy) — these historically
+        # perform when broad equity is in bear.
+        scan_universe = (
+            [s for s in ALL_SYMBOLS if s in DEFENSIVE_SYMBOLS]
+            if rotate_defensives else ALL_SYMBOLS
+        )
         candidates = []
-        for sym in ALL_SYMBOLS:
+        for sym in scan_universe:
             if sym in positions or sym not in cache_4h:
                 continue
             df_4h = cache_4h[sym]
@@ -205,12 +228,15 @@ def main():
                 best_by_symbol[sig.symbol] = sig
         sorted_cands = sorted(best_by_symbol.values(), key=lambda s: s.score, reverse=True)
 
-        # 6. Quality gate + size by rank
+        # 6. Quality gate + size by rank (× size_factor when in defensive rotation)
         accepted = [s for s in sorted_cands if gate_passes(s, rg, now=bar_ts)][:TOP_N_SIGNALS]
         for rank, sig in enumerate(accepted):
             if len(positions) >= MAX_OPEN_POSITIONS:
                 break
             size_res = compute_size(rank=rank, cash=capital, entry_price=sig.entry_price)
+            if size_factor != 1.0:
+                size_res = type(size_res)(qty=size_res.qty * size_factor,
+                                          notional=size_res.notional * size_factor)
             if size_res.qty <= 0:
                 continue
             entry_eff = sig.entry_price * (1 + SLIPPAGE)
@@ -220,6 +246,8 @@ def main():
             if total > capital:
                 continue
             capital -= total
+            if rotate_defensives:
+                n_trades_in_rotation += 1
             stop_initial = entry_eff - ATR_MULT_STOP_INIT * sig.atr
             positions[sig.symbol] = {
                 "strategy": sig.strategy, "score": sig.score,
@@ -300,6 +328,25 @@ def main():
         wins = sum(1 for t in ts if t["pnl"] > 0)
         total_pnl = sum(t["pnl"] for t in ts)
         print(f"  {s:18} : {len(ts):4} trades | win {wins/len(ts)*100:.1f}% | PnL ${total_pnl:+,.0f}")
+
+    # Breakdown par symbole
+    by_sym = {}
+    for t in trades:
+        by_sym.setdefault(t["symbol"], []).append(t)
+    print("\nTrades par symbole (TOUS, triés par PnL) :")
+    sym_pnl = [(sym, sum(t["pnl"] for t in ts), len(ts),
+                sum(1 for t in ts if t["pnl"] > 0))
+               for sym, ts in by_sym.items()]
+    for sym, pnl, n, wins in sorted(sym_pnl, key=lambda x: -x[1]):
+        tag = " [DEF]" if sym in ("GLD", "KO", "PG", "LLY", "ABBV", "XOM", "CVX") else ""
+        print(f"  {sym:10} : {n:3} trades | win {wins/n*100:5.1f}% | PnL ${pnl:+,.0f}{tag}")
+
+    # Régime diagnostics
+    print(f"\nRégime cycles :")
+    print(f"  Total cycles   : {n_cycles_total}")
+    print(f"  SHIELD active  : {n_cycles_shielded} ({n_cycles_shielded/max(n_cycles_total,1)*100:.1f}%)")
+    print(f"  Rotation déf.  : {n_cycles_rotation} ({n_cycles_rotation/max(n_cycles_total,1)*100:.1f}%)")
+    print(f"  Trades en rotation : {n_trades_in_rotation} sur {len(trades)} total")
 
     # Comparaison références
     print(f"\n Références prod :")

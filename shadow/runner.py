@@ -39,8 +39,10 @@ from shadow.constants_v2 import (
     ATR_MULT_STOP_INIT,
     ATR_MULT_TRAIL,
     PROFIT_LOOSEN_PCT,
+    DEFENSIVE_SYMBOLS,
+    EQUITY_BEAR_SIZE_FACTOR,
 )
-from shadow.regime import shield_active
+from shadow.regime import shield_active, equity_bear_active
 from shadow.quality_gate import passes as gate_passes
 from shadow.risk_guard import RiskGuard
 from shadow.sizing import compute_size
@@ -161,15 +163,22 @@ def run_cycle():
     }
     print(f"[SHADOW] VIX={ctx['vix']:.1f} BTC={ctx['btc_trend']} QQQ_ok={ctx['qqq_ok']}", flush=True)
 
-    # 2b. SHIELD regime + halt check — skip new entries if either active
-    shielded = shield_active({"vix": ctx["vix"], "btc_trend": ctx["btc_trend"],
-                              "qqq_regime_ok": ctx["qqq_ok"]})
+    # 2b. SHIELD regime + halt check — skip new entries if either active.
+    # equity_bear (lighter trigger: just SPY/QQQ < SMA200) rotates to defensives.
+    macro_ctx = {"vix": ctx["vix"], "btc_trend": ctx["btc_trend"],
+                 "qqq_regime_ok": ctx["qqq_ok"]}
+    shielded = shield_active(macro_ctx)
     halted = rg.is_halted(now=now)
     skip_new_entries = shielded or halted
+    equity_bear = equity_bear_active(macro_ctx)
+    rotate_defensives = equity_bear and not skip_new_entries
+    size_factor = EQUITY_BEAR_SIZE_FACTOR if rotate_defensives else 1.0
     if shielded:
         print(f"[SHADOW] SHIELD active (VIX>{macro.get('vix', 0):.1f} or bear macro) — no new entries", flush=True)
     if halted:
         print(f"[SHADOW] HALT active until {rg.halt_until} (MaxDD breached) — no new entries", flush=True)
+    if rotate_defensives:
+        print(f"[SHADOW] EQUITY_BEAR — rotation défensive: scan restreint à {DEFENSIVE_SYMBOLS}, sizing × {size_factor}", flush=True)
 
     # 3. Fetch OHLCV
     symbols = list(getattr(config, "SYMBOLS", []) or
@@ -246,8 +255,13 @@ def run_cycle():
         print(f"[SHADOW] skip scan (shielded={shielded} halted={halted})", flush=True)
     else:
         # 6a. Scan signaux pour symboles sans position et sans ordre buy en cours
+        # En equity_bear: scan restreint au subset défensif (gold/healthcare/energy/consumer)
+        scan_universe = (
+            [s for s in symbols if s in DEFENSIVE_SYMBOLS]
+            if rotate_defensives else symbols
+        )
         candidates = []
-        for sym in symbols:
+        for sym in scan_universe:
             alp_sym = _alpaca_symbol(sym)
             if alp_sym in pos_by_sym or alp_sym in pending_buy_syms:
                 continue
@@ -279,13 +293,16 @@ def run_cycle():
         rejected_n = len(sorted_cands) - len([s for s in sorted_cands if gate_passes(s, rg, now=now)])
         print(f"[SHADOW] {len(sorted_cands)} signaux ≥ {SCORE_FLOOR} → {len(accepted)} acceptés via quality gate ({rejected_n} rejetés)", flush=True)
 
-        # 7. Ouvrir positions — score-weighted sizing (v2)
+        # 7. Ouvrir positions — score-weighted sizing (v2) × size_factor (rotation)
         n_open = len(pos_by_sym)
         for rank, sig in enumerate(accepted):
             if n_open >= MAX_OPEN_POSITIONS:
                 break
-            # Score-weighted sizing : WEIGHT_BY_RANK[rank] × cash disponible
+            # Score-weighted sizing : WEIGHT_BY_RANK[rank] × cash dispo × size_factor
             size_res = compute_size(rank=rank, cash=cash, entry_price=sig.entry_price)
+            if size_factor != 1.0:
+                size_res = type(size_res)(qty=size_res.qty * size_factor,
+                                          notional=size_res.notional * size_factor)
             if size_res.qty <= 0:
                 continue
             # Floor décimales

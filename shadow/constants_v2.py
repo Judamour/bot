@@ -33,6 +33,14 @@ PROFIT_LOOSEN_PCT = 0.05      # threshold to switch from tight → loose trailin
 # ── Régime SHIELD ────────────────────────────────────────────────────────────
 VIX_SHIELD_THRESHOLD = 30.0   # VIX > this → SHIELD active (no new entries)
 
+# ── Defensive rotation (iter-4) ──────────────────────────────────────────────
+# When broad equity is in bear (SPY < SMA200 or QQQ < SMA200), instead of
+# going fully dormant we restrict scanning to assets that historically
+# perform in bear/crisis regimes (gold, healthcare, defensive consumer, energy)
+# and reduce sizing as a prudent measure.
+DEFENSIVE_SYMBOLS = ("GLD", "KO", "PG", "LLY", "ABBV", "XOM", "CVX")
+EQUITY_BEAR_SIZE_FACTOR = 0.5  # half-position when in equity-bear scan mode
+
 # ── Risk guard (MaxDD halt) ──────────────────────────────────────────────────
 HALT_DD_PCT = -0.15           # rolling DD ≤ this → halt new entries
 HALT_DURATION_DAYS = 7        # halt lasts this many days after triggering
