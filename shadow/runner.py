@@ -29,27 +29,35 @@ except Exception:
 import config
 from data.market_snapshot import fetch_macro_context, fetch_ohlcv_cache
 from shadow.scorer import compute_score
-from shadow.strategies import ALL_DETECTORS
+from shadow.strategies import ALL_DETECTORS as _ALL_DETECTORS
 from shadow import broker
+from shadow.constants_v2 import (
+    SCORE_FLOOR,
+    TOP_N_SIGNALS,
+    MAX_OPEN_POSITIONS,
+    ACTIVE_DETECTORS,
+    ATR_MULT_STOP_INIT,
+    ATR_MULT_TRAIL,
+    PROFIT_LOOSEN_PCT,
+)
+from shadow.regime import shield_active
+from shadow.quality_gate import passes as gate_passes
+from shadow.risk_guard import RiskGuard
+from shadow.sizing import compute_size
+
+# Filter detectors to v2 active subset (drops bleeders like supertrend, mean_reversion on 4h)
+ALL_DETECTORS = [d for d in _ALL_DETECTORS
+                 if d.__name__.replace("detect_", "") in ACTIVE_DETECTORS]
 
 # Paths
 LOG_DIR = "logs/shadow"
 DECISIONS_LOG = f"{LOG_DIR}/decisions.jsonl"
 EQUITY_LOG = f"{LOG_DIR}/equity.jsonl"
 LOCAL_META = f"{LOG_DIR}/meta.json"  # méta locale (stops trailing, etc.)
+RISK_STATE = f"{LOG_DIR}/risk_state.json"
 
 # Cycle config — synchronisé sur les heartbeats prod (03/07/11/15/19/23 UTC)
 CYCLE_HOURS_UTC = [3, 7, 11, 15, 19, 23]
-MIN_SCORE = 55.0
-TOP_N_SIGNALS = 5
-
-# Sizing : risk parity
-RISK_PER_TRADE_PCT = 0.01     # 1% du capital risqué
-MAX_POSITION_PCT = 0.10       # max 10% capital par position
-MAX_OPEN_POSITIONS = 10
-
-# Trailing
-ATR_MULT_TRAIL = 4.0
 
 _stop = False
 
@@ -109,7 +117,8 @@ def _alpaca_symbol(sym: str) -> str:
 
 
 def run_cycle():
-    print(f"\n=== [SHADOW] Cycle {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')} UTC ===", flush=True)
+    now = datetime.now(timezone.utc)
+    print(f"\n=== [SHADOW] Cycle {now.strftime('%Y-%m-%d %H:%M')} UTC ===", flush=True)
 
     # 1. Account state via Alpaca shadow
     try:
@@ -126,6 +135,19 @@ def run_cycle():
     meta = load_meta()
     pos_meta = meta.setdefault("positions_meta", {})
 
+    # 1b. Risk guard — MaxDD halt + cooldown tracking (v2)
+    rg = RiskGuard.load(state_path=RISK_STATE, initial_equity=equity, now=now)
+    rg.update_equity(equity, now=now)
+
+    # Detect positions closed since last cycle (stop fired or manual exit) → cooldown
+    closed_syms = set(pos_meta.keys()) - set(pos_by_sym.keys())
+    for sym in closed_syms:
+        rg.register_stop(sym, pnl=0.0, now=now)  # pnl=0 placeholder, only date matters for G4
+        log_event("exit_detected", {"symbol": sym, "reason": "absent_from_alpaca"})
+        del pos_meta[sym]
+    if closed_syms:
+        print(f"[SHADOW] {len(closed_syms)} positions closed → cooldown: {sorted(closed_syms)}", flush=True)
+
     # 2. Macro context
     try:
         macro = fetch_macro_context()
@@ -139,6 +161,16 @@ def run_cycle():
     }
     print(f"[SHADOW] VIX={ctx['vix']:.1f} BTC={ctx['btc_trend']} QQQ_ok={ctx['qqq_ok']}", flush=True)
 
+    # 2b. SHIELD regime + halt check — skip new entries if either active
+    shielded = shield_active({"vix": ctx["vix"], "btc_trend": ctx["btc_trend"],
+                              "qqq_regime_ok": ctx["qqq_ok"]})
+    halted = rg.is_halted(now=now)
+    skip_new_entries = shielded or halted
+    if shielded:
+        print(f"[SHADOW] SHIELD active (VIX>{macro.get('vix', 0):.1f} or bear macro) — no new entries", flush=True)
+    if halted:
+        print(f"[SHADOW] HALT active until {rg.halt_until} (MaxDD breached) — no new entries", flush=True)
+
     # 3. Fetch OHLCV
     symbols = list(getattr(config, "SYMBOLS", []) or
                    (list(getattr(config, "CRYPTO", [])) + list(getattr(config, "STOCKS", []))))
@@ -150,7 +182,7 @@ def run_cycle():
         return
     print(f"[SHADOW] OHLCV: {len(cache_4h)} 4h | {len(cache_1d)} 1d", flush=True)
 
-    # 4. Trailing stops update sur positions ouvertes
+    # 4. Trailing stops update sur positions ouvertes (adaptive — v2)
     from strategies.supertrend import compute_atr
     for sym, p in list(pos_by_sym.items()):
         # Alpaca retourne "BTCUSD" (sans slash) ; notre cache OHLCV utilise "BTC/USD"
@@ -166,8 +198,15 @@ def run_cycle():
         close = float(df["close"].iloc[-1])
         if atr <= 0:
             continue
-        new_stop = round(close - ATR_MULT_TRAIL * atr, 2)
+        # Adaptive trailing: tight (3.0x) until +5% profit, then loosen to 5.0x
         m = pos_meta.get(sym, {})
+        entry = float(m.get("entry_price") or 0)
+        if entry > 0:
+            pnl_pct = (close - entry) / entry
+            atr_mult = ATR_MULT_TRAIL if pnl_pct >= PROFIT_LOOSEN_PCT else ATR_MULT_STOP_INIT
+        else:
+            atr_mult = ATR_MULT_STOP_INIT  # entry unknown (queued) → use init
+        new_stop = round(close - atr_mult * atr, 2)
         old_stop = m.get("stop", 0)
         if new_stop > old_stop:
             # Annuler ancien stop si présent + replacer
@@ -202,103 +241,113 @@ def run_cycle():
         print(f"[SHADOW] open_orders fetch échec: {e} — skip cycle pour éviter doublons", flush=True)
         return
 
-    # 6. Scan signaux pour symboles sans position et sans ordre buy en cours
-    candidates = []
-    for sym in symbols:
-        alp_sym = _alpaca_symbol(sym)
-        if alp_sym in pos_by_sym or alp_sym in pending_buy_syms:
-            continue
-        df_4h = cache_4h.get(sym)
-        df_1d = cache_1d.get(sym)
-        if df_4h is None:
-            continue
-        for detector in ALL_DETECTORS:
-            try:
-                sig = detector(sym, df_4h, df_1d)
-                if sig is None:
-                    continue
-                sig.score = compute_score(sig, ctx)
-                if sig.score >= MIN_SCORE:
-                    candidates.append(sig)
-            except Exception as e:
-                print(f"[SHADOW] detector {detector.__name__} {sym}: {e}", flush=True)
+    # 6. Skip scan if SHIELD or HALT active (v2)
+    if skip_new_entries:
+        print(f"[SHADOW] skip scan (shielded={shielded} halted={halted})", flush=True)
+    else:
+        # 6a. Scan signaux pour symboles sans position et sans ordre buy en cours
+        candidates = []
+        for sym in symbols:
+            alp_sym = _alpaca_symbol(sym)
+            if alp_sym in pos_by_sym or alp_sym in pending_buy_syms:
+                continue
+            df_4h = cache_4h.get(sym)
+            df_1d = cache_1d.get(sym)
+            if df_4h is None:
+                continue
+            for detector in ALL_DETECTORS:
+                try:
+                    sig = detector(sym, df_4h, df_1d)
+                    if sig is None:
+                        continue
+                    sig.score = compute_score(sig, ctx)
+                    if sig.score >= SCORE_FLOOR:
+                        candidates.append(sig)
+                except Exception as e:
+                    print(f"[SHADOW] detector {detector.__name__} {sym}: {e}", flush=True)
 
-    # Dédup intra-cycle par symbole : un actif ne peut générer qu'UN seul ordre par cycle
-    # même si plusieurs détecteurs firent dessus. On garde le meilleur score.
-    best_by_symbol: dict[str, "Signal"] = {}
-    for sig in candidates:
-        if sig.symbol not in best_by_symbol or sig.score > best_by_symbol[sig.symbol].score:
-            best_by_symbol[sig.symbol] = sig
-    candidates = sorted(best_by_symbol.values(), key=lambda s: s.score, reverse=True)
-    print(f"[SHADOW] {len(candidates)} signaux ≥ {MIN_SCORE} (dédup, pending_buys exclus={len(pending_buy_syms)})", flush=True)
+        # Dédup intra-cycle par symbole : un actif ne peut générer qu'UN seul ordre par cycle.
+        # On garde le meilleur score.
+        best_by_symbol: dict[str, "Signal"] = {}
+        for sig in candidates:
+            if sig.symbol not in best_by_symbol or sig.score > best_by_symbol[sig.symbol].score:
+                best_by_symbol[sig.symbol] = sig
+        sorted_cands = sorted(best_by_symbol.values(), key=lambda s: s.score, reverse=True)
 
-    # 7. Ouvrir positions top N
-    n_open = len(pos_by_sym)
-    for sig in candidates[:TOP_N_SIGNALS]:
-        if n_open >= MAX_OPEN_POSITIONS:
-            break
-        # Sizing risk parity
-        stop_dist = abs(sig.entry_price - sig.stop_price)
-        if stop_dist <= 0:
-            continue
-        risk_eur = equity * RISK_PER_TRADE_PCT
-        size = risk_eur / stop_dist
-        max_size = (equity * MAX_POSITION_PCT) / sig.entry_price
-        size = min(size, max_size)
-        # Floor décimales
-        is_crypto = "/" in sig.symbol
-        import math
-        decimals = 6 if is_crypto else 5
-        factor = 10 ** decimals
-        size = math.floor(size * factor) / factor
-        if size <= 0:
-            continue
-        order_value = size * sig.entry_price
-        if is_crypto and order_value < 10:
-            continue  # min Alpaca crypto
+        # 6b. Quality gate (G1 score, G2 MTF, G3 volume, G4 cooldown) puis top-N
+        accepted = [s for s in sorted_cands if gate_passes(s, rg, now=now)][:TOP_N_SIGNALS]
+        rejected_n = len(sorted_cands) - len([s for s in sorted_cands if gate_passes(s, rg, now=now)])
+        print(f"[SHADOW] {len(sorted_cands)} signaux ≥ {SCORE_FLOOR} → {len(accepted)} acceptés via quality gate ({rejected_n} rejetés)", flush=True)
 
-        # Place market buy sur compte shadow
-        res = broker.market_buy(sig.symbol, size)
-        if not res.get("ok"):
-            print(f"[SHADOW] BUY {sig.symbol} échec: {res.get('error')}", flush=True)
-            continue
+        # 7. Ouvrir positions — score-weighted sizing (v2)
+        n_open = len(pos_by_sym)
+        for rank, sig in enumerate(accepted):
+            if n_open >= MAX_OPEN_POSITIONS:
+                break
+            # Score-weighted sizing : WEIGHT_BY_RANK[rank] × cash disponible
+            size_res = compute_size(rank=rank, cash=cash, entry_price=sig.entry_price)
+            if size_res.qty <= 0:
+                continue
+            # Floor décimales
+            is_crypto = "/" in sig.symbol
+            import math
+            decimals = 6 if is_crypto else 5
+            factor = 10 ** decimals
+            size = math.floor(size_res.qty * factor) / factor
+            if size <= 0:
+                continue
+            order_value = size * sig.entry_price
+            if is_crypto and order_value < 10:
+                continue  # min Alpaca crypto
 
-        fill_price = res.get("filled_avg") or sig.entry_price
-        fill_qty = res.get("filled_qty") or size
-        status = res.get("status", "filled")
-        queued = (status != "filled")
+            # Stop initial = entry - ATR_MULT_STOP_INIT × ATR (override sig.stop_price)
+            stop_initial = round(sig.entry_price - ATR_MULT_STOP_INIT * sig.atr, 2)
 
-        alp_sym = _alpaca_symbol(sig.symbol)
-        pos_meta[alp_sym] = {
-            "strategy": sig.strategy,
-            "score": sig.score,
-            "entry_price": fill_price if not queued else None,
-            "stop": sig.stop_price,
-            "stop_order_id": None,
-            "buy_order_id": res.get("id"),
-            "queued": queued,
-            "entry_date": datetime.now(timezone.utc).isoformat(),
-            "rationale": sig.rationale,
-        }
-        # Si ordre fillé immédiatement (crypto ou marché stock ouvert), placer le stop maintenant.
-        # Sinon (queued après market close), le stop sera placé au prochain cycle quand on
-        # verra la position effective dans /v2/positions.
-        if not queued:
-            stop_res = broker.place_stop(sig.symbol, fill_qty, sig.stop_price)
-            pos_meta[alp_sym]["stop_order_id"] = stop_res.get("id") if stop_res.get("ok") else None
+            # Place market buy sur compte shadow
+            res = broker.market_buy(sig.symbol, size)
+            if not res.get("ok"):
+                print(f"[SHADOW] BUY {sig.symbol} échec: {res.get('error')}", flush=True)
+                continue
 
-        log_event("entry", {
-            "symbol": sig.symbol, "strategy": sig.strategy, "score": round(sig.score, 1),
-            "size": fill_qty, "price": fill_price, "stop": sig.stop_price,
-            "status": status,
-            "risk_eur": round(risk_eur, 2), "rationale": sig.rationale,
-        })
-        suffix = f" [QUEUED — fill prochaine session]" if queued else ""
-        print(f"[SHADOW] BUY {sig.symbol} ({sig.strategy}) score={sig.score:.1f} @ {fill_price:.4f} qty={fill_qty:.6f} stop={sig.stop_price:.4f}{suffix}", flush=True)
-        n_open += 1
+            fill_price = res.get("filled_avg") or sig.entry_price
+            fill_qty = res.get("filled_qty") or size
+            status = res.get("status", "filled")
+            queued = (status != "filled")
 
-    # 7. Sauve meta + log equity
+            alp_sym = _alpaca_symbol(sig.symbol)
+            pos_meta[alp_sym] = {
+                "strategy": sig.strategy,
+                "score": sig.score,
+                "entry_price": fill_price if not queued else None,
+                "stop": stop_initial,
+                "stop_order_id": None,
+                "buy_order_id": res.get("id"),
+                "queued": queued,
+                "entry_date": now.isoformat(),
+                "rationale": sig.rationale,
+                "rank": rank,
+                "notional": round(size_res.notional, 2),
+            }
+            # Si fillé immédiatement, placer le stop. Sinon stop placé au prochain cycle.
+            if not queued:
+                stop_res = broker.place_stop(sig.symbol, fill_qty, stop_initial)
+                pos_meta[alp_sym]["stop_order_id"] = stop_res.get("id") if stop_res.get("ok") else None
+
+            log_event("entry", {
+                "symbol": sig.symbol, "strategy": sig.strategy, "score": round(sig.score, 1),
+                "rank": rank, "weight": size_res.notional / cash if cash > 0 else 0,
+                "size": fill_qty, "price": fill_price, "stop": stop_initial,
+                "status": status,
+                "rationale": sig.rationale,
+            })
+            suffix = f" [QUEUED — fill prochaine session]" if queued else ""
+            print(f"[SHADOW] BUY rank={rank} {sig.symbol} ({sig.strategy}) score={sig.score:.1f} @ {fill_price:.4f} qty={fill_qty:.6f} stop={stop_initial:.4f} notional=${size_res.notional:.0f}{suffix}", flush=True)
+            n_open += 1
+
+    # 8. Sauve meta + persiste risk guard (prune expired entries pour garder l'état compact)
     save_meta(meta)
+    rg.prune_expired(now=now)
+    rg.save()
     try:
         account = broker.get_account()
         equity = float(account.get("equity", 0))
