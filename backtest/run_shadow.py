@@ -17,6 +17,8 @@ import os
 import sys
 import warnings
 import json
+import pickle
+import time
 from datetime import datetime, timezone
 
 import pandas as pd
@@ -60,15 +62,60 @@ STOCKS = ["NVDA", "GOOGL", "META", "PLTR", "CRWD", "LLY", "ABBV", "XOM", "CVX",
 ALL_SYMBOLS = list(CRYPTO.keys()) + STOCKS
 
 
+# ── OHLCV cache (iter-5 #16) ────────────────────────────────────────────────
+# Pickle-based local cache to skip re-fetching the same data across runs.
+# Speeds backtest iteration from ~40s → ~3s when cache is warm.
+# Invalidation: delete backtest/cache/ to force fresh fetch.
+CACHE_DIR = os.path.join(os.path.dirname(__file__), "cache")
+CACHE_TTL_SECONDS = 6 * 3600  # 6h — long enough for iterative tuning sessions
+
+
+def _cache_key(symbol: str, timeframe: str, days: int) -> str:
+    """Safe filename: replace / with _ for crypto pairs."""
+    safe = symbol.replace("/", "_").replace("^", "")
+    return f"{safe}_{timeframe}_{days}"
+
+
+def _cache_load(key: str):
+    """Return cached DataFrame if fresh (< CACHE_TTL_SECONDS old), else None."""
+    path = os.path.join(CACHE_DIR, f"{key}.pkl")
+    if not os.path.exists(path):
+        return None
+    age = time.time() - os.path.getmtime(path)
+    if age >= CACHE_TTL_SECONDS:
+        return None
+    try:
+        with open(path, "rb") as f:
+            return pickle.load(f)
+    except Exception:
+        return None
+
+
+def _cache_save(key: str, value) -> None:
+    os.makedirs(CACHE_DIR, exist_ok=True)
+    path = os.path.join(CACHE_DIR, f"{key}.pkl")
+    try:
+        with open(path, "wb") as f:
+            pickle.dump(value, f, protocol=pickle.HIGHEST_PROTOCOL)
+    except Exception as e:
+        print(f"  [cache-warn] failed to save {key}: {e}")
+
+
 def fetch_bars(symbol_internal: str, timeframe: str, days: int) -> pd.DataFrame | None:
-    """Fetch OHLCV via prod data.fetcher (Binance crypto / Alpaca-or-yf stocks)."""
+    """Fetch OHLCV via prod data.fetcher with local pickle cache."""
+    key = _cache_key(symbol_internal, timeframe, days)
+    cached = _cache_load(key)
+    if cached is not None:
+        return cached
     from data.fetcher import fetch_ohlcv
     try:
         df = fetch_ohlcv(symbol_internal, timeframe, days)
         if df is None or len(df) < 50:
             return None
         df.columns = [c.lower() for c in df.columns]
-        return df[["open", "high", "low", "close", "volume"]].dropna()
+        out = df[["open", "high", "low", "close", "volume"]].dropna()
+        _cache_save(key, out)
+        return out
     except Exception as e:
         print(f"  [skip] {symbol_internal} {timeframe}: {e}")
         return None
@@ -90,22 +137,29 @@ def main():
         print("Aucune donnée chargée")
         return
 
-    # VIX cache for real SHIELD activation in backtest
+    # VIX cache for real SHIELD activation in backtest (pickle-cached too)
     print("Chargement VIX (régime SHIELD)…")
-    try:
-        import yfinance as yf
-        vix_df = yf.download("^VIX", period=f"{int(DAYS_1D)}d", interval="1d",
-                             progress=False, auto_adjust=False)
-        if vix_df is not None and len(vix_df) > 0:
-            # Flatten potential MultiIndex columns from yfinance
-            if hasattr(vix_df.columns, 'levels'):
-                vix_df.columns = vix_df.columns.get_level_values(0)
-            vix_df.columns = [c.lower() for c in vix_df.columns]
-            vix_df.index = vix_df.index.tz_localize(None) if vix_df.index.tz else vix_df.index
-            cache_1d["VIX"] = vix_df[["close"]]
-            print(f"  ✓ VIX       : {len(vix_df)} bars 1d ({vix_df.index[0].date()} → {vix_df.index[-1].date()})")
-    except Exception as e:
-        print(f"  [skip] VIX fetch failed: {e} — backtest will use vix=18 stub")
+    vix_key = _cache_key("VIX", "1d", DAYS_1D)
+    vix_cached = _cache_load(vix_key)
+    if vix_cached is not None:
+        cache_1d["VIX"] = vix_cached
+        print(f"  ✓ VIX       : {len(vix_cached)} bars 1d (from cache)")
+    else:
+        try:
+            import yfinance as yf
+            vix_df = yf.download("^VIX", period=f"{int(DAYS_1D)}d", interval="1d",
+                                 progress=False, auto_adjust=False)
+            if vix_df is not None and len(vix_df) > 0:
+                if hasattr(vix_df.columns, 'levels'):
+                    vix_df.columns = vix_df.columns.get_level_values(0)
+                vix_df.columns = [c.lower() for c in vix_df.columns]
+                vix_df.index = vix_df.index.tz_localize(None) if vix_df.index.tz else vix_df.index
+                vix_out = vix_df[["close"]]
+                cache_1d["VIX"] = vix_out
+                _cache_save(vix_key, vix_out)
+                print(f"  ✓ VIX       : {len(vix_df)} bars 1d ({vix_df.index[0].date()} → {vix_df.index[-1].date()})")
+        except Exception as e:
+            print(f"  [skip] VIX fetch failed: {e} — backtest will use vix=18 stub")
 
     # Date timeline: intersection of all 4h indices
     common_bars = sorted(set.intersection(*[set(df.index) for df in cache_4h.values()]))

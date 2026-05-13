@@ -17,6 +17,7 @@ build/
 logs/paper_state.json
 logs/bot.log
 data/cache/
+backtest/cache/
 
 # Backtest images (générées localement)
 logs/*.png
@@ -29,3 +30,4 @@ CLAUDE.md
 .idea/
 *.swp
 *.swo
+docs/SESSIONS_HISTORY.md

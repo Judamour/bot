@@ -9,14 +9,20 @@ def test_normal_market_no_shield():
 
 
 def test_high_vix_triggers_shield():
-    """VIX > 30 → SHIELD regardless of other signals."""
-    macro = {"vix": 31.0, "btc_trend": "bull", "qqq_regime_ok": True}
+    """VIX > VIX_SHIELD_THRESHOLD (35) → SHIELD regardless of other signals."""
+    macro = {"vix": 36.0, "btc_trend": "bull", "qqq_regime_ok": True}
     assert shield_active(macro) is True
 
 
 def test_vix_at_threshold_no_shield():
-    """VIX = 30 exactly → no SHIELD (strict >)."""
-    macro = {"vix": 30.0, "btc_trend": "bull", "qqq_regime_ok": True}
+    """VIX = VIX_SHIELD_THRESHOLD (35) exactly → no SHIELD (strict >)."""
+    macro = {"vix": 35.0, "btc_trend": "bull", "qqq_regime_ok": True}
+    assert shield_active(macro) is False
+
+
+def test_vix_below_new_threshold_no_shield():
+    """VIX = 31 → no SHIELD anymore (was True with old threshold of 30)."""
+    macro = {"vix": 31.0, "btc_trend": "bull", "qqq_regime_ok": True}
     assert shield_active(macro) is False
 
 
