@@ -41,6 +41,9 @@ from shadow.constants_v2 import (
     PROFIT_LOOSEN_PCT,
     DEFENSIVE_SYMBOLS,
     EQUITY_BEAR_SIZE_FACTOR,
+    SECTOR_MAP,
+    MAX_PER_SECTOR,
+    MACRO_EXIT_PROFIT_PCT,
 )
 from shadow.regime import shield_active, equity_bear_active
 from shadow.quality_gate import passes as gate_passes
@@ -209,11 +212,33 @@ def run_cycle():
         close = float(df["close"].iloc[-1])
         if atr <= 0:
             continue
-        # Macro-aware exits removed: trends need room to run, trailing stops
-        # handle drawdowns. Force-closing at +5% on SHIELD activation killed
-        # the bull-period CAGR (-22 pts in 3y backtest).
+        # Macro-aware exit (iter-6 #3): SHIELD/HALT + position at ≥ +15%
+        # → lock the gain at market. +5% was too tight; +15% protects only
+        # strong winners while normal trends keep running.
         m = pos_meta.get(sym, {})
         entry = float(m.get("entry_price") or 0)
+        if (shielded or halted) and entry > 0 and (close - entry) / entry >= MACRO_EXIT_PROFIT_PCT:
+            qty_avail = float(p.get("qty_available") or p.get("qty") or 0)
+            if qty_avail > 0:
+                old_id = m.get("stop_order_id")
+                if old_id:
+                    broker.cancel_order(old_id)
+                orig_sym = p["symbol"]
+                if any(c in orig_sym for c in ["BTC", "ETH", "SOL", "AVAX", "LINK"]) and "/" not in orig_sym:
+                    orig_sym = orig_sym[:-3] + "/" + orig_sym[-3:]
+                sell_res = broker.market_sell(orig_sym, qty_avail)
+                if sell_res.get("ok"):
+                    pnl_pct = (close - entry) / entry
+                    log_event("macro_take_profit", {
+                        "symbol": sym, "reason": "SHIELD" if shielded else "HALT",
+                        "entry": entry, "exit": sell_res.get("filled_avg", close),
+                        "pnl_pct": pnl_pct,
+                    })
+                    print(f"[SHADOW] MACRO_TP {sym} ({'SHIELD' if shielded else 'HALT'}) entry={entry:.4f} exit≈{close:.4f} pnl=+{pnl_pct*100:.1f}%", flush=True)
+                    pos_meta.pop(sym, None)
+                    continue
+                else:
+                    print(f"[SHADOW] MACRO_TP {sym} échec: {sell_res.get('error')}", flush=True)
         # Adaptive trailing: tight (4.0x) until +5% profit, then loosen to 5.0x
         if entry > 0:
             pnl_pct = (close - entry) / entry
@@ -222,11 +247,18 @@ def run_cycle():
             atr_mult = ATR_MULT_STOP_INIT  # entry unknown (queued) → use init
         new_stop = round(close - atr_mult * atr, 2)
         old_stop = m.get("stop", 0)
-        if new_stop > old_stop:
+        existing_stop_id = m.get("stop_order_id")
+
+        # BUG FIX (iter-6 #5): if no stop_order_id exists, position is UNPROTECTED
+        # (filled after queued buy + price dropped slightly → trailing guard
+        # refused to place initial stop). Force-place stop regardless of trailing.
+        needs_initial_stop = existing_stop_id is None
+        should_update = needs_initial_stop or (new_stop > old_stop)
+
+        if should_update:
             # Annuler ancien stop si présent + replacer
-            old_id = m.get("stop_order_id")
-            if old_id:
-                broker.cancel_order(old_id)
+            if existing_stop_id:
+                broker.cancel_order(existing_stop_id)
             qty = float(p.get("qty_available") or p.get("qty") or 0)
             if qty > 0:
                 # Cherche le symbole original (avec slash si crypto)
@@ -234,13 +266,22 @@ def run_cycle():
                 # Alpaca retourne BTCUSD sans slash — pour les ordres, accepte BTC/USD avec slash
                 if any(c in orig_sym for c in ["BTC", "ETH", "SOL", "AVAX", "LINK"]) and "/" not in orig_sym:
                     orig_sym = orig_sym[:-3] + "/" + orig_sym[-3:]
-                res = broker.place_stop(orig_sym, qty, new_stop)
+                # For "needs_initial_stop" case, anchor to entry - ATR_MULT_STOP_INIT
+                # to prevent a too-tight stop right after a drawn-down fill.
+                target_stop = new_stop
+                if needs_initial_stop and entry > 0:
+                    initial_anchor = round(entry - ATR_MULT_STOP_INIT * atr, 2)
+                    target_stop = max(new_stop, initial_anchor)
+                res = broker.place_stop(orig_sym, qty, target_stop)
                 if res.get("ok"):
-                    m["stop"] = new_stop
+                    m["stop"] = target_stop
                     m["stop_order_id"] = res["id"]
                     pos_meta[sym] = m
-                    log_event("trail", {"symbol": sym, "new_stop": new_stop, "qty": qty})
-                    print(f"[SHADOW] TRAIL {sym} → {new_stop}", flush=True)
+                    reason = "INIT" if needs_initial_stop else "TRAIL"
+                    log_event(reason.lower(), {"symbol": sym, "new_stop": target_stop, "qty": qty})
+                    print(f"[SHADOW] {reason} {sym} → {target_stop}", flush=True)
+                else:
+                    print(f"[SHADOW] {('INIT_STOP' if needs_initial_stop else 'TRAIL')} {sym} échec: {res.get('error')}", flush=True)
 
     # 5. Récupère les ordres BUY en cours (queued/accepted) pour ne pas re-trigger
     # sur des actifs dont l'ordre est déjà placé mais pas encore fillé (typique pour
@@ -293,10 +334,31 @@ def run_cycle():
                 best_by_symbol[sig.symbol] = sig
         sorted_cands = sorted(best_by_symbol.values(), key=lambda s: s.score, reverse=True)
 
-        # 6b. Quality gate (G1 score, G2 MTF, G3 volume, G4 cooldown) puis top-N
-        accepted = [s for s in sorted_cands if gate_passes(s, rg, now=now)][:TOP_N_SIGNALS]
-        rejected_n = len(sorted_cands) - len([s for s in sorted_cands if gate_passes(s, rg, now=now)])
-        print(f"[SHADOW] {len(sorted_cands)} signaux ≥ {SCORE_FLOOR} → {len(accepted)} acceptés via quality gate ({rejected_n} rejetés)", flush=True)
+        # 6b. Quality gate (G1 score, G2 MTF, G3 volume, G4 cooldown) + sector diversification
+        gate_passed = [s for s in sorted_cands if gate_passes(s, rg, now=now)]
+        # Already-open positions count against their sector's quota
+        sector_count: dict[str, int] = {}
+        for sym_alp in pos_by_sym.keys():
+            # Reverse-map Alpaca symbol (BTCUSD) back to our internal format (BTC/USD)
+            internal = sym_alp
+            for s in SECTOR_MAP:
+                if s.replace("/", "") == sym_alp:
+                    internal = s
+                    break
+            sec = SECTOR_MAP.get(internal, "other")
+            sector_count[sec] = sector_count.get(sec, 0) + 1
+        accepted = []
+        for sig in gate_passed:
+            sec = SECTOR_MAP.get(sig.symbol, "other")
+            if sector_count.get(sec, 0) >= MAX_PER_SECTOR:
+                continue
+            accepted.append(sig)
+            sector_count[sec] = sector_count.get(sec, 0) + 1
+            if len(accepted) >= TOP_N_SIGNALS:
+                break
+        rejected_n = len(sorted_cands) - len(gate_passed)
+        sector_skipped = len(gate_passed) - len(accepted)
+        print(f"[SHADOW] {len(sorted_cands)} signaux ≥ {SCORE_FLOOR} → quality_gate {len(gate_passed)} (rejetés {rejected_n}) → sector_filter {len(accepted)} (skipped {sector_skipped})", flush=True)
 
         # 7. Ouvrir positions — score-weighted sizing (v2) × size_factor (rotation)
         n_open = len(pos_by_sym)
