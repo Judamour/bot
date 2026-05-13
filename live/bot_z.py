@@ -109,13 +109,17 @@ CORR_REDUCE_THRESHOLD  = 0.70   # corrélation inter-bots > 70% → réduction e
 REGIME_PERSIST_DAYS    = 7      # jours pour confiance pleine dans un régime (persist factor)
 
 # ── Weight caps — garde-fous contre sur-concentration ────────────────────────
-# Bot C : +0.6% CAGR réel corrigé → cap à 25% (était 64% en SHIELD, trop haut)
-# Bot G : vrai stabilisateur (+23.4%) → peut monter à 55% en SHIELD
-# Bot A : peut descendre à 5% en SHIELD (mais jamais 0 — moteur principal)
+# Bot A : Sharpe 2.24, CAGR +33%, 6+ positions actives — cap relevé 60→70%
+#         pour exploiter son edge (max=0.70). Min reste 5% en SHIELD.
+# Bot G : Sharpe 0.65, CAGR +23%, 4 positions actives — cap 60% inchangé.
+# Bot B/C : 0 trade depuis 60+ jours en paper. Activity factor les crushait à
+#           5-8% (résiduel) mais ils prenaient du capital dormant (~€9K).
+#           iter-9: hard kill (max=0.00) pour libérer le capital vers A+G.
+#           Si un jour B ou C reprend l'activité, lever leur cap manuellement.
 WEIGHT_CAPS = {
-    "a": {"min": 0.05, "max": 0.60},
-    "b": {"min": 0.00, "max": 0.15},
-    "c": {"min": 0.00, "max": 0.15},
+    "a": {"min": 0.05, "max": 0.70},
+    "b": {"min": 0.00, "max": 0.00},
+    "c": {"min": 0.00, "max": 0.00},
     "g": {"min": 0.05, "max": 0.60},
 }
 
