@@ -209,14 +209,42 @@ def _reconcile_stops_once() -> None:
         status = order.get("status")
 
         if status in ("expired", "canceled", "rejected"):
-            res = broker.place_stop(orig_sym, qty, stop_level)
+            # Recompute chandelier-22 - atr_mult × ATR au lieu de réutiliser
+            # stale m["stop"] : permet au stop de suivre les rallies entre
+            # renouvellements quotidiens (TIF=day expire à chaque clôture NYSE).
+            target_stop = stop_level
+            try:
+                from data.market_snapshot import fetch_ohlcv_cache
+                from strategies.supertrend import compute_atr
+                df = fetch_ohlcv_cache([orig_sym], timeframe="4h", days=55).get(orig_sym)
+                if df is not None and len(df) >= 22:
+                    atr_val = float(compute_atr(df["high"], df["low"], df["close"], 14).iloc[-1] or 0)
+                    if atr_val > 0:
+                        entry_p = float(m.get("entry_price") or alp_pos.get("avg_entry_price") or 0)
+                        close_p = float(df["close"].iloc[-1])
+                        pnl_pct = (close_p - entry_p) / entry_p if entry_p > 0 else 0
+                        atr_mult = ATR_MULT_TRAIL if pnl_pct >= PROFIT_LOOSEN_PCT else ATR_MULT_STOP_INIT
+                        chandelier_high = float(df["high"].tail(22).max())
+                        new_stop = round(chandelier_high - atr_mult * atr_val, 2)
+                        if new_stop > stop_level:
+                            target_stop = new_stop
+            except Exception as e:
+                print(f"[STOP-MONITOR] renew chandelier recompute échec {alp_sym}: {e}", flush=True)
+
+            res = broker.place_stop(orig_sym, qty, target_stop)
             if res.get("ok"):
                 m["stop_order_id"] = res["id"]
+                m["stop"] = target_stop
                 pos_meta[alp_sym] = m
                 mutated = True
                 renewed += 1
-                log_event("stop_renew", {"symbol": alp_sym, "from_status": status, "stop": stop_level, "qty": qty})
-                print(f"[STOP-MONITOR] RENEW {alp_sym} (was {status}) → {stop_level}", flush=True)
+                log_event("stop_renew", {
+                    "symbol": alp_sym, "from_status": status,
+                    "stop": target_stop, "qty": qty,
+                    "trailed": target_stop > stop_level,
+                })
+                trail_note = f" (trailed +{target_stop - stop_level:.2f})" if target_stop > stop_level else ""
+                print(f"[STOP-MONITOR] RENEW {alp_sym} (was {status}) → {target_stop}{trail_note}", flush=True)
             else:
                 m["stop_order_id"] = None  # mark orphan for next iteration retry
                 pos_meta[alp_sym] = m

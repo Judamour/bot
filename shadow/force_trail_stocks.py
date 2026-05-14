@@ -98,23 +98,34 @@ def main() -> int:
             skipped.append(f"{sym}: new={new_stop} ≤ old={current_stop}")
             continue
 
-        # Cancel existing stop then place fresh GTC stop at new level
-        cancel_ok = True
+        # PATCH first (safe — pas de fenêtre d'unprotection). Cancel+create
+        # uniquement si PATCH refuse (rare : ordre déjà rempli/expiré).
+        new_order_id = None
         if existing_order:
-            cancel_ok = broker.cancel_order(existing_order["id"])
-            if not cancel_ok:
-                errors.append(f"{sym}: cancel échoué")
+            patch_res = broker.replace_stop(existing_order["id"], new_stop)
+            if patch_res.get("ok"):
+                new_order_id = patch_res["id"]
+            else:
+                # Fallback: cancel + create. Si create échoue, on garde
+                # l'orphan flag pour que stop_monitor retente au prochain tick.
+                broker.cancel_order(existing_order["id"])
+                place_res = broker.place_stop(sym, qty, new_stop)
+                if place_res.get("ok"):
+                    new_order_id = place_res["id"]
+                else:
+                    errors.append(f"{sym}: patch={patch_res.get('error')}, place={place_res.get('error')}")
+                    continue
+        else:
+            place_res = broker.place_stop(sym, qty, new_stop)
+            if not place_res.get("ok"):
+                errors.append(f"{sym}: place échoué ({place_res.get('error')})")
                 continue
-
-        place_res = broker.place_stop(sym, qty, new_stop)
-        if not place_res.get("ok"):
-            errors.append(f"{sym}: place échoué ({place_res.get('error')})")
-            continue
+            new_order_id = place_res["id"]
 
         # Persist new state in meta
         m = positions_meta.get(sym, {}) or {}
         m["stop"] = new_stop
-        m["stop_order_id"] = place_res["id"]
+        m["stop_order_id"] = new_order_id
         if entry > 0:
             m.setdefault("entry_price", entry)
             m.setdefault("qty", qty)
