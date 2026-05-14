@@ -276,11 +276,14 @@ def place_stop(symbol: str, qty: float, stop_price: float) -> dict:
             "time_in_force": "gtc",
         }
     else:
+        # GTC (au lieu de day): les stops survivent aux clôtures NYSE, donc le
+        # trailing 4h tourne en continu sans dépendre du renouvellement quotidien
+        # par stop_monitor (qui réutilisait le stale stop sans recalculer).
         payload = {
             "symbol": symbol, "qty": str(qty), "side": "sell",
             "type": "stop",
             "stop_price": str(round(stop_price, 2)),
-            "time_in_force": "day",
+            "time_in_force": "gtc",
         }
     try:
         o = _request("POST", "/v2/orders", body=payload)

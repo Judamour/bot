@@ -455,8 +455,26 @@ def run_cycle():
         needs_initial_stop = existing_stop_id is None
         should_update = needs_initial_stop or (new_stop > old_stop)
 
+        # Diagnostic: tracer chaque évaluation pour comprendre pourquoi un stop
+        # ne se met pas à jour (utile quand le log "TRAIL" est absent malgré
+        # un mouvement de prix favorable). decision = skip|patch|create|error.
+        eval_decision = "skip" if not should_update else "pending"
+        eval_log = {
+            "symbol": sym, "close": round(close, 4),
+            "atr": round(atr, 4), "atr_mult": atr_mult,
+            "chandelier_high": round(chandelier_high, 4),
+            "new_stop": new_stop, "old_stop": old_stop,
+            "should_update": should_update,
+            "decision": eval_decision,
+        }
+        if not should_update:
+            log_event("trail_eval", eval_log)
+
         if should_update:
             qty = float(p.get("qty_available") or p.get("qty") or 0)
+            if qty <= 0:
+                eval_log["decision"] = "qty_zero"
+                log_event("trail_eval", eval_log)
             if qty > 0:
                 # Cherche le symbole original (avec slash si crypto)
                 orig_sym = p["symbol"]
@@ -469,6 +487,7 @@ def run_cycle():
                     initial_anchor = round(entry - ATR_MULT_STOP_INIT * atr, 2)
                     target_stop = max(new_stop, initial_anchor)
                 # PATCH first (Z's approach — single API call), fallback to cancel+create.
+                patch_error = None
                 if existing_stop_id:
                     patch_res = broker.replace_stop(existing_stop_id, target_stop)
                     if patch_res.get("ok"):
@@ -476,9 +495,12 @@ def run_cycle():
                         m["stop_order_id"] = patch_res["id"]
                         pos_meta[sym] = m
                         log_event("trail", {"symbol": sym, "new_stop": target_stop, "qty": qty, "method": "patch"})
+                        eval_log["decision"] = "patch_ok"
+                        log_event("trail_eval", eval_log)
                         print(f"[SHADOW] TRAIL {sym} → {target_stop} (patch)", flush=True)
                         continue
                     # PATCH failed → cancel + recreate
+                    patch_error = patch_res.get("error")
                     broker.cancel_order(existing_stop_id)
                 res = broker.place_stop(orig_sym, qty, target_stop)
                 if res.get("ok"):
@@ -487,9 +509,16 @@ def run_cycle():
                     pos_meta[sym] = m
                     reason = "INIT" if needs_initial_stop else "TRAIL"
                     log_event(reason.lower(), {"symbol": sym, "new_stop": target_stop, "qty": qty, "method": "create"})
+                    eval_log["decision"] = "create_ok"
+                    eval_log["patch_error"] = patch_error
+                    log_event("trail_eval", eval_log)
                     print(f"[SHADOW] {reason} {sym} → {target_stop} (create)", flush=True)
                 else:
-                    print(f"[SHADOW] {('INIT' if needs_initial_stop else 'TRAIL')} {sym} échec: {res.get('error')}", flush=True)
+                    eval_log["decision"] = "error"
+                    eval_log["patch_error"] = patch_error
+                    eval_log["place_error"] = res.get("error")
+                    log_event("trail_eval", eval_log)
+                    print(f"[SHADOW] {('INIT' if needs_initial_stop else 'TRAIL')} {sym} échec: patch={patch_error} place={res.get('error')}", flush=True)
 
     # 5. Récupère les ordres BUY en cours (queued/accepted) pour ne pas re-trigger
     # sur des actifs dont l'ordre est déjà placé mais pas encore fillé (typique pour
