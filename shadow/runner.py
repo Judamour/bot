@@ -300,8 +300,23 @@ def run_cycle():
     # Detect positions closed since last cycle (stop fired or manual exit) → cooldown
     closed_syms = set(pos_meta.keys()) - set(pos_by_sym.keys())
     for sym in closed_syms:
+        m_closed = pos_meta.get(sym, {}) or {}
+        entry_p = float(m_closed.get("entry_price") or 0)
+        qty_closed = float(m_closed.get("qty") or 0)
+        strat = m_closed.get("strategy") or "?"
         rg.register_stop(sym, pnl=0.0, now=now)  # pnl=0 placeholder, only date matters for G4
-        log_event("exit_detected", {"symbol": sym, "reason": "absent_from_alpaca"})
+        log_event("exit_detected", {
+            "symbol": sym, "reason": "absent_from_alpaca",
+            "entry": entry_p, "qty": qty_closed, "strategy": strat,
+        })
+        try:
+            attribution = f"[SHADOW·{strat[:6]}]" if strat and strat != "?" else "[SHADOW]"
+            notify(
+                f"⚠️ {attribution} EXIT {sym} (broker closed, prix sortie inconnu) | "
+                f"entry ${entry_p:.4f} qty {qty_closed:.4f}"
+            )
+        except Exception as _e:
+            print(f"[SHADOW] notify exit_detected échec: {_e}", flush=True)
         del pos_meta[sym]
     if closed_syms:
         print(f"[SHADOW] {len(closed_syms)} positions closed → cooldown: {sorted(closed_syms)}", flush=True)
@@ -497,6 +512,10 @@ def run_cycle():
         "vix": ctx["vix"], "btc_trend": ctx["btc_trend"],
         "qqq_ok": ctx["qqq_ok"], "qqq_full_uptrend": ctx["qqq_full_uptrend"],
     })
+    # Heartbeat metrics (defaults — overridden in scan block below)
+    hb_signals_above_floor = 0
+    hb_accepted = 0
+    n_open = len(pos_by_sym)  # fallback si shielded/halted (override en cas d'entries)
     if skip_new_entries:
         log_event("scan_skip", {"reason": "shielded" if shielded else "halted",
                                 "shielded": shielded, "halted": halted})
@@ -589,6 +608,8 @@ def run_cycle():
                 break
         rejected_n = len(sorted_cands) - len(gate_passed)
         sector_skipped = len(gate_passed) - len(accepted)
+        hb_signals_above_floor = len(sorted_cands)
+        hb_accepted = len(accepted)
         # Cycle scan summary (top-level audit)
         log_event("scan_summary", {
             "evaluated": scan_stats["evaluated"],
@@ -694,13 +715,21 @@ def run_cycle():
         cash = float(account.get("cash", 0))
         log_equity(equity, cash, n_open)
         print(f"[SHADOW] Final: equity ${equity:.2f} ({(equity-100000)/1000:.2f}%) | cash ${cash:.2f} | positions {n_open}", flush=True)
-        # Daily snapshot Telegram — fire seulement au cycle 19:03 UTC (post US close)
-        # 1 notif/jour max, contient: equity, perf, positions, regime
-        if now.hour == 19 and now.minute < 30:
-            perf_pct = (equity - 100_000) / 1_000  # %  from $100K seed
-            regime_str = "SHIELD" if shielded else "HALT" if halted else "BEAR" if equity_bear else "NORMAL"
-            pos_str = f"{n_open}pos" if n_open > 0 else "no pos"
-            notify(f"📊 Shadow daily | ${equity:,.0f} ({perf_pct:+.2f}%) | {pos_str} | {regime_str}".replace(",", " "))
+        # Cycle heartbeat Telegram — fire à chaque cycle 4h (6×/jour)
+        # Daily snapshot enrichi à 19:03 UTC (post US close)
+        perf_pct = (equity - 100_000) / 1_000  # % from $100K seed
+        regime_str = "SHIELD" if shielded else "HALT" if halted else "BEAR" if equity_bear else "NORMAL"
+        pos_str = f"{n_open}pos" if n_open > 0 else "no pos"
+        sig_str = f"{hb_signals_above_floor} sig"
+        if hb_accepted > 0:
+            sig_str += f"→{hb_accepted} ouv"
+        is_daily = now.hour == 19 and now.minute < 30
+        label = "Shadow daily" if is_daily else "Shadow cycle"
+        emoji = "📊" if is_daily else "🫀"
+        notify(
+            f"{emoji} {label} | ${equity:,.0f} ({perf_pct:+.2f}%) | "
+            f"{pos_str} | {sig_str} | {regime_str}".replace(",", " ")
+        )
     except Exception as e:
         print(f"[SHADOW] final account fetch échec: {e}", flush=True)
 
