@@ -157,7 +157,7 @@ def _reconcile_stops_once() -> None:
     rg = RiskGuard.load(state_path=RISK_STATE,
                         initial_equity=100_000.0, now=now)
 
-    checked = adopted = renewed = filled = 0
+    checked = adopted = renewed = filled = trailed = trailed_ok = 0
     mutated = False
 
     # DRIFT CHECK (iter-9): detect bot/broker divergence
@@ -277,12 +277,50 @@ def _reconcile_stops_once() -> None:
             mutated = True
             filled += 1
 
+        elif status in ("new", "accepted", "pending_new", "held"):
+            # Trail intra-cycle 15min: recompute chandelier sur fresh OHLCV
+            # et PATCH si new_stop > old_stop. Comble le gap entre cycles 4h
+            # (utile quand une bougie 4h se close entre 2 main cycles).
+            trailed += 1  # count attempt for summary
+            try:
+                from data.market_snapshot import fetch_ohlcv_cache
+                from strategies.supertrend import compute_atr
+                df = fetch_ohlcv_cache([orig_sym], timeframe="4h", days=55).get(orig_sym)
+                if df is None or len(df) < 22:
+                    continue
+                atr_val = float(compute_atr(df["high"], df["low"], df["close"], 14).iloc[-1] or 0)
+                if atr_val <= 0:
+                    continue
+                entry_p = float(m.get("entry_price") or alp_pos.get("avg_entry_price") or 0)
+                close_p = float(df["close"].iloc[-1])
+                pnl_pct = (close_p - entry_p) / entry_p if entry_p > 0 else 0
+                atr_mult = ATR_MULT_TRAIL if pnl_pct >= PROFIT_LOOSEN_PCT else ATR_MULT_STOP_INIT
+                chandelier_high = float(df["high"].tail(22).max())
+                new_stop = round(chandelier_high - atr_mult * atr_val, 2)
+                if new_stop <= stop_level:
+                    continue  # pas de progression du chandelier
+                patch_res = broker.replace_stop(sid, new_stop)
+                if patch_res.get("ok"):
+                    m["stop"] = new_stop
+                    m["stop_order_id"] = patch_res["id"]
+                    pos_meta[alp_sym] = m
+                    mutated = True
+                    trailed_ok += 1
+                    log_event("trail_intra", {
+                        "symbol": alp_sym, "old_stop": stop_level,
+                        "new_stop": new_stop, "delta": round(new_stop - stop_level, 2),
+                    })
+                    print(f"[STOP-MONITOR] TRAIL {alp_sym} {stop_level:.2f}→{new_stop:.2f} (+{new_stop-stop_level:.2f})", flush=True)
+            except Exception as e:
+                print(f"[STOP-MONITOR] trail intra-cycle échec {alp_sym}: {e}", flush=True)
+
     if mutated:
         save_meta(meta)
         rg.save()
 
     if checked > 0:
-        print(f"[STOP-MONITOR] {checked} stops vérifiés, {adopted} adoptés, {renewed} renouvelés, {filled} fillés", flush=True)
+        trail_note = f", {trailed_ok}/{trailed} trailed" if trailed > 0 else ""
+        print(f"[STOP-MONITOR] {checked} stops vérifiés, {adopted} adoptés, {renewed} renouvelés, {filled} fillés{trail_note}", flush=True)
 
 
 def _stop_monitor_loop() -> None:
