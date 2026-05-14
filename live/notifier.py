@@ -22,6 +22,110 @@ BOT_INFO = {
     "j": ("Mean Reversion",     "🎯"),
 }
 
+# Abréviation courte de stratégie utilisée dans le préfixe `[BotA·ST]`.
+# Max 4 chars pour rester compact sur mobile (38 chars/ligne iPhone).
+BOT_STRATEGY_ABBR = {
+    "a": "ST",   # Supertrend
+    "b": "DM",   # Dual Momentum
+    "c": "DB",   # Donchian Breakout
+    "g": "CTA",  # Trend CTA
+    "h": "VCB",  # VCB Breakout
+    "i": "RS",   # RS Leaders
+    "j": "MR",   # Mean Reversion
+    "z": "Z",    # Bot Z meta
+}
+
+# ── Convention émojis Freqtrade-style ────────────────────────────────────────
+# Hiérarchie de sévérité standardisée. NE PAS dévier — l'utilisateur pattern-
+# match l'émoji avant le texte. Inconsistance détruit l'avantage scan visuel.
+ICON_BUY_FILL       = "✅"   # Ordre BUY fillé
+ICON_BUY_PENDING    = "🔵"   # Ordre BUY placé mais pas encore fillé
+ICON_EXIT_BIG_WIN   = "🚀"   # Exit ≥ +5%
+ICON_EXIT_WIN       = "✳️"   # Exit 0 à +5%
+ICON_STOP_LOSS      = "⚠️"   # Stop loss déclenché (comportement attendu)
+ICON_EXIT_LOSS      = "❌"   # Exit en perte hors stop / échec ordre
+ICON_CRITICAL       = "🔥"   # Kill switch / broker down / catastrophique
+ICON_INFO           = "ℹ️"   # Info non-trade (engine switch, etc.)
+ICON_CYCLE          = "📊"   # Résumé de cycle 4h
+ICON_DAILY          = "📅"   # Rapport quotidien
+ICON_SHADOW         = "🔬"   # Préfixe Shadow bot (banc de test)
+
+
+def _attribution(bot_id: str, strategy: str = None) -> str:
+    """Préfixe d'attribution compact: `[BotA·ST]` ou `[SHADOW]`.
+
+    Args:
+        bot_id: 'a'..'j', 'z' pour Bot Z, 'shadow' pour Shadow bot.
+        strategy: override d'abréviation (sinon dérive de BOT_STRATEGY_ABBR).
+    """
+    bid = (bot_id or "").lower()
+    if bid in ("shadow", "shadow_bot"):
+        return "[SHADOW]"
+    if bid == "z":
+        return "[Z]"
+    abbr = strategy or BOT_STRATEGY_ABBR.get(bid, "?")
+    return f"[Bot{bid.upper()}·{abbr}]"
+
+
+def _fmt_money(amount: float, ccy: str = "USD", sign: bool = False) -> str:
+    """Format monétaire avec séparateur d'espace fine: `$67,420.00` ou `+$143.20`.
+
+    Force USD par défaut (Alpaca paper unifié). Le signe est inclus si sign=True
+    OU si amount < 0 (toujours montrer le moins).
+    """
+    symbol = {"USD": "$", "EUR": "€"}.get((ccy or "USD").upper(), "")
+    sign_str = ""
+    if sign and amount >= 0:
+        sign_str = "+"
+    elif amount < 0:
+        sign_str = "−"  # vrai minus, pas hyphen — meilleure lisibilité
+        amount = abs(amount)
+    formatted = f"{amount:,.2f}".replace(",", " ")  # espace fine séparateur
+    return f"{sign_str}{symbol}{formatted}"
+
+
+def _fmt_pct(pct: float, sign: bool = True, decimals: int = 1) -> str:
+    """Format pourcentage avec signe: `+14.5%` ou `−4.8%`.
+
+    Utilise vrai minus (−) au lieu d'hyphen (-) pour lisibilité.
+    """
+    if pct < 0:
+        return f"−{abs(pct):.{decimals}f}%"
+    if sign:
+        return f"+{pct:.{decimals}f}%"
+    return f"{pct:.{decimals}f}%"
+
+
+def _fmt_duration(seconds_or_delta) -> str:
+    """Durée compacte: `2d 4h`, `18h`, `45m`, `30s`.
+
+    Accepte int/float (secondes) ou timedelta.
+    """
+    from datetime import timedelta
+    if isinstance(seconds_or_delta, timedelta):
+        secs = int(seconds_or_delta.total_seconds())
+    else:
+        secs = int(seconds_or_delta or 0)
+    if secs < 60:
+        return f"{secs}s"
+    mins = secs // 60
+    if mins < 60:
+        return f"{mins}m"
+    hours = mins // 60
+    if hours < 24:
+        rem_min = mins % 60
+        return f"{hours}h {rem_min}m" if rem_min else f"{hours}h"
+    days = hours // 24
+    rem_h = hours % 24
+    return f"{days}d {rem_h}h" if rem_h else f"{days}d"
+
+
+def _escape_html(text: str) -> str:
+    """Échappe les entités HTML qui cassent silencieusement les messages Telegram."""
+    if not text:
+        return ""
+    return str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
 
 def _bot_label(bot_id: str) -> str:
     """Retourne 'Bot C (Donchian Breakout)' à partir de 'c'."""
@@ -59,6 +163,109 @@ def notify(msg: str):
     except Exception as e:
         import logging
         logging.warning(f"[notifier] Telegram indisponible : {e}")
+
+
+# ── Cycle batching ───────────────────────────────────────────────────────────
+# Accumule les events trade d'un cycle dans un buffer global, flush en 1 message
+# à la fin du cycle. Réduit la pression de notifs de 5× sur les cycles chargés.
+# Toggle via env: NOTIF_BATCH_CYCLE=true|false (défaut true).
+
+_CYCLE_BUFFER = {
+    "executed": [],   # [{action, symbol, price, pct_capital, pnl_pct, reason, bot_id}]
+    "skipped": [],    # [{symbol, reason}]
+}
+
+
+def _batching_enabled() -> bool:
+    return os.getenv("NOTIF_BATCH_CYCLE", "true").lower() in ("true", "1", "yes")
+
+
+def buffer_buy(bot_id: str, symbol: str, price: float, size_units: float,
+               size_usd: float, stop: float = None, risk_usd: float = None,
+               capital_total: float = None, strategy: str = None,
+               queued: bool = False, ccy: str = "USD"):
+    """Bufferise un BUY dans le cycle courant (ou l'envoie direct si batching off).
+
+    Si NOTIF_BATCH_CYCLE=false, équivalent à notify_buy() immédiat.
+    Sinon, accumule dans _CYCLE_BUFFER, à flusher avec flush_cycle().
+    """
+    if not _batching_enabled():
+        notify_buy(bot_id, symbol, price, size_units, size_usd, stop,
+                   risk_usd, strategy, queued, ccy)
+        return
+    pct_cap = (size_usd / capital_total * 100) if (capital_total and capital_total > 0) else 0
+    _CYCLE_BUFFER["executed"].append({
+        "action": "BUY",
+        "bot_id": bot_id,
+        "strategy": strategy,
+        "symbol": symbol,
+        "price": price,
+        "pct_capital": pct_cap,
+        "size_units": size_units,
+        "size_usd": size_usd,
+        "stop": stop,
+        "risk_usd": risk_usd,
+        "queued": queued,
+        "ccy": ccy,
+    })
+
+
+def buffer_sell(bot_id: str, symbol: str, entry_price: float, exit_price: float,
+                pnl_usd: float, pnl_pct: float, reason: str,
+                duration_sec: float = None, strategy: str = None,
+                ccy: str = "USD"):
+    """Bufferise un SELL/EXIT dans le cycle courant (ou l'envoie direct si batching off)."""
+    if not _batching_enabled():
+        notify_sell(bot_id, symbol, entry_price, exit_price, pnl_usd, pnl_pct,
+                    reason, duration_sec, strategy, ccy)
+        return
+    _CYCLE_BUFFER["executed"].append({
+        "action": "SELL",
+        "bot_id": bot_id,
+        "strategy": strategy,
+        "symbol": symbol,
+        "price": exit_price,
+        "entry_price": entry_price,
+        "pnl_usd": pnl_usd,
+        "pnl_pct": pnl_pct,
+        "reason": reason,
+        "duration_sec": duration_sec,
+        "ccy": ccy,
+    })
+
+
+def buffer_skip(symbol: str, reason: str):
+    """Bufferise un skip (signal rejeté) pour information dans le résumé cycle."""
+    if not _batching_enabled():
+        return  # En mode immédiat, on ne notifie pas les skips (trop de bruit)
+    _CYCLE_BUFFER["skipped"].append({
+        "symbol": symbol,
+        "reason": reason,
+    })
+
+
+def flush_cycle(hour_utc: int, engine: str,
+                capital_deployed: float = None, capital_total: float = None,
+                vix: float = None, regime: str = None, ccy: str = "USD"):
+    """Flushe le buffer cycle vers 1 message batch. Vide le buffer après envoi.
+
+    Si batching off, vide juste le buffer (déjà notifié individuellement).
+    Si buffer vide, ne notifie rien (silence = santé).
+    """
+    executed = _CYCLE_BUFFER["executed"]
+    skipped = _CYCLE_BUFFER["skipped"]
+
+    if _batching_enabled() and (executed or skipped):
+        notify_cycle_batch(
+            hour_utc=hour_utc, engine=engine,
+            executed=executed, skipped=skipped,
+            capital_deployed=capital_deployed, capital_total=capital_total,
+            vix=vix, regime=regime, ccy=ccy,
+        )
+
+    # Reset
+    _CYCLE_BUFFER["executed"] = []
+    _CYCLE_BUFFER["skipped"] = []
 
 
 def notify_file(filepath: str, caption: str = ""):
@@ -213,6 +420,200 @@ def notify_cycle_summary(engine: str, vix: float, regime: str, z_capital: float,
     notify(msg)
 
 
+# ── Trades : BUY / SELL structurés (Freqtrade-style) ─────────────────────────
+
+def notify_buy(bot_id: str, symbol: str, price: float, size_units: float,
+               size_usd: float, stop: float = None, risk_usd: float = None,
+               strategy: str = None, queued: bool = False, ccy: str = "USD"):
+    """Notification BUY fillée — format multi-ligne avec attribution.
+
+    Format:
+        ✅ [BotA·ST]  BUY  BTC/USD
+
+        Price:    $67,420.00
+        Size:     0.0148 BTC  ($998)
+        Stop:     $64,200  (−4.8%)
+        Risk:     $46  (1R)
+
+    Args:
+        bot_id:      'a'..'j', 'z', ou 'shadow'
+        symbol:      'BTC/USD', 'NVDA', etc.
+        price:       prix d'exécution
+        size_units:  taille en unités de l'actif (0.0148 BTC, 100 NVDA)
+        size_usd:    notional en USD
+        stop:        prix du stop loss (optionnel)
+        risk_usd:    montant à risque jusqu'au stop (optionnel, affiche '(1R)')
+        strategy:    override abréviation stratégie (sinon dérive de bot_id)
+        queued:      True si l'ordre est en queue (hors marché)
+        ccy:         devise (défaut USD)
+    """
+    attr = _attribution(bot_id, strategy)
+    icon = ICON_BUY_PENDING if queued else ICON_BUY_FILL
+    sym_clean = _escape_html(symbol)
+    base_unit = symbol.split("/")[0] if "/" in symbol else "sh"  # 'shares' pour stocks
+
+    lines = [
+        f"{icon} {attr}  <b>BUY</b>  <code>{sym_clean}</code>",
+        "",
+        f"Price:    <code>{_fmt_money(price, ccy)}</code>",
+        f"Size:     <code>{size_units:.4f} {base_unit}</code>  ({_fmt_money(size_usd, ccy)})",
+    ]
+    if stop is not None and stop > 0:
+        stop_pct = (stop - price) / price * 100 if price else 0
+        lines.append(f"Stop:     <code>{_fmt_money(stop, ccy)}</code>  ({_fmt_pct(stop_pct)})")
+    if risk_usd is not None:
+        lines.append(f"Risk:     <code>{_fmt_money(risk_usd, ccy)}</code>  (1R)")
+    if queued:
+        lines.append("")
+        lines.append("<i>Queued — fill prochaine session</i>")
+    notify("\n".join(lines))
+
+
+def notify_sell(bot_id: str, symbol: str, entry_price: float, exit_price: float,
+                pnl_usd: float, pnl_pct: float, reason: str,
+                duration_sec: float = None, strategy: str = None,
+                ccy: str = "USD"):
+    """Notification SELL/EXIT — format multi-ligne, P&L en première position.
+
+    Format:
+        🚀 [BotA·ST]  SELL  BTC/USD
+
+        P&L:      +$143.20  (+14.5%)
+        Duration: 2d 4h
+        Exit:     trailing_stop
+        Entry→Exit: $67,420 → $77,060
+
+    L'icône reflète l'outcome:
+        🚀 exit ≥ +5%   |   ✳️ exit 0 à +5%
+        ⚠️ stop_loss     |   ❌ autre exit en perte
+    """
+    attr = _attribution(bot_id, strategy)
+    sym_clean = _escape_html(symbol)
+
+    # Choix icône selon résultat — convention Freqtrade
+    if reason in ("stop_loss", "broker_stop_fill"):
+        icon = ICON_STOP_LOSS
+    elif pnl_pct >= 5.0:
+        icon = ICON_EXIT_BIG_WIN
+    elif pnl_usd >= 0:
+        icon = ICON_EXIT_WIN
+    else:
+        icon = ICON_EXIT_LOSS
+
+    lines = [
+        f"{icon} {attr}  <b>SELL</b>  <code>{sym_clean}</code>",
+        "",
+        f"P&amp;L:      <code>{_fmt_money(pnl_usd, ccy, sign=True)}</code>  ({_fmt_pct(pnl_pct)})",
+    ]
+    if duration_sec is not None and duration_sec > 0:
+        lines.append(f"Duration: <code>{_fmt_duration(duration_sec)}</code>")
+    lines.append(f"Exit:     <code>{_escape_html(reason)}</code>")
+    lines.append(
+        f"Entry→Exit: <code>{_fmt_money(entry_price, ccy)}</code> → "
+        f"<code>{_fmt_money(exit_price, ccy)}</code>"
+    )
+    notify("\n".join(lines))
+
+
+def notify_cycle_batch(hour_utc: int, engine: str,
+                       executed: list, skipped: list = None,
+                       capital_deployed: float = None,
+                       capital_total: float = None,
+                       vix: float = None, regime: str = None,
+                       ccy: str = "USD"):
+    """Résumé d'un cycle 4h: 1 message au lieu de N notifs individuelles.
+
+    Args:
+        hour_utc:        heure UTC du cycle (3, 7, 11, 15, 19, 23)
+        engine:          BULL / BALANCED / PARITY / SHIELD
+        executed:        list of dict {action: 'BUY'|'SELL', symbol, price, pct_capital, pnl_pct (sell only)}
+        skipped:         list of dict {symbol, reason} (signaux ignorés)
+        capital_deployed: USD effectivement engagé en positions
+        capital_total:    USD capital total
+        vix:             VIX au moment du cycle
+        regime:          BULL / BEAR / NEUTRAL
+
+    Format:
+        📊 Cycle 11:00 UTC  |  Z → BALANCED
+
+        Executed:
+          ✅ BUY   NVDA     $876.20  (2.5%)
+          🚀 SELL  BTC/USD  $77,060  (+14.5%)
+          — SKIP  META     score 48 < 55
+
+        Capital: $24,800 / $25,000  (99%)
+        Regime: BALANCED  |  VIX: 18.4
+    """
+    engine_icon = {"BULL": "🟢", "BALANCED": "🔵", "PARITY": "🟡", "SHIELD": "🔴"}.get(engine, "⚪")
+    lines = [f"{ICON_CYCLE} Cycle <b>{hour_utc:02d}:00 UTC</b>  |  Z → {engine_icon} <b>{engine}</b>"]
+
+    if executed:
+        lines.append("")
+        lines.append("<b>Executed:</b>")
+        for ev in executed:
+            action = ev.get("action", "?").upper()
+            sym = _escape_html(ev.get("symbol", "?"))
+            price = ev.get("price", 0)
+            if action == "BUY":
+                pct_cap = ev.get("pct_capital", 0)
+                lines.append(
+                    f"  {ICON_BUY_FILL} BUY   <code>{sym:<8}</code> "
+                    f"<code>{_fmt_money(price, ccy)}</code>  ({pct_cap:.1f}%)"
+                )
+            elif action == "SELL":
+                pnl_pct = ev.get("pnl_pct", 0)
+                reason = ev.get("reason", "")
+                # Icône selon outcome
+                if reason in ("stop_loss", "broker_stop_fill"):
+                    sicon = ICON_STOP_LOSS
+                elif pnl_pct >= 5.0:
+                    sicon = ICON_EXIT_BIG_WIN
+                elif pnl_pct >= 0:
+                    sicon = ICON_EXIT_WIN
+                else:
+                    sicon = ICON_EXIT_LOSS
+                lines.append(
+                    f"  {sicon} SELL  <code>{sym:<8}</code> "
+                    f"<code>{_fmt_money(price, ccy)}</code>  ({_fmt_pct(pnl_pct)})"
+                )
+
+    if skipped:
+        if not executed:
+            lines.append("")
+        for sk in skipped[:5]:  # cap à 5 pour éviter le wall of text
+            sym = _escape_html(sk.get("symbol", "?"))
+            reason = _escape_html(sk.get("reason", ""))
+            lines.append(f"  — SKIP  <code>{sym:<8}</code> {reason}")
+        if len(skipped) > 5:
+            lines.append(f"  …  +{len(skipped) - 5} skips")
+
+    # Capital + régime
+    if capital_deployed is not None and capital_total is not None and capital_total > 0:
+        deploy_pct = capital_deployed / capital_total * 100
+        lines.append("")
+        lines.append(
+            f"Capital: <code>{_fmt_money(capital_deployed, ccy)}</code> / "
+            f"<code>{_fmt_money(capital_total, ccy)}</code>  ({deploy_pct:.0f}%)"
+        )
+
+    ctx_parts = []
+    if regime:
+        regime_icon = {"BULL": "🐂", "BEAR": "🐻", "NEUTRAL": "➡️"}.get(regime.upper(), "")
+        ctx_parts.append(f"Regime: {regime_icon} <b>{regime}</b>")
+    if vix is not None:
+        ctx_parts.append(f"VIX: <code>{vix:.1f}</code>")
+    if ctx_parts:
+        if capital_deployed is None:
+            lines.append("")
+        lines.append("  |  ".join(ctx_parts))
+
+    # Si rien à reporter (cycle vide sans exec/skip), ne pas envoyer
+    if not executed and not skipped:
+        return
+
+    notify("\n".join(lines))
+
+
 # ── Évènements de bot ────────────────────────────────────────────────────────
 
 def notify_data_stale(symbol: str, timeframe: str, age_hours: float):
@@ -330,7 +731,249 @@ def notify_token_warning(hours_remaining: float, refresh_ok: bool):
         )
 
 
+# ── Shadow bot — notifications dédiées ───────────────────────────────────────
+
+def notify_shadow_buy(symbol: str, strategy_name: str, price: float,
+                       size_units: float, size_usd: float, stop: float = None,
+                       score: float = None, rationale: str = None,
+                       queued: bool = False, ccy: str = "USD"):
+    """Shadow bot BUY — même structure que notify_buy, préfixe [SHADOW]."""
+    attr = "[SHADOW]"
+    abbr = strategy_name[:4].upper() if strategy_name else None
+    if abbr:
+        attr = f"[SHADOW·{abbr}]"
+    icon = ICON_BUY_PENDING if queued else ICON_BUY_FILL
+    sym_clean = _escape_html(symbol)
+    base_unit = symbol.split("/")[0] if "/" in symbol else "sh"
+
+    lines = [
+        f"{icon} {attr}  <b>BUY</b>  <code>{sym_clean}</code>",
+        "",
+        f"Price:    <code>{_fmt_money(price, ccy)}</code>",
+        f"Size:     <code>{size_units:.4f} {base_unit}</code>  ({_fmt_money(size_usd, ccy)})",
+    ]
+    if stop is not None and stop > 0:
+        stop_pct = (stop - price) / price * 100 if price else 0
+        lines.append(f"Stop:     <code>{_fmt_money(stop, ccy)}</code>  ({_fmt_pct(stop_pct)})")
+    if score is not None:
+        lines.append(f"Score:    <code>{score:.0f}/100</code>")
+    if rationale:
+        lines.append(f"<i>{_escape_html(rationale[:120])}</i>")
+    if queued:
+        lines.append("")
+        lines.append("<i>Queued — fill prochaine session</i>")
+    notify("\n".join(lines))
+
+
+def notify_shadow_sell(symbol: str, entry_price: float, exit_price: float,
+                       pnl_usd: float, pnl_pct: float, reason: str,
+                       duration_sec: float = None, strategy_name: str = None,
+                       ccy: str = "USD"):
+    """Shadow bot SELL — même structure que notify_sell, préfixe [SHADOW]."""
+    attr = "[SHADOW]"
+    abbr = strategy_name[:4].upper() if strategy_name else None
+    if abbr:
+        attr = f"[SHADOW·{abbr}]"
+    sym_clean = _escape_html(symbol)
+
+    if reason in ("stop_loss", "broker_stop_fill"):
+        icon = ICON_STOP_LOSS
+    elif pnl_pct >= 5.0:
+        icon = ICON_EXIT_BIG_WIN
+    elif pnl_usd >= 0:
+        icon = ICON_EXIT_WIN
+    else:
+        icon = ICON_EXIT_LOSS
+
+    lines = [
+        f"{icon} {attr}  <b>SELL</b>  <code>{sym_clean}</code>",
+        "",
+        f"P&amp;L:      <code>{_fmt_money(pnl_usd, ccy, sign=True)}</code>  ({_fmt_pct(pnl_pct)})",
+    ]
+    if duration_sec is not None and duration_sec > 0:
+        lines.append(f"Duration: <code>{_fmt_duration(duration_sec)}</code>")
+    lines.append(f"Exit:     <code>{_escape_html(reason)}</code>")
+    lines.append(
+        f"Entry→Exit: <code>{_fmt_money(entry_price, ccy)}</code> → "
+        f"<code>{_fmt_money(exit_price, ccy)}</code>"
+    )
+    notify("\n".join(lines))
+
+
 # ── Rapport quotidien ────────────────────────────────────────────────────────
+
+def _ascii_bar(pct: float, width: int = 10) -> str:
+    """Barre ASCII pour visualisation mobile-safe: `███████░░░ 78%`.
+
+    Args:
+        pct: 0-100. Tronqué à [0, 100].
+        width: nombre de cellules (défaut 10).
+    """
+    pct = max(0, min(100, pct))
+    filled = round(pct / 100 * width)
+    return "█" * filled + "░" * (width - filled)
+
+
+def notify_daily_report(
+    date_str: str,
+    pnl_today_usd: float, pnl_today_pct: float, pnl_today_trades: int,
+    pnl_open_usd: float, pnl_open_pct: float, open_positions: int,
+    attribution: list,
+    win_rate_today: tuple = None,  # (wins, losses)
+    win_rate_7d_pct: float = None,
+    peak_dd_pct: float = None, dd_limit_pct: float = -25.0,
+    capital_at_risk_usd: float = None, capital_total_usd: float = None,
+    regime_today: str = None, regime_yesterday: str = None,
+    pnl_yesterday_usd: float = None,
+    ccy: str = "USD",
+):
+    """Rapport quotidien enrichi (Freqtrade-style + attribution bars).
+
+    Args:
+        date_str:        '2026-05-14'
+        pnl_today_usd:   P&L USD réalisé aujourd'hui (trades clos)
+        pnl_today_pct:   P&L % réalisé aujourd'hui
+        pnl_today_trades: nombre de trades clos aujourd'hui
+        pnl_open_usd:    P&L USD non réalisé (positions ouvertes)
+        pnl_open_pct:    P&L % non réalisé
+        open_positions:  nombre de positions ouvertes
+        attribution:     list of dict {id, label, pnl_usd, pnl_pct_of_total}
+                         exemple: [{'id': 'a', 'label': 'BotA (ST)', 'pnl_usd': 318.4, 'pnl_pct_of_total': 78}, ...]
+        win_rate_today:  (n_wins, n_losses) pour aujourd'hui
+        win_rate_7d_pct: win rate moyen sur 7 jours
+        peak_dd_pct:     drawdown peak depuis init (négatif)
+        dd_limit_pct:    seuil kill switch (défaut -25%)
+        capital_at_risk_usd: somme MTM positions ouvertes
+        capital_total_usd:   capital Z total
+        regime_today:    engine au moment du report
+        regime_yesterday: pour delta
+        pnl_yesterday_usd: pour delta visuel
+
+    Format mockup E (~600 chars):
+        📅 Daily Report — 2026-05-14
+
+        P&L Today
+          Closed:  +$318.40  (+3.2%)  3 trades
+          Open:    +$87.20   (+0.9%)  2 positions
+          Net:     +$405.60  (+4.1%)
+          vs hier: +$87.40 (+27%)
+
+        Attribution
+          BotA (ST):   +$318.40  ███████░░░ 78%
+          BotG (CTA):    +$0.00  ░░░░░░░░░░  0%
+          Shadow:       +$87.20  ██░░░░░░░░ 22%
+
+        Win Rate  3W / 0L (100%)  — 7d avg: 62%
+
+        Risk
+          Peak DD:    −3.1%  🟢 vs −25% limit
+          At risk:    $998 / $25K  (4%)
+
+        Regime  BALANCED → BALANCED (stable)
+    """
+    lines = [f"{ICON_DAILY} <b>Daily Report — {_escape_html(date_str)}</b>", ""]
+
+    # ── Bloc P&L ──
+    pnl_net_usd = (pnl_today_usd or 0) + (pnl_open_usd or 0)
+    pnl_net_pct = (pnl_today_pct or 0) + (pnl_open_pct or 0)
+
+    lines.append("<b>P&amp;L Today</b>")
+    lines.append(
+        f"  Closed:  <code>{_fmt_money(pnl_today_usd, ccy, sign=True)}</code>  "
+        f"({_fmt_pct(pnl_today_pct)})  {pnl_today_trades} trades"
+    )
+    lines.append(
+        f"  Open:    <code>{_fmt_money(pnl_open_usd, ccy, sign=True)}</code>  "
+        f"({_fmt_pct(pnl_open_pct)})  {open_positions} positions"
+    )
+    lines.append(
+        f"  Net:     <code>{_fmt_money(pnl_net_usd, ccy, sign=True)}</code>  "
+        f"({_fmt_pct(pnl_net_pct)})"
+    )
+
+    # Delta vs hier
+    if pnl_yesterday_usd is not None:
+        delta_usd = pnl_today_usd - pnl_yesterday_usd
+        if pnl_yesterday_usd != 0:
+            delta_pct = (pnl_today_usd - pnl_yesterday_usd) / abs(pnl_yesterday_usd) * 100
+            lines.append(
+                f"  vs hier: <code>{_fmt_money(delta_usd, ccy, sign=True)}</code> "
+                f"({_fmt_pct(delta_pct, decimals=0)})"
+            )
+        else:
+            lines.append(
+                f"  vs hier: <code>{_fmt_money(delta_usd, ccy, sign=True)}</code> (hier flat)"
+            )
+
+    # ── Bloc Attribution ──
+    if attribution:
+        lines.append("")
+        lines.append("<b>Attribution</b>")
+        for item in attribution:
+            label = item.get("label", item.get("id", "?"))
+            pnl = item.get("pnl_usd", 0)
+            pct_of_total = item.get("pnl_pct_of_total", 0)
+            bar = _ascii_bar(abs(pct_of_total))
+            # Pad label à 12 chars pour alignement
+            lines.append(
+                f"  <code>{label:<13}</code> "
+                f"<code>{_fmt_money(pnl, ccy, sign=True):>9}</code>  "
+                f"<code>{bar}</code> {pct_of_total:.0f}%"
+            )
+
+    # ── Bloc Win Rate ──
+    if win_rate_today:
+        wins, losses = win_rate_today
+        total = wins + losses
+        wr_pct = (wins / total * 100) if total > 0 else 0
+        wr_line = f"<b>Win Rate</b>  {wins}W / {losses}L ({wr_pct:.0f}%)"
+        if win_rate_7d_pct is not None:
+            wr_line += f"  —  7d avg: {win_rate_7d_pct:.0f}%"
+        lines.append("")
+        lines.append(wr_line)
+
+    # ── Bloc Risk ──
+    if peak_dd_pct is not None or capital_at_risk_usd is not None:
+        lines.append("")
+        lines.append("<b>Risk</b>")
+        if peak_dd_pct is not None:
+            # Icône proximité kill switch
+            ratio = peak_dd_pct / dd_limit_pct if dd_limit_pct != 0 else 0
+            if ratio < 0.5:
+                dd_icon = "🟢"
+            elif ratio < 0.8:
+                dd_icon = "🟡"
+            else:
+                dd_icon = "🔴"
+            lines.append(
+                f"  Peak DD:    <code>{_fmt_pct(peak_dd_pct)}</code>  "
+                f"{dd_icon} vs {_fmt_pct(dd_limit_pct, decimals=0)} limit"
+            )
+        if capital_at_risk_usd is not None and capital_total_usd is not None and capital_total_usd > 0:
+            risk_pct = capital_at_risk_usd / capital_total_usd * 100
+            # Format compact pour le total (K si > 10000)
+            if capital_total_usd >= 10000:
+                cap_str = f"${capital_total_usd/1000:.0f}K"
+            else:
+                cap_str = _fmt_money(capital_total_usd, ccy)
+            lines.append(
+                f"  At risk:    <code>{_fmt_money(capital_at_risk_usd, ccy)}</code> / "
+                f"<code>{cap_str}</code>  ({risk_pct:.0f}%)"
+            )
+
+    # ── Régime ──
+    if regime_today:
+        lines.append("")
+        if regime_yesterday and regime_yesterday != regime_today:
+            lines.append(
+                f"<b>Regime</b>  {_escape_html(regime_yesterday)} → "
+                f"{_escape_html(regime_today)}"
+            )
+        else:
+            lines.append(f"<b>Regime</b>  {_escape_html(regime_today)} (stable)")
+
+    notify("\n".join(lines))
+
 
 def notify_daily_health(bots_status: list[dict], z_capital: float, engine: str, days_running: int):
     """Rapport quotidien envoyé 1x/jour à 19h UTC.
