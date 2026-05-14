@@ -366,14 +366,16 @@ def execute_buy(symbol: str, size: float, price_estimate: float,
             except Exception as e:
                 logger.warning(f"[ALPACA] post-fill clamp {symbol} skip: {e}")
 
-        notify(f"✅ BUY {symbol} {filled_qty:.4f}@{filled_avg:.2f}$")
+        # Notif BUY fill: déléguée au caller (bot.py via buffer_buy) — évite double notif
         return OrderResult(success=True, order_id=order_id,
                            filled_size=filled_qty, filled_price=filled_avg)
 
     except Exception as e:
         err_msg = str(e)
         logger.error(f"[ALPACA] BUY {symbol} ÉCHOUÉ: {err_msg}")
-        notify(f"❌ BUY {symbol} échec: {err_msg[:80]}")
+        # Erreur critique — notif immédiate
+        from live.notifier import ICON_EXIT_LOSS
+        notify(f"{ICON_EXIT_LOSS} <b>BUY {symbol} échec</b>\n<code>{err_msg[:160]}</code>")
         return OrderResult(success=False, error=err_msg)
 
 
@@ -416,21 +418,24 @@ def execute_sell(symbol: str, size: float, price_estimate: float,
         filled = _wait_for_fill(order_id, max_wait_sec)
         if filled is None:
             logger.error(f"[ALPACA] SELL {order_id} non rempli après {max_wait_sec}s")
-            notify(f"🚨 SELL {symbol} non rempli ({max_wait_sec}s) — manuel requis")
+            from live.notifier import ICON_CRITICAL
+            notify(f"{ICON_CRITICAL} <b>SELL {symbol} non rempli</b>\n"
+                   f"Timeout {max_wait_sec}s [{reason}] — intervention manuelle requise")
             return OrderResult(success=False, order_id=order_id,
                                error=f"Timeout {max_wait_sec}s")
 
         filled_qty = float(filled.get("filled_qty", size))
         filled_avg = float(filled.get("filled_avg_price") or price_estimate)
-        icon = "🔴" if "stop" in reason else "⏹"
-        notify(f"{icon} SELL {symbol} {filled_qty:.4f}@{filled_avg:.2f}$ [{reason}]")
+        # Notif SELL fill: déléguée au caller (bot.py via buffer_sell) — évite double notif
         return OrderResult(success=True, order_id=order_id,
                            filled_size=filled_qty, filled_price=filled_avg)
 
     except Exception as e:
         err_msg = str(e)
         logger.error(f"[ALPACA] SELL {symbol} ÉCHOUÉ: {err_msg}")
-        notify(f"🚨 SELL {symbol} échec [{reason}]: {err_msg[:80]} — manuel requis")
+        from live.notifier import ICON_CRITICAL
+        notify(f"{ICON_CRITICAL} <b>SELL {symbol} échec [{reason}]</b>\n"
+               f"<code>{err_msg[:160]}</code>\nIntervention manuelle requise")
         return OrderResult(success=False, error=err_msg)
 
 

@@ -418,12 +418,31 @@ def process_symbol(
                 f"PnL: {pnl:+.2f}€ ({pnl_r:+.1f}R) | Capital: {state['capital']:.2f}€",
                 "BUY" if pnl > 0 else "SELL",
             )
-            # ── Notification Telegram ──
-            # BUG-13 : "take_profit" jamais généré (pas de TP hard dans cette stratégie) — cas absorbé par else
-            if reason == "stop_loss":
-                notify(f"🔴 <b>{symbol}</b> SL {pnl:.2f}€ ({pnl_r:+.1f}R)")
-            else:
-                notify(f"⏹ <b>{symbol}</b> EXIT [{reason}] {pnl:+.2f}€ ({pnl_r:+.1f}R)")
+            # ── Notification Telegram (format structuré + cycle batching) ──
+            try:
+                from live.notifier import buffer_sell
+                _entry_dt = position.get("date")
+                _dur_sec = None
+                if _entry_dt:
+                    try:
+                        _ed = datetime.fromisoformat(_entry_dt.replace("Z", "+00:00"))
+                        _dur_sec = (datetime.now(timezone.utc) - _ed).total_seconds()
+                    except Exception:
+                        pass
+                _entry = position["entry"]
+                _pnl_pct = ((exit_price_eff - _entry) / _entry * 100) if _entry > 0 else 0
+                buffer_sell(
+                    bot_id="a",
+                    symbol=symbol,
+                    entry_price=_entry,
+                    exit_price=exit_price_eff,
+                    pnl_usd=pnl,
+                    pnl_pct=_pnl_pct,
+                    reason=reason,
+                    duration_sec=_dur_sec,
+                )
+            except Exception as _e:
+                log(f"[notif] buffer_sell error: {_e}", "WARN")
 
             # ── Win rate degradation alert ──
             recent = state.get("trades", [])[-10:]
@@ -631,10 +650,21 @@ def process_symbol(
             f"Frais: {fee_entry:.2f}€",
             "BUY",
         )
-        notify(
-            f"▲ <b>{symbol}</b> BUY | {effective_buy:.2f}€ | "
-            f"SL {pos['stop_loss']:.2f}€ | TP {pos['take_profit']:.2f}€"
-        )
+        # Notification structurée + cycle batching
+        try:
+            from live.notifier import buffer_buy
+            buffer_buy(
+                bot_id="a",
+                symbol=symbol,
+                price=effective_buy,
+                size_units=pos["size"],
+                size_usd=total_cost,
+                stop=pos["stop_loss"],
+                risk_usd=pos["risk_eur"],
+                capital_total=total_value,
+            )
+        except Exception as _e:
+            log(f"[notif] buffer_buy error: {_e}", "WARN")
         _send_trade_chart(symbol, df, effective_buy, pos["stop_loss"], pos["take_profit"])
 
     return state

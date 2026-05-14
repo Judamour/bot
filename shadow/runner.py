@@ -227,13 +227,24 @@ def _reconcile_stops_once() -> None:
             filled_price = float(order.get("filled_avg_price") or stop_level)
             entry = float(m.get("entry_price") or 0)
             pnl_pct = ((filled_price - entry) / entry * 100) if entry > 0 else 0.0
+            qty = float(m.get("qty") or 0)
+            pnl_usd = (filled_price - entry) * qty if entry > 0 else 0.0
             rg.register_stop(alp_sym, pnl=0.0, now=now)
             log_event("stop_filled", {
                 "symbol": alp_sym, "filled_price": filled_price,
                 "stop_level": stop_level,
             })
             print(f"[STOP-MONITOR] FILLED {alp_sym} @ {filled_price} (cooldown 5j)", flush=True)
-            notify(f"🔴 Shadow STOP {alp_sym} @{filled_price:.2f}$ ({pnl_pct:+.1f}%)")
+            # Format structuré [SHADOW] SELL
+            try:
+                from live.notifier import notify_shadow_sell
+                notify_shadow_sell(
+                    symbol=alp_sym, entry_price=entry, exit_price=filled_price,
+                    pnl_usd=pnl_usd, pnl_pct=pnl_pct, reason="broker_stop_fill",
+                    strategy_name=m.get("strategy"),
+                )
+            except Exception as _e:
+                notify(f"⚠️ Shadow STOP {alp_sym} @{filled_price:.2f}$ ({pnl_pct:+.1f}%) [notif_err: {_e}]")
             pos_meta.pop(alp_sym, None)
             mutated = True
             filled += 1
@@ -386,12 +397,22 @@ def run_cycle():
                 if sell_res.get("ok"):
                     pnl_pct = (close - entry) / entry
                     exit_p = sell_res.get("filled_avg", close)
+                    pnl_usd = (exit_p - entry) * qty_avail
                     log_event("macro_take_profit", {
                         "symbol": sym, "reason": "SHIELD" if shielded else "HALT",
                         "entry": entry, "exit": exit_p, "pnl_pct": pnl_pct,
                     })
                     print(f"[SHADOW] MACRO_TP {sym} ({'SHIELD' if shielded else 'HALT'}) entry={entry:.4f} exit≈{close:.4f} pnl=+{pnl_pct*100:.1f}%", flush=True)
-                    notify(f"⏹ Shadow EXIT {sym} {entry:.2f}→{exit_p:.2f}$ +{pnl_pct*100:.1f}% [{'SHIELD' if shielded else 'HALT'}]")
+                    try:
+                        from live.notifier import notify_shadow_sell
+                        notify_shadow_sell(
+                            symbol=sym, entry_price=entry, exit_price=exit_p,
+                            pnl_usd=pnl_usd, pnl_pct=pnl_pct * 100,
+                            reason=f"macro_tp_{'shield' if shielded else 'halt'}",
+                            strategy_name=m.get("strategy"),
+                        )
+                    except Exception as _e:
+                        notify(f"⏹ Shadow EXIT {sym} {entry:.2f}→{exit_p:.2f}$ +{pnl_pct*100:.1f}% [notif_err: {_e}]")
                     pos_meta.pop(sym, None)
                     continue
                 else:
@@ -649,9 +670,18 @@ def run_cycle():
             })
             suffix = f" [QUEUED — fill prochaine session]" if queued else ""
             print(f"[SHADOW] BUY rank={rank} {sig.symbol} ({sig.strategy}) score={sig.score:.1f} @ {fill_price:.4f} qty={fill_qty:.6f} stop={stop_initial:.4f} notional=${size_res.notional:.0f}{suffix}", flush=True)
-            # Notify Telegram (concise — 1 ligne)
-            q_tag = " [Q]" if queued else ""
-            notify(f"🟦 Shadow BUY {sig.symbol} {fill_qty:.4f}@{fill_price:.2f}$ score={sig.score:.0f} stop={stop_initial:.2f}{q_tag}")
+            # Notification structurée [SHADOW] BUY
+            try:
+                from live.notifier import notify_shadow_buy
+                notify_shadow_buy(
+                    symbol=sig.symbol, strategy_name=sig.strategy,
+                    price=fill_price, size_units=fill_qty,
+                    size_usd=size_res.notional, stop=stop_initial,
+                    score=sig.score, rationale=sig.rationale,
+                    queued=queued,
+                )
+            except Exception as _e:
+                notify(f"🟦 Shadow BUY {sig.symbol} {fill_qty:.4f}@{fill_price:.2f}$ [notif_err: {_e}]")
             n_open += 1
 
     # 8. Sauve meta + persiste risk guard (prune expired entries pour garder l'état compact)

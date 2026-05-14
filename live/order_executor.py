@@ -440,8 +440,7 @@ def execute_buy(symbol: str, size: float, price_estimate: float,
     if _is_xstock(symbol):
         logger.info(f"[ORDER] BUY {symbol} (xStock raw) size={size:.6f} @ ~{price_estimate:.4f}$ ({order_value:.2f}$)")
         result = _execute_xstock_order(symbol, "buy", size, price_estimate)
-        if result.success:
-            notify(f"✅ BUY {symbol} {size:.4f}@{price_estimate:.2f}$")
+        # Notif BUY fill: déléguée au caller (bot.py via buffer_buy) — évite double notif
         return result
 
     try:
@@ -469,7 +468,7 @@ def execute_buy(symbol: str, size: float, price_estimate: float,
             return OrderResult(success=False, order_id=order_id,
                                error=f"Timeout {max_wait_sec}s — ordre annulé")
 
-        notify(f"✅ BUY {symbol} {filled['filled']:.4f}@{filled['average']:.2f}€")
+        # Notif BUY fill: déléguée au caller (bot.py via buffer_buy) — évite double notif
 
         return OrderResult(
             success=True,
@@ -482,7 +481,9 @@ def execute_buy(symbol: str, size: float, price_estimate: float,
         err_msg = str(e)
         logger.error(f"[ORDER] BUY {symbol} ÉCHOUÉ: {err_msg}")
         if not _is_silent_kraken_error(err_msg):
-            notify(f"❌ BUY {symbol} échec: {err_msg[:80]}")
+            # Erreur critique — notif immédiate (pas batchée)
+            from live.notifier import ICON_EXIT_LOSS
+            notify(f"{ICON_EXIT_LOSS} <b>BUY {symbol} échec</b>\n<code>{err_msg[:160]}</code>")
         return OrderResult(success=False, error=err_msg)
 
 
@@ -520,9 +521,7 @@ def execute_sell(symbol: str, size: float, price_estimate: float,
     if _is_xstock(symbol):
         logger.info(f"[ORDER] SELL {symbol} (xStock raw) size={size:.6f} @ ~{price_estimate:.4f}$ ({reason})")
         result = _execute_xstock_order(symbol, "sell", size, price_estimate)
-        if result.success:
-            icon = "🔴" if "stop" in reason else "⏹"
-            notify(f"{icon} SELL {symbol} {size:.4f}@{price_estimate:.2f}$ [{reason}]")
+        # Notif SELL fill: déléguée au caller (bot.py via buffer_sell) — évite double notif
         return result
 
     try:
@@ -542,12 +541,14 @@ def execute_sell(symbol: str, size: float, price_estimate: float,
             # Pour un SELL (exit), on log l'échec mais on ne ré-essaie pas automatiquement
             # L'opérateur doit intervenir manuellement
             logger.error(f"[ORDER] SELL {order_id} non rempli après {max_wait_sec}s — intervention manuelle requise")
-            notify(f"🚨 SELL {symbol} non rempli ({max_wait_sec}s) — manuel Kraken")
+            # Alerte critique — notif immédiate
+            from live.notifier import ICON_CRITICAL
+            notify(f"{ICON_CRITICAL} <b>SELL {symbol} non rempli</b>\n"
+                   f"Timeout {max_wait_sec}s — intervention manuelle Kraken requise")
             return OrderResult(success=False, order_id=order_id,
                                error=f"Timeout — vérifier Kraken manuellement")
 
-        icon = "🔴" if "stop" in reason else "⏹"
-        notify(f"{icon} SELL {symbol} {filled['filled']:.4f}@{filled['average']:.2f}€ [{reason}]")
+        # Notif SELL fill: déléguée au caller (bot.py via buffer_sell) — évite double notif
 
         return OrderResult(
             success=True,
