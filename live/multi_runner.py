@@ -576,6 +576,190 @@ def _trades_today_total(states: list) -> int:
     return n
 
 
+# ── Daily report enrichi (21h Paris / 19h UTC) ──────────────────────────────
+
+DAILY_SNAPSHOT_FILE = "logs/daily_snapshot.json"
+
+
+def _load_daily_snapshot() -> dict:
+    """Charge le snapshot du jour précédent pour comparaison delta."""
+    if not os.path.exists(DAILY_SNAPSHOT_FILE):
+        return {}
+    try:
+        with open(DAILY_SNAPSHOT_FILE) as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def _save_daily_snapshot(data: dict) -> None:
+    """Persiste le snapshot du jour pour le delta de demain."""
+    try:
+        os.makedirs(os.path.dirname(DAILY_SNAPSHOT_FILE), exist_ok=True)
+        with open(DAILY_SNAPSHOT_FILE, "w") as f:
+            json.dump(data, f, indent=2)
+    except Exception as e:
+        log(f"[daily_snapshot] save échec: {e}", "WARN")
+
+
+def _compute_pnl_today(state: dict) -> tuple[float, int, int, int]:
+    """Retourne (pnl_usd_today, n_trades, wins, losses) pour les trades fermés aujourd'hui."""
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    pnl, n, wins, losses = 0.0, 0, 0, 0
+    for t in state.get("trades", []) or []:
+        d = str(t.get("exit_date") or "")[:10]
+        if d == today:
+            p = float(t.get("pnl", 0) or 0)
+            pnl += p
+            n += 1
+            if p > 0:
+                wins += 1
+            elif p < 0:
+                losses += 1
+    return pnl, n, wins, losses
+
+
+def _compute_win_rate_7d(states: dict) -> float | None:
+    """Win rate moyen sur 7 jours glissants, tous bots confondus."""
+    from datetime import timedelta
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=7)).strftime("%Y-%m-%d")
+    wins, losses = 0, 0
+    for st in states.values():
+        for t in st.get("trades", []) or []:
+            d = str(t.get("exit_date") or "")[:10]
+            if d >= cutoff:
+                p = float(t.get("pnl", 0) or 0)
+                if p > 0:
+                    wins += 1
+                elif p < 0:
+                    losses += 1
+    total = wins + losses
+    if total == 0:
+        return None
+    return wins / total * 100
+
+
+def _send_daily_report(states: dict, z_summary: dict, ohlcv_daily: dict) -> None:
+    """Envoie le daily report enrichi via Telegram (notify_daily_report).
+
+    Args:
+        states: {'a': state_a, ..., 'j': state_j}
+        z_summary: résumé Bot Z (current_engine, regime, etc.)
+        ohlcv_daily: cache OHLCV pour valoriser positions ouvertes
+    """
+    from live.notifier import notify_daily_report, BOT_STRATEGY_ABBR
+
+    today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    # ── PnL today (clos aujourd'hui) ──
+    pnl_today_total = 0.0
+    n_trades_today = 0
+    wins_today = 0
+    losses_today = 0
+    per_bot_pnl = {}  # {bot_id: pnl_usd_today}
+    for bid, st in states.items():
+        if bid not in config.ACTIVE_BOTS:
+            continue
+        pnl, n, w, l = _compute_pnl_today(st)
+        pnl_today_total += pnl
+        n_trades_today += n
+        wins_today += w
+        losses_today += l
+        per_bot_pnl[bid] = pnl
+
+    # ── PnL open (positions actives, MTM) ──
+    pnl_open_total = 0.0
+    open_positions = 0
+    for bid, st in states.items():
+        if bid not in config.ACTIVE_BOTS:
+            continue
+        for sym, pos in st.get("positions", {}).items():
+            entry = pos.get("entry", 0)
+            size = pos.get("size", 0)
+            df = ohlcv_daily.get(sym) if ohlcv_daily else None
+            last_price = float(df["close"].iloc[-1]) if df is not None and len(df) > 0 else entry
+            pnl_open_total += (last_price - entry) * size
+            open_positions += 1
+
+    # ── Capital total Z ──
+    z_capital = z_summary.get("z_capital_eur") or 0  # historiquement nommé _eur mais c'est en USD now
+    pnl_today_pct = (pnl_today_total / z_capital * 100) if z_capital > 0 else 0
+    pnl_open_pct = (pnl_open_total / z_capital * 100) if z_capital > 0 else 0
+
+    # ── Attribution par bot ──
+    attribution = []
+    total_abs_pnl = sum(abs(v) for v in per_bot_pnl.values()) or 1
+    for bid in sorted(per_bot_pnl.keys()):
+        pnl = per_bot_pnl[bid]
+        pct = abs(pnl) / total_abs_pnl * 100 if total_abs_pnl > 0 else 0
+        # Signe : si pnl < 0, on garde pct positif pour la barre mais on indique perte via le montant
+        abbr = BOT_STRATEGY_ABBR.get(bid, "?")
+        attribution.append({
+            "id": bid,
+            "label": f"Bot{bid.upper()} ({abbr})",
+            "pnl_usd": pnl,
+            "pnl_pct_of_total": pct if pnl >= 0 else -pct,  # négatif = perte
+        })
+    # Trier par pnl_usd desc
+    attribution.sort(key=lambda x: x["pnl_usd"], reverse=True)
+
+    # ── Win rate 7d ──
+    wr_7d = _compute_win_rate_7d(states)
+
+    # ── Peak DD depuis init ──
+    initial_capital = 0
+    for bid, st in states.items():
+        if bid in config.ACTIVE_BOTS:
+            initial_capital += st.get("original_capital", st.get("initial_capital", 0)) or 0
+    current_capital = z_capital
+    # Peak DD se calcule depuis le snapshot persisté
+    snap = _load_daily_snapshot()
+    peak_cap = max(snap.get("peak_capital_usd", initial_capital), current_capital)
+    peak_dd_pct = ((current_capital - peak_cap) / peak_cap * 100) if peak_cap > 0 else 0
+
+    # ── Capital at risk = somme MTM positions ouvertes ──
+    cap_at_risk = 0
+    for bid, st in states.items():
+        if bid not in config.ACTIVE_BOTS:
+            continue
+        for sym, pos in st.get("positions", {}).items():
+            entry = pos.get("entry", 0)
+            size = pos.get("size", 0)
+            df = ohlcv_daily.get(sym) if ohlcv_daily else None
+            last_price = float(df["close"].iloc[-1]) if df is not None and len(df) > 0 else entry
+            cap_at_risk += last_price * size
+
+    # ── Régime today / yesterday ──
+    regime_today = z_summary.get("current_engine") or "?"
+    regime_yest = snap.get("regime")
+
+    # ── Delta vs hier ──
+    pnl_yesterday = snap.get("pnl_today_usd")
+
+    # ── Envoi ──
+    notify_daily_report(
+        date_str=today_str,
+        pnl_today_usd=pnl_today_total, pnl_today_pct=pnl_today_pct, pnl_today_trades=n_trades_today,
+        pnl_open_usd=pnl_open_total, pnl_open_pct=pnl_open_pct, open_positions=open_positions,
+        attribution=attribution,
+        win_rate_today=(wins_today, losses_today),
+        win_rate_7d_pct=wr_7d,
+        peak_dd_pct=peak_dd_pct, dd_limit_pct=config.MAX_DRAWDOWN * 100,
+        capital_at_risk_usd=cap_at_risk, capital_total_usd=z_capital,
+        regime_today=regime_today, regime_yesterday=regime_yest,
+        pnl_yesterday_usd=pnl_yesterday,
+    )
+
+    # ── Snapshot pour demain ──
+    _save_daily_snapshot({
+        "date": today_str,
+        "pnl_today_usd": pnl_today_total,
+        "z_capital_usd": z_capital,
+        "peak_capital_usd": peak_cap,
+        "regime": regime_today,
+    })
+
+
 # ── Archive trades (anti-bloat state.json) ──────────────────────────────────
 
 KEEP_LAST_N_TRADES = int(os.getenv("KEEP_LAST_N_TRADES", "500"))
@@ -1435,6 +1619,33 @@ def run():
             # ── 15. Contest summary ───────────────────────────────────────────
             print_contest_status(state_a, state_b, state_c, state_g, state_h, state_i, state_j, ohlcv_daily)
 
+            # ── 15a. Flush cycle batch (BUYs/SELLs accumulés depuis Bot A et autres) ─
+            # Si NOTIF_BATCH_CYCLE=true (défaut), envoie 1 message groupé.
+            # Si false, les notifs ont déjà été envoyées individuellement et le buffer est vide.
+            try:
+                from live.notifier import flush_cycle
+                _now_utc_cycle = datetime.now(timezone.utc)
+                _z_engine_now = z_summary.get("current_engine", "BALANCED") if z_summary else "?"
+                _z_cap_now = z_summary.get("z_capital_eur") if z_summary else None
+                # Capital déployé = somme MTM des positions ouvertes A+B+C+G
+                _cap_deployed = 0.0
+                for _st in (state_a, state_b, state_c, state_g):
+                    for _sym, _p in _st.get("positions", {}).items():
+                        _df = ohlcv_daily.get(_sym) if ohlcv_daily else None
+                        _last = float(_df["close"].iloc[-1]) if _df is not None and len(_df) > 0 else _p.get("entry", 0)
+                        _cap_deployed += _last * _p.get("size", 0)
+                _vix_now = z_summary.get("last_regime_info", {}).get("vix") if z_summary else None
+                flush_cycle(
+                    hour_utc=_now_utc_cycle.hour,
+                    engine=_z_engine_now,
+                    capital_deployed=_cap_deployed,
+                    capital_total=_z_cap_now,
+                    vix=_vix_now,
+                    regime=z_summary.get("regime") if z_summary else None,
+                )
+            except Exception as _e:
+                log(f"[flush_cycle] erreur: {_e}", "WARN")
+
             # ── Cycle summary Telegram (résumé compact chaque cycle) ──────────
             if z_summary:
                 try:
@@ -1477,37 +1688,20 @@ def run():
                 except Exception as _e:
                     log(f"[notify_cycle_summary] erreur: {_e}", "WARN")
 
-            # ── 15b. Daily health report (1x/jour au cycle 19h UTC = 21h Paris) ──
+            # ── 15b. Daily report enrichi (1x/jour au cycle 19h UTC = 21h Paris) ──
             _now_utc = datetime.now(timezone.utc)
             if _now_utc.hour == 19 and z_summary:
                 try:
-                    from live.notifier import notify_daily_health
-                    _all_bots = [
-                        ("A", "Supertrend", state_a), ("B", "Momentum", state_b),
-                        ("C", "Breakout", state_c), ("G", "Trend CTA", state_g),
-                        ("H", "VCB", state_h), ("I", "RS Leaders", state_i), ("J", "MeanRev", state_j),
-                    ]
-                    _bots_status = []
-                    for _bid, _bname, _bstate in _all_bots:
-                        _bval = _portfolio_value(_bstate, ohlcv_daily)
-                        _binit = _bstate.get("original_capital", _bstate.get("initial_capital", INITIAL_CAPITAL_PER_BOT))
-                        _bpnl = ((_bval - _binit) / _binit * 100) if _binit > 0 else 0
-                        _bots_status.append({
-                            "id": _bid, "name": _bname,
-                            "capital": _bval,
-                            "positions": len(_bstate.get("positions", {})),
-                            "trades": len(_bstate.get("trades", [])),
-                            "dd_frozen": _bstate.get("dd_frozen", False),
-                            "pnl_pct": _bpnl,
-                        })
-                    notify_daily_health(
-                        _bots_status,
-                        z_capital=z_summary.get("z_capital_eur", 10000),
-                        engine=z_summary.get("current_engine", "?"),
-                        days_running=z_summary.get("days_running", 0),
+                    _send_daily_report(
+                        states={"a": state_a, "b": state_b, "c": state_c, "g": state_g,
+                                "h": state_h, "i": state_i, "j": state_j},
+                        z_summary=z_summary,
+                        ohlcv_daily=ohlcv_daily,
                     )
                 except Exception as _e:
-                    log(f"[daily_health] erreur: {_e}", "WARN")
+                    log(f"[daily_report] erreur: {_e}", "WARN")
+                    import traceback
+                    log(traceback.format_exc(), "WARN")
 
             # ── 16. Drawdown checks ───────────────────────────────────────────
             # DD baseline = z_budget_eur (allocation cible actuelle Bot Z) ou
