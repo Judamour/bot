@@ -111,3 +111,153 @@ def process_wallet(
         last_seen_ts = max(last_seen_ts, ts)
 
     return last_seen_ts, decisions
+
+
+import os
+import signal
+import sys
+import time
+from pathlib import Path
+
+from live.copytrade import state as state_mod
+from live.copytrade.targets import (
+    CAPITAL_PER_WALLET,
+    PAPER_CAPITAL_USD,
+    TARGETS,
+)
+
+LOG_DIR = Path(os.getenv("BOT_CP_LOG_DIR", "logs/copytrade"))
+POLL_INTERVAL_S = int(os.getenv("BOT_CP_POLL_S", "60"))
+
+_stop = False
+
+
+def _signal_handler(signum, _frame):
+    global _stop
+    log.info("received signal %d, stopping after current cycle", signum)
+    _stop = True
+
+
+def _load_portfolios() -> dict[str, PaperPortfolio]:
+    portfolio_path = LOG_DIR / "portfolio.json"
+    raw = state_mod.load_portfolio(str(portfolio_path))
+    out: dict[str, PaperPortfolio] = {}
+    for t in TARGETS:
+        pseudo = t["pseudonym"]
+        if pseudo in raw:
+            out[pseudo] = PaperPortfolio.from_dict(raw[pseudo])
+        else:
+            out[pseudo] = PaperPortfolio(wallet=pseudo, cash_usd=CAPITAL_PER_WALLET)
+    return out
+
+
+def _save_portfolios(portfolios: dict[str, PaperPortfolio]) -> None:
+    portfolio_path = LOG_DIR / "portfolio.json"
+    body = {pseudo: pf.to_dict() for pseudo, pf in portfolios.items()}
+    state_mod.save_portfolio(str(portfolio_path), body)
+
+
+# Track last-snapshotted UTC date so we append at most once per day
+_last_equity_date: str | None = None
+
+
+def _maybe_snapshot_equity(portfolios: dict[str, PaperPortfolio]) -> None:
+    """Append a daily MTM snapshot to equity.jsonl when the UTC date changes.
+
+    For MTM we use the position avg_price as fallback (no live price fetch
+    each cycle to stay light). The dashboard can compute richer MTM on demand.
+    """
+    from datetime import datetime, timezone
+
+    global _last_equity_date
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    if _last_equity_date == today:
+        return
+
+    per_wallet = {}
+    total = 0.0
+    for pseudo, pf in portfolios.items():
+        eq = pf.equity({})  # avg_price fallback
+        per_wallet[pseudo] = eq
+        total += eq
+
+    state_mod.append_equity(str(LOG_DIR / "equity.jsonl"), {
+        "ts": int(time.time()),
+        "date": today,
+        "per_wallet_eq": per_wallet,
+        "total_eq": total,
+    })
+    _last_equity_date = today
+    log.info("equity snapshot for %s: total=$%.2f", today, total)
+
+
+def _smoke_test() -> None:
+    """Hit Data API once to fail-fast on geoblock / network at boot."""
+    test_wallet = TARGETS[0]["wallet"]
+    try:
+        data_api.trades(test_wallet, limit=1)
+        log.info("smoke test ok: Data API reachable")
+    except data_api.DataAPIError as e:
+        log.error("smoke test failed: %s — aborting", e)
+        sys.exit(2)
+
+
+def run() -> None:
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s %(message)s",
+    )
+    signal.signal(signal.SIGTERM, _signal_handler)
+    signal.signal(signal.SIGINT, _signal_handler)
+
+    log.info("bot-cp starting: capital=$%.2f, %d wallets, poll=%ds",
+             PAPER_CAPITAL_USD, len(TARGETS), POLL_INTERVAL_S)
+    _smoke_test()
+
+    state = state_mod.load_state(str(LOG_DIR / "state.json"))
+    last_seen = state.get("last_seen_ts", {})
+    portfolios = _load_portfolios()
+
+    decisions_path = str(LOG_DIR / "decisions.jsonl")
+
+    while not _stop:
+        cycle_start = time.time()
+        for t in TARGETS:
+            pseudo = t["pseudonym"]
+            wallet = t["wallet"]
+            try:
+                new_ts, decisions = process_wallet(
+                    t, portfolios[pseudo],
+                    last_seen_ts=int(last_seen.get(wallet, 0)),
+                    capital_per_wallet=CAPITAL_PER_WALLET,
+                )
+                for d in decisions:
+                    state_mod.append_decision(decisions_path, d)
+                if new_ts > int(last_seen.get(wallet, 0)):
+                    last_seen[wallet] = new_ts
+                if decisions:
+                    log.info("%s: %d new trade(s) processed", pseudo, len(decisions))
+            except Exception:
+                log.exception("error processing %s, continuing", pseudo)
+
+        # Persist after each cycle
+        state_mod.save_state(str(LOG_DIR / "state.json"), {"last_seen_ts": last_seen})
+        _save_portfolios(portfolios)
+
+        # Daily equity snapshot (UTC date change triggers append)
+        _maybe_snapshot_equity(portfolios)
+
+        # Sleep, but check stop flag every second
+        elapsed = time.time() - cycle_start
+        remaining = max(0.0, POLL_INTERVAL_S - elapsed)
+        slept = 0.0
+        while slept < remaining and not _stop:
+            time.sleep(1.0)
+            slept += 1.0
+
+    log.info("bot-cp stopped cleanly")
+
+
+if __name__ == "__main__":
+    run()
