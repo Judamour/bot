@@ -7,6 +7,10 @@ log = logging.getLogger(__name__)
 
 MAX_TRADE_PCT = 0.50
 MIN_PAPER_SIZE_USD = 1.0
+# Hard cap on how old a trade can be when the bot first boots a wallet (last_seen_ts == 0).
+# Without this the first cycle replays days of historical trades, which inflates PnL
+# with a retroactive mini-backtest the bot was never present for.
+BOOTSTRAP_CUTOFF_S = 3600  # 1 hour
 
 
 def compute_paper_size(
@@ -40,11 +44,19 @@ def process_wallet(
         (new_last_seen_ts, decisions) where decisions is a list of structured
         records (one per detected trade, including skipped).
     """
+    import time as _time
     wallet = target["wallet"]
-    new_trades = data_api.trades(wallet, limit=50, since_ts=last_seen_ts)
+    # First-boot guard: if we've never seen this wallet, only consider trades
+    # within the last BOOTSTRAP_CUTOFF_S seconds. Avoids replaying ancient
+    # history as if it were happening now.
+    effective_since = last_seen_ts
+    if last_seen_ts == 0:
+        effective_since = int(_time.time()) - BOOTSTRAP_CUTOFF_S
+    new_trades = data_api.trades(wallet, limit=50, since_ts=effective_since)
     decisions: list[dict] = []
     if not new_trades:
-        return last_seen_ts, decisions
+        # Advance last_seen_ts to the cutoff so subsequent cycles use real time
+        return max(last_seen_ts, effective_since), decisions
 
     # process oldest first so dedup / position state evolves correctly
     for t in sorted(new_trades, key=lambda x: int(x["timestamp"])):
@@ -82,6 +94,15 @@ def process_wallet(
             continue
 
         if side == "BUY":
+            # Cash check: refuse to overdraw. In live this is what Polymarket would do.
+            if portfolio.cash_usd < paper_size:
+                decision["action"] = "skipped"
+                decision["rationale"] = (
+                    f"insufficient_cash (have ${portfolio.cash_usd:.2f}, need ${paper_size:.2f})"
+                )
+                decisions.append(decision)
+                last_seen_ts = max(last_seen_ts, ts)
+                continue
             portfolio.buy(
                 condition_id=condition_id, asset=asset, outcome=outcome,
                 outcome_index=outcome_index, price=price, usd_size=paper_size,

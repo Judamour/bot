@@ -103,3 +103,89 @@ def test_sell_reduces_position(tmp_path):
     assert pf.positions[0]["size"] == pytest.approx(5.0)
     assert new_last_seen == 200
     assert decisions[0]["action"] == "executed"
+
+
+def test_bootstrap_cutoff_skips_old_trades(tmp_path):
+    """When last_seen_ts == 0 (first boot), only trades within BOOTSTRAP_CUTOFF_S
+    must be considered — avoids replaying historical PnL retroactively."""
+    import time as _time
+    now = int(_time.time())
+    target = {"pseudonym": "T1", "wallet": "0xW", "allocation_pct": 1.0}
+    pf = PaperPortfolio(wallet="T1", cash_usd=1000.0)
+    captured = {}
+
+    def fake_trades(wallet, limit=50, since_ts=None):
+        captured["since_ts"] = since_ts
+        return []
+
+    with patch("live.copytrade.runner.data_api.trades", side_effect=fake_trades):
+        new_last_seen, decisions = runner_mod.process_wallet(
+            target, pf, last_seen_ts=0, capital_per_wallet=1000.0,
+        )
+
+    # since_ts must be ~now - BOOTSTRAP_CUTOFF_S (within 5s for clock slack)
+    expected_floor = now - runner_mod.BOOTSTRAP_CUTOFF_S
+    assert captured["since_ts"] is not None
+    assert abs(captured["since_ts"] - expected_floor) < 5
+    # And on empty response, last_seen_ts must advance to the cutoff so we
+    # don't keep re-applying it forever.
+    assert new_last_seen >= expected_floor - 1
+
+
+def test_bootstrap_cutoff_does_not_apply_when_resuming(tmp_path):
+    """When last_seen_ts > 0, the cutoff must NOT override it (continuity)."""
+    target = {"pseudonym": "T1", "wallet": "0xW", "allocation_pct": 1.0}
+    pf = PaperPortfolio(wallet="T1", cash_usd=1000.0)
+    captured = {}
+
+    def fake_trades(wallet, limit=50, since_ts=None):
+        captured["since_ts"] = since_ts
+        return []
+
+    with patch("live.copytrade.runner.data_api.trades", side_effect=fake_trades):
+        runner_mod.process_wallet(
+            target, pf, last_seen_ts=12345, capital_per_wallet=1000.0,
+        )
+
+    assert captured["since_ts"] == 12345  # untouched
+
+
+def test_insufficient_cash_skips_buy(tmp_path):
+    """A BUY whose paper_size exceeds current cash is skipped, not executed."""
+    target = {"pseudonym": "T1", "wallet": "0xW", "allocation_pct": 1.0}
+    pf = PaperPortfolio(wallet="T1", cash_usd=10.0)  # only $10 left
+    # Trade that would compute to a big paper_size: target trades 5000 @ $0.5
+    # with AUM 1000 → trade_pct = 2500/1000 = 2.5, clamped to 0.5
+    # paper_size = capital_per_wallet * 0.5 = $50 → exceeds $10 cash
+    trades = [_trade(ts=100, side="BUY", size=5000, price=0.5)]
+
+    with patch("live.copytrade.runner.data_api.trades", return_value=trades), \
+         patch("live.copytrade.runner.aum_estimator.aum", return_value=1000.0):
+        new_last_seen, decisions = runner_mod.process_wallet(
+            target, pf, last_seen_ts=50, capital_per_wallet=100.0,
+        )
+
+    assert new_last_seen == 100
+    assert len(decisions) == 1
+    assert decisions[0]["action"] == "skipped"
+    assert "insufficient_cash" in decisions[0]["rationale"]
+    # Cash and positions untouched
+    assert pf.cash_usd == pytest.approx(10.0)
+    assert pf.positions == []
+
+
+def test_sufficient_cash_allows_buy(tmp_path):
+    """Sanity counterpart: when cash >= paper_size, BUY proceeds normally."""
+    target = {"pseudonym": "T1", "wallet": "0xW", "allocation_pct": 1.0}
+    pf = PaperPortfolio(wallet="T1", cash_usd=100.0)
+    trades = [_trade(ts=100, side="BUY", size=500, price=0.5)]  # 250 USD trade
+
+    with patch("live.copytrade.runner.data_api.trades", return_value=trades), \
+         patch("live.copytrade.runner.aum_estimator.aum", return_value=10_000.0):
+        new_last_seen, decisions = runner_mod.process_wallet(
+            target, pf, last_seen_ts=50, capital_per_wallet=1000.0,
+        )
+
+    # trade_pct = 250/10000 = 0.025 → paper_size = $25 (fits in $100 cash)
+    assert decisions[0]["action"] == "executed"
+    assert pf.cash_usd == pytest.approx(75.0)
