@@ -920,6 +920,13 @@ def api_copytrade():
     })
 
 
+@app.route("/api/overview")
+def api_overview():
+    """At-a-glance status of all bots (Bot Z, Shadow, CopyTrade, Freqtrade)."""
+    from dashboard.overview import build_overview
+    return jsonify(build_overview())
+
+
 def run(host: str = "0.0.0.0", port: int = 5000, debug: bool = False):
     """Lance le serveur Flask."""
     t = threading.Thread(target=background_thread, daemon=True)
