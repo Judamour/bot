@@ -21,5 +21,5 @@ jobs:
           script: |
             sudo -u botuser bash -c "cd /home/botuser/bot-trading && git pull"
             sudo -u botuser bash -c "cd /home/botuser/bot-trading && venv/bin/pip install -q -r requirements.txt"
-            sudo systemctl restart bot dashboard
+            sudo systemctl restart bot dashboard shadow
             echo "✓ Déployé à $(date)"
