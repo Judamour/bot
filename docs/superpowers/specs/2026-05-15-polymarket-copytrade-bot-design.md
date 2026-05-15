@@ -53,15 +53,25 @@ No write access to any broker. No private keys. No outbound traffic to Polymarke
 ### `targets.py`
 Hardcoded `TARGETS` list of dicts: `{pseudonym, wallet, allocation_pct}`. v1 splits 33/33/33; allocation is a const, not derived.
 
+Also the single source of truth for the paper capital constant:
+```python
+PAPER_CAPITAL_USD = 1000.0   # total simulated capital, override via env BOT_CP_CAPITAL_USD
+CAPITAL_PER_WALLET = PAPER_CAPITAL_USD / len(TARGETS)
+```
+All other modules import from here — no duplication.
+
 ### `data_api.py`
-Thin wrapper around three Polymarket Data API endpoints:
-- `GET /trades?user={wallet}&limit=N` — recent trades
-- `GET /positions?user={wallet}` — open positions with `currentValue`, `curPrice`, `size`
-- `GET /value?user={wallet}` — total portfolio value (sanity check vs sum of positions)
+Thin wrapper around four Polymarket public endpoints:
+- `GET data-api.polymarket.com/trades?user={wallet}&limit=N` — recent trades
+- `GET data-api.polymarket.com/positions?user={wallet}` — open positions with `currentValue`, `curPrice`, `size`
+- `GET data-api.polymarket.com/value?user={wallet}` — total portfolio value (sanity check vs sum of positions)
+- `GET clob.polymarket.com/price?token_id={asset}&side={BUY|SELL}` — current orderbook mid for a given asset; used for MTM of paper positions, including positions the target has since closed but the paper bot still holds. Confirmed accessible from FR VPS (no geoblock on read endpoints).
 
 Headers required: `Origin: https://polymarket.com`, `Referer: https://polymarket.com/`, `User-Agent: Mozilla/5.0`. Without them, requests 403.
 
 Exponential backoff on 429/5xx. Per-wallet rate limit budget tracked locally.
+
+Also exposes the helper `target_position_size_at(wallet, conditionId, ts)` → returns the target's outcome-token size in that market at or just before `ts`. Implemented by summing the target's signed trades on that `conditionId` with `timestamp <= ts`. Used by `runner.py` to compute the SELL fraction.
 
 ### `aum_estimator.py`
 Given a wallet and a target timestamp, return estimated AUM in USD.
@@ -126,10 +136,12 @@ every 60s:
 
 ### `state.py`
 Two files:
-- `logs/copytrade/state.json` — `{last_seen_ts: {wallet: ts}, processed_hashes: [...]}`
+- `logs/copytrade/state.json` — `{last_seen_ts: {wallet: ts}}` (authoritative for dedup)
 - `logs/copytrade/portfolio.json` — paper portfolio (above)
 
 Atomic writes (write tmp, rename) to avoid corruption on crash.
+
+**Dedup policy** : `last_seen_ts` per wallet is the single source of truth. Any new trade with `timestamp <= last_seen_ts[wallet]` is skipped. No hash-list kept (removes the rollover concern, since `last_seen_ts` is monotonic).
 
 ### `notifier.py`
 Reuse `live/notifier.py` Telegram client. Emit:
@@ -171,7 +183,7 @@ Polymarket Data API
 
 ```
 logs/copytrade/
-├── state.json          ← last_seen_ts per wallet, dedup hashes (last 1000)
+├── state.json          ← last_seen_ts per wallet (dedup authoritative)
 ├── portfolio.json      ← cash + positions per wallet
 ├── decisions.jsonl     ← one line per detected trade with copy outcome
 ├── equity.jsonl        ← daily snapshot {ts, per_wallet_eq, total_eq}
@@ -308,9 +320,9 @@ logs/copytrade/                 ← created at runtime
 
 ## Open questions for implementation plan
 
-- Frequency of equity snapshot — daily 00h UTC, or rolling on each trade?
-- Should the bot replay the last 24h of target trades on boot to catch up, or only watch from `now`?
-- Heartbeat in Telegram — every hour silent / only when changes / configurable?
-- Dashboard tab styling — reuse existing CSS or add new section?
+1. **Boot catch-up behavior** *(decided first — has real behavioral impact)* : should the bot replay the last 24h of target trades on first boot / after long downtime, or always start from `now`? Default proposal: catch up up to 24h (avoids missing trades from a deploy/restart), older than 24h gets skipped to avoid replaying ancient history.
+2. Frequency of equity snapshot — daily 00h UTC, or rolling on each trade?
+3. Heartbeat in Telegram — every hour silent / only when changes / configurable?
+4. Dashboard tab styling — reuse existing CSS or add new section?
 
 These get resolved in the writing-plans phase.
