@@ -119,6 +119,7 @@ import sys
 import time
 from pathlib import Path
 
+from live import notifier
 from live.copytrade import state as state_mod
 from live.copytrade.targets import (
     CAPITAL_PER_WALLET,
@@ -213,6 +214,13 @@ def run() -> None:
 
     log.info("bot-cp starting: capital=$%.2f, %d wallets, poll=%ds",
              PAPER_CAPITAL_USD, len(TARGETS), POLL_INTERVAL_S)
+    try:
+        notifier.notify(
+            f"🟢 bot-cp démarré — capital ${PAPER_CAPITAL_USD:.0f}, "
+            f"{len(TARGETS)} wallets ({', '.join(t['pseudonym'] for t in TARGETS)})"
+        )
+    except Exception:
+        log.exception("telegram start notify failed (non-fatal)")
     _smoke_test()
 
     state = state_mod.load_state(str(LOG_DIR / "state.json"))
@@ -234,6 +242,19 @@ def run() -> None:
                 )
                 for d in decisions:
                     state_mod.append_decision(decisions_path, d)
+                    if d.get("action") != "executed":
+                        continue
+                    try:
+                        side_emoji = "🟩" if d["side"] == "BUY" else "🟥"
+                        notifier.notify(
+                            f"{side_emoji} CP {pseudo} {d['side']} "
+                            f"{d.get('market', '?')[:50]} / {d.get('outcome', '?')}\n"
+                            f"size ${d['paper_size_usd']:.2f} @ {d['price']:.3f} "
+                            f"(target ${d['target_size_usd']:.0f} / "
+                            f"{d['trade_pct']*100:.1f}% AUM)"
+                        )
+                    except Exception:
+                        log.exception("telegram trade notify failed (non-fatal)")
                 if new_ts > int(last_seen.get(wallet, 0)):
                     last_seen[wallet] = new_ts
                 if decisions:
@@ -255,6 +276,11 @@ def run() -> None:
         while slept < remaining and not _stop:
             time.sleep(1.0)
             slept += 1.0
+
+    try:
+        notifier.notify("🛑 bot-cp arrêté")
+    except Exception:
+        log.exception("telegram stop notify failed (non-fatal)")
 
     log.info("bot-cp stopped cleanly")
 
