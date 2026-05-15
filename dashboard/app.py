@@ -927,6 +927,13 @@ def api_overview():
     return jsonify(build_overview())
 
 
+@app.route("/api/targets")
+def api_targets():
+    """Live view of the Polymarket wallets we're copytrading."""
+    from dashboard.targets import build_targets
+    return jsonify(build_targets())
+
+
 def run(host: str = "0.0.0.0", port: int = 5000, debug: bool = False):
     """Lance le serveur Flask."""
     t = threading.Thread(target=background_thread, daemon=True)

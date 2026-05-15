@@ -250,6 +250,129 @@
       .ov-grid { grid-template-columns: 1fr; }
     }
 
+    /* ═══════════════════════════════════════════════════════════
+       TARGETS TAB — live view of copytrade targets
+    ═══════════════════════════════════════════════════════════ */
+    #tab-targets { --tg-accent: #ff3d92; --tg-grid: rgba(106,138,170,0.04); }
+    #tab-targets {
+      background-image:
+        linear-gradient(to right, var(--tg-grid) 1px, transparent 1px),
+        linear-gradient(to bottom, var(--tg-grid) 1px, transparent 1px);
+      background-size: 48px 48px;
+      padding-bottom: 60px;
+    }
+
+    .tg-totals {
+      display: grid; grid-template-columns: repeat(4, 1fr); gap: 0;
+      padding: 16px 20px; margin-bottom: 20px;
+      background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+      box-shadow: var(--shadow-card);
+    }
+    .tg-totals > div { border-right: 1px solid var(--border); padding: 0 20px; }
+    .tg-totals > div:first-child { padding-left: 0; }
+    .tg-totals > div:last-child { border-right: none; padding-right: 0; }
+    .tg-totals-lbl { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.14em; margin-bottom: 6px; }
+    .tg-totals-val { font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; line-height: 1; }
+
+    .tg-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 16px; margin-bottom: 28px; }
+
+    .tg-card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); box-shadow: var(--shadow-card);
+      padding: 0; overflow: hidden;
+      transition: border-color .18s, box-shadow .18s;
+    }
+    .tg-card:hover { border-color: var(--tg-accent); box-shadow: 0 0 20px rgba(255,61,146,0.12); }
+    .tg-card-head { padding: 16px 18px 12px 18px; border-bottom: 1px solid var(--border); display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+    .tg-card-pseudo { font-size: 18px; font-weight: 700; letter-spacing: -0.01em; }
+    .tg-card-addr { font-size: 10px; color: var(--muted); font-family: monospace; margin-top: 2px; text-decoration: none; }
+    .tg-card-addr:hover { color: var(--tg-accent); }
+    .tg-card-aum { text-align: right; }
+    .tg-card-aum-val { font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; }
+    .tg-card-aum-lbl { font-size: 9px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.12em; margin-top: 2px; }
+
+    .tg-card-strip {
+      display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1px;
+      background: var(--border);
+    }
+    .tg-card-strip > div { padding: 8px 14px; background: var(--surface); }
+    .tg-card-strip-lbl { font-size: 9px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 2px; }
+    .tg-card-strip-val { font-size: 14px; font-weight: 700; font-variant-numeric: tabular-nums; }
+
+    .tg-card-section-lbl { padding: 12px 18px 6px 18px; font-size: 9px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.14em; }
+    .tg-positions { padding: 0 12px 12px 12px; max-height: 280px; overflow-y: auto; }
+    .tg-pos-row {
+      display: grid; grid-template-columns: 1fr auto; gap: 8px;
+      padding: 8px 8px; border-radius: 5px;
+      transition: background .14s;
+    }
+    .tg-pos-row:hover { background: rgba(255,61,146,0.04); }
+    .tg-pos-title { font-size: 12px; line-height: 1.3; }
+    .tg-pos-title .pos-outcome { color: var(--tg-accent); font-weight: 600; }
+    .tg-pos-meta { font-size: 10px; color: var(--muted); margin-top: 2px; }
+    .tg-pos-money { text-align: right; min-width: 110px; }
+    .tg-pos-value { font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
+    .tg-pos-pnl { font-size: 11px; font-variant-numeric: tabular-nums; margin-top: 2px; }
+    .tg-pos-pnl.pos { color: var(--green); }
+    .tg-pos-pnl.neg { color: var(--red); }
+
+    .tg-feed {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); box-shadow: var(--shadow-card);
+      overflow: hidden;
+    }
+    .tg-feed-head {
+      padding: 14px 18px; border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; gap: 10px;
+      font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.14em;
+    }
+    .tg-feed-head .tg-live-dot {
+      width: 7px; height: 7px; border-radius: 50%; background: var(--tg-accent);
+      animation: ov-ping 1.6s ease-out infinite;
+      box-shadow: 0 0 0 0 rgba(255,61,146,0.6);
+    }
+    @keyframes ov-ping-pink {
+      0%   { box-shadow: 0 0 0 0 rgba(255,61,146,0.6); }
+      70%  { box-shadow: 0 0 0 8px rgba(255,61,146,0); }
+      100% { box-shadow: 0 0 0 0 rgba(255,61,146,0); }
+    }
+    .tg-feed-rows { max-height: 480px; overflow-y: auto; }
+    .tg-feed-row {
+      display: grid; grid-template-columns: 76px 100px 60px 1fr 120px;
+      gap: 14px; align-items: baseline;
+      padding: 11px 18px; border-bottom: 1px solid var(--border);
+      font-size: 12px;
+      transition: background .14s;
+    }
+    .tg-feed-row:hover { background: rgba(255,61,146,0.03); }
+    .tg-feed-row:last-child { border-bottom: none; }
+    .tg-feed-ts { color: var(--muted); font-size: 10px; font-variant-numeric: tabular-nums; }
+    .tg-feed-pseudo { font-weight: 700; font-size: 11px; }
+    .tg-feed-side {
+      display: inline-block; padding: 2px 8px; border-radius: 3px; font-size: 9px;
+      font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; text-align: center;
+    }
+    .tg-feed-side.buy  { background: rgba(0,230,118,0.10); color: var(--green); border: 1px solid rgba(0,230,118,0.25); }
+    .tg-feed-side.sell { background: rgba(255,68,68,0.10); color: var(--red);   border: 1px solid rgba(255,68,68,0.25); }
+    .tg-feed-market { color: var(--text); line-height: 1.4; }
+    .tg-feed-market .feed-outcome { color: var(--tg-accent); font-weight: 600; }
+    .tg-feed-money { text-align: right; font-variant-numeric: tabular-nums; }
+    .tg-feed-usd { font-size: 14px; font-weight: 700; }
+    .tg-feed-price { font-size: 10px; color: var(--muted); margin-top: 2px; }
+
+    @media (max-width: 880px) {
+      .tg-totals { grid-template-columns: 1fr 1fr; }
+      .tg-totals > div:nth-child(2) { border-right: none; }
+      .tg-grid { grid-template-columns: 1fr; }
+      .tg-feed-row { grid-template-columns: 60px 80px 1fr 100px; }
+      .tg-feed-row > .tg-feed-side { display: none; }
+    }
+    @media (max-width: 560px) {
+      .tg-totals { grid-template-columns: 1fr; padding: 12px; }
+      .tg-totals > div { border-right: none !important; border-bottom: 1px solid var(--border); padding: 8px 0; }
+      .tg-totals > div:last-child { border-bottom: none; }
+    }
+
     /* ── Engine chip (header) ── */
     .engine-chip {
       display: inline-flex; align-items: center; gap: 6px;
@@ -591,6 +714,7 @@
   <button class="nav-btn" onclick="switchTab('logs')">Logs</button>
   <button class="nav-btn" onclick="switchTab('docs')">Documentation</button>
   <button class="nav-btn" onclick="switchTab('copytrade')">CopyTrade <span class="nav-badge" id="nb-cp">—</span></button>
+  <button class="nav-btn" onclick="switchTab('targets')">Targets <span class="nav-badge" id="nb-tg">—</span></button>
 </nav>
 
 <!-- ── Bottom Nav (mobile only) ──────────────────────────────── -->
@@ -618,6 +742,10 @@
   <button class="bnav-btn" onclick="switchTab('copytrade')" id="bnav-copytrade">
     <span class="bnav-icon">📋</span>
     <span class="bnav-lbl">CopyTrade</span>
+  </button>
+  <button class="bnav-btn" onclick="switchTab('targets')" id="bnav-targets">
+    <span class="bnav-icon">🎯</span>
+    <span class="bnav-lbl">Targets</span>
   </button>
 </nav>
 
@@ -1291,6 +1419,32 @@
     </tr></thead>
     <tbody></tbody>
   </table>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     TAB: TARGETS — live view of the wallets we're copying
+═══════════════════════════════════════════════════════════════ -->
+<div id="tab-targets" class="tab-content">
+  <div class="ov-section-title">Targets · live activity on polymarket</div>
+  <div id="tg-totals" class="tg-totals">
+    <div><div class="tg-totals-lbl">Aggregate AUM</div><div class="tg-totals-val" id="tg-aum">—</div></div>
+    <div><div class="tg-totals-lbl">Open positions</div><div class="tg-totals-val" id="tg-open">—</div></div>
+    <div><div class="tg-totals-lbl">Trades (24h)</div><div class="tg-totals-val" id="tg-24h-count">—</div></div>
+    <div><div class="tg-totals-lbl">Volume (24h)</div><div class="tg-totals-val" id="tg-24h-vol">—</div></div>
+  </div>
+
+  <div id="tg-cards" class="tg-grid"></div>
+
+  <div class="ov-section-title">Recent activity feed · all targets</div>
+  <div class="tg-feed">
+    <div class="tg-feed-head">
+      <span class="tg-live-dot"></span>
+      <span>LIVE FEED</span>
+      <span style="color:var(--border)">/</span>
+      <span id="tg-feed-status">Loading…</span>
+    </div>
+    <div id="tg-feed" class="tg-feed-rows"></div>
+  </div>
 </div>
 
 </div><!-- /main -->
@@ -2466,6 +2620,129 @@ setInterval(_ovTickClock, 1000);
 
 loadOverview();
 setInterval(loadOverview, 30000);
+
+// ════════ TARGETS — live view of the wallets we mirror ════════
+function _shortAddr(addr) {
+  if (!addr) return '';
+  return addr.slice(0, 6) + '…' + addr.slice(-4);
+}
+function _fmtAbs(n) {
+  const v = Math.abs(n||0);
+  if (v >= 1e6) return (n/1e6).toFixed(2) + 'M';
+  if (v >= 1e3) return Math.round(n).toLocaleString('en-US');
+  return (n||0).toFixed(2);
+}
+function _fmtPct2(p) {
+  return ((p||0) > 0 ? '+' : '') + (p||0).toFixed(2) + '%';
+}
+function _fmtFeedTime(ts) {
+  if (!ts) return '';
+  const sec = Math.floor((Date.now()/1000) - ts);
+  if (sec < 60)    return sec + 's ago';
+  if (sec < 3600)  return Math.floor(sec/60) + 'm ago';
+  if (sec < 86400) return Math.floor(sec/3600) + 'h ago';
+  return Math.floor(sec/86400) + 'd ago';
+}
+
+async function loadTargets() {
+  try {
+    const r = await fetch('/api/targets');
+    if (!r.ok) return;
+    const data = await r.json();
+
+    // Totals
+    const aumEl = document.getElementById('tg-aum');
+    const openEl = document.getElementById('tg-open');
+    const c24El = document.getElementById('tg-24h-count');
+    const v24El = document.getElementById('tg-24h-vol');
+    if (aumEl) aumEl.textContent = '$' + _fmtAbs(data.totals.aum_total_usd || 0);
+    if (openEl) openEl.textContent = data.totals.open_total || 0;
+    if (c24El) c24El.textContent = data.totals.trades_24h_total || 0;
+    if (v24El) v24El.textContent = '$' + _fmtAbs(data.totals.volume_24h_total_usd || 0);
+
+    // Per-target cards
+    const grid = document.getElementById('tg-cards');
+    if (grid) {
+      grid.innerHTML = '';
+      for (const t of (data.targets || [])) {
+        const positionsHtml = (t.open_positions || []).slice(0, 6).map(p => {
+          const pnlCls = (p.cash_pnl || 0) > 0 ? 'pos' : (p.cash_pnl || 0) < 0 ? 'neg' : '';
+          return `<div class="tg-pos-row">
+            <div>
+              <div class="tg-pos-title"><span class="pos-outcome">${(p.outcome||'').slice(0,10)}</span> · ${(p.title||'').slice(0, 64)}</div>
+              <div class="tg-pos-meta">${p.size.toFixed(2)} @ avg ${p.avg_price.toFixed(3)} · now ${p.cur_price.toFixed(3)}</div>
+            </div>
+            <div class="tg-pos-money">
+              <div class="tg-pos-value">$${_fmtAbs(p.current_value)}</div>
+              <div class="tg-pos-pnl ${pnlCls}">${_fmtPct2(p.percent_pnl)} · ${(p.cash_pnl||0)>=0?'+':''}$${_fmtAbs(p.cash_pnl)}</div>
+            </div>
+          </div>`;
+        }).join('');
+        const noPos = (t.open_positions || []).length === 0;
+        const morePos = (t.open_count || 0) - (t.open_positions || []).length;
+        grid.insertAdjacentHTML('beforeend', `
+          <div class="tg-card">
+            <div class="tg-card-head">
+              <div>
+                <div class="tg-card-pseudo">${t.pseudonym}</div>
+                <a class="tg-card-addr" href="${t.profile_url}" target="_blank" rel="noopener">${_shortAddr(t.wallet)} ↗</a>
+              </div>
+              <div class="tg-card-aum">
+                <div class="tg-card-aum-val">$${_fmtAbs(t.value_usd)}</div>
+                <div class="tg-card-aum-lbl">Portfolio value</div>
+              </div>
+            </div>
+            <div class="tg-card-strip">
+              <div>
+                <div class="tg-card-strip-lbl">Open positions</div>
+                <div class="tg-card-strip-val">${t.open_count}</div>
+              </div>
+              <div>
+                <div class="tg-card-strip-lbl">Trades 24h</div>
+                <div class="tg-card-strip-val">${t.trades_24h}</div>
+              </div>
+              <div>
+                <div class="tg-card-strip-lbl">Vol 24h</div>
+                <div class="tg-card-strip-val">$${_fmtAbs(t.volume_24h_usd)}</div>
+              </div>
+            </div>
+            <div class="tg-card-section-lbl">Top open positions${morePos>0 ? ` · +${morePos} more` : ''}</div>
+            <div class="tg-positions">${positionsHtml || '<div style="padding:14px;color:var(--muted);font-size:12px">No open positions</div>'}</div>
+          </div>
+        `);
+      }
+    }
+
+    // Activity feed
+    const feedEl = document.getElementById('tg-feed');
+    if (feedEl) {
+      feedEl.innerHTML = '';
+      for (const ev of (data.feed || [])) {
+        const sideCls = (ev.side || '').toLowerCase();
+        feedEl.insertAdjacentHTML('beforeend', `
+          <div class="tg-feed-row">
+            <div class="tg-feed-ts">${_fmtFeedTime(ev.ts)}</div>
+            <div class="tg-feed-pseudo">${ev.pseudonym}</div>
+            <div><span class="tg-feed-side ${sideCls}">${ev.side}</span></div>
+            <div class="tg-feed-market"><span class="feed-outcome">${(ev.outcome||'').slice(0,10)}</span> · ${(ev.title||'').slice(0, 80)}</div>
+            <div class="tg-feed-money">
+              <div class="tg-feed-usd">$${_fmtAbs(ev.usd)}</div>
+              <div class="tg-feed-price">@${(ev.price||0).toFixed(3)}</div>
+            </div>
+          </div>
+        `);
+      }
+    }
+    const statusEl = document.getElementById('tg-feed-status');
+    if (statusEl) statusEl.textContent = `${(data.feed||[]).length} events · last sync ${new Date().toLocaleTimeString('fr-FR', {hour: '2-digit', minute: '2-digit', second: '2-digit'})}`;
+
+    // Top-nav badge
+    const tb = document.getElementById('nb-tg');
+    if (tb) tb.textContent = data.totals.trades_24h_total || 0;
+  } catch (e) { console.warn('loadTargets failed', e); }
+}
+loadTargets();
+setInterval(loadTargets, 45000);
 </script>
 </body>
 </html>
