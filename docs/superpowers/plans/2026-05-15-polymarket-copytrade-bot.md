@@ -1578,6 +1578,40 @@ def _save_portfolios(portfolios: dict[str, PaperPortfolio]) -> None:
     state_mod.save_portfolio(str(portfolio_path), body)
 
 
+# Track last-snapshotted UTC date so we append at most once per day
+_last_equity_date: str | None = None
+
+
+def _maybe_snapshot_equity(portfolios: dict[str, PaperPortfolio]) -> None:
+    """Append a daily MTM snapshot to equity.jsonl when the UTC date changes.
+
+    For MTM we use the position avg_price as fallback (no live price fetch
+    each cycle to stay light). The dashboard can compute richer MTM on demand.
+    """
+    from datetime import datetime, timezone
+
+    global _last_equity_date
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    if _last_equity_date == today:
+        return
+
+    per_wallet = {}
+    total = 0.0
+    for pseudo, pf in portfolios.items():
+        eq = pf.equity({})  # avg_price fallback
+        per_wallet[pseudo] = eq
+        total += eq
+
+    state_mod.append_equity(str(LOG_DIR / "equity.jsonl"), {
+        "ts": int(time.time()),
+        "date": today,
+        "per_wallet_eq": per_wallet,
+        "total_eq": total,
+    })
+    _last_equity_date = today
+    log.info("equity snapshot for %s: total=$%.2f", today, total)
+
+
 def _smoke_test() -> None:
     """Hit Data API once to fail-fast on geoblock / network at boot."""
     test_wallet = TARGETS[0]["wallet"]
@@ -1631,6 +1665,9 @@ def run() -> None:
         # Persist after each cycle
         state_mod.save_state(str(LOG_DIR / "state.json"), {"last_seen_ts": last_seen})
         _save_portfolios(portfolios)
+
+        # Daily equity snapshot (UTC date change triggers append)
+        _maybe_snapshot_equity(portfolios)
 
         # Sleep, but check stop flag every second
         elapsed = time.time() - cycle_start
@@ -1697,10 +1734,11 @@ Replace the existing `log.info("bot-cp starting: ...")` line in `run()` with the
         log.exception("telegram start notify failed (non-fatal)")
 ```
 
-After the `for d in decisions:` loop inside the cycle, add:
+Modify the existing `for d in decisions:` persistence loop inside the cycle (single pass — do not add a second loop). Replace the existing loop body with:
+
 ```python
-                # Telegram alert on each executed copy trade
                 for d in decisions:
+                    state_mod.append_decision(decisions_path, d)
                     if d.get("action") != "executed":
                         continue
                     try:
@@ -2184,58 +2222,106 @@ git commit -m "feat(copytrade): replay_30d.py retroactive equity curve script"
 **Files:**
 - Modify: `dashboard/templates/index.html`
 
-- [ ] **Step 1: Find the tab structure in the existing template**
+The existing template (verified 2026-05-15) uses three coordinated blocks:
+1. **Top nav** : `<nav class="nav">…<button class="nav-btn" onclick="switchTab('xxx')">Label</button>…</nav>` (around line 397)
+2. **Bottom nav (mobile)** : `<nav class="bottom-nav">…<button class="bnav-btn" onclick="switchTab('xxx')" id="bnav-xxx">…</button>…</nav>` (around line 410)
+3. **Tab content** : `<div id="tab-xxx" class="tab-content">…</div>` (sequential blocks after `<div class="main">`)
 
-```bash
-grep -n "tab\|copytrade\|<nav" dashboard/templates/index.html | head -20
+`switchTab('xxx')` is a global JS function that hides all `.tab-content`, shows `#tab-xxx`, and updates `.nav-btn` + `.bnav-btn` active class. We do not need to touch it.
+
+- [ ] **Step 1: Add the top-nav button**
+
+In `dashboard/templates/index.html`, locate the `<nav class="nav">` block (≈ line 397). After the last `<button class="nav-btn" ...>Documentation</button>` line, insert:
+
+```html
+  <button class="nav-btn" onclick="switchTab('copytrade')">CopyTrade <span class="nav-badge" id="nb-cp">—</span></button>
 ```
 
-Note the existing tab block markup so the new tab matches style.
+- [ ] **Step 2: Add the bottom-nav button (mobile)**
 
-- [ ] **Step 2: Add the CopyTrade tab**
+Locate the `<nav class="bottom-nav">` block. After the last `<button class="bnav-btn"…>Logs</button>` block, insert:
 
-The exact insertion will depend on the current template layout. Match the existing tab pattern (e.g., if tabs use `<div data-tab="shadow">`, add `<div data-tab="copytrade">`).
-
-Minimum content of the new tab:
 ```html
-<div data-tab="copytrade" style="display:none">
-  <h2>CopyTrade (paper)</h2>
-  <div id="cp-wallets">Loading…</div>
-  <h3>Recent decisions</h3>
-  <table id="cp-decisions"></table>
-</div>
+  <button class="bnav-btn" onclick="switchTab('copytrade')" id="bnav-copytrade">
+    <span class="bnav-icon">📋</span>
+    <span class="bnav-lbl">CopyTrade</span>
+  </button>
+```
 
+- [ ] **Step 3: Add the tab content block**
+
+After the last existing `<div id="tab-…" class="tab-content">…</div>` block (the docs tab around line 718, end of its closing `</div>`), insert:
+
+```html
+<div id="tab-copytrade" class="tab-content">
+  <h2 style="margin:0 0 12px 0">CopyTrade (paper)</h2>
+  <div id="cp-wallets" style="display:grid;gap:8px;margin-bottom:16px">Loading…</div>
+  <h3 style="margin:16px 0 8px 0">Recent decisions (last 20)</h3>
+  <table id="cp-decisions" style="width:100%;border-collapse:collapse;font-size:13px">
+    <thead><tr style="border-bottom:1px solid var(--border)">
+      <th style="text-align:left;padding:6px">UTC</th>
+      <th style="text-align:left">Wallet</th>
+      <th>Side</th>
+      <th style="text-align:left">Market</th>
+      <th style="text-align:right">Size</th>
+      <th>Action</th>
+    </tr></thead>
+    <tbody></tbody>
+  </table>
+</div>
+```
+
+- [ ] **Step 4: Add the loader script + auto-refresh**
+
+Find the closing `</body>` (last lines). Just before it, insert:
+
+```html
 <script>
 async function loadCopytrade() {
-  const r = await fetch('/api/copytrade');
-  const data = await r.json();
-  const w = document.getElementById('cp-wallets');
-  w.innerHTML = '';
-  for (const [pseudo, pf] of Object.entries(data.portfolio || {})) {
-    const eq = (pf.cash_usd || 0) + (pf.positions || [])
-      .reduce((s, p) => s + (p.size || 0) * (p.avg_price || 0), 0);
-    w.insertAdjacentHTML('beforeend',
-      `<div><b>${pseudo}</b>: cash $${(pf.cash_usd||0).toFixed(2)}, ` +
-      `${(pf.positions||[]).length} pos, equity $${eq.toFixed(2)} ` +
-      `(realized $${(pf.realized_pnl_usd||0).toFixed(2)})</div>`);
-  }
-  const t = document.getElementById('cp-decisions');
-  t.innerHTML = '<tr><th>ts</th><th>wallet</th><th>side</th>' +
-                '<th>market</th><th>size</th><th>action</th></tr>';
-  for (const d of (data.recent_decisions || []).slice(-20).reverse()) {
-    t.insertAdjacentHTML('beforeend',
-      `<tr><td>${new Date(d.ts*1000).toISOString().slice(0,16).replace('T',' ')}</td>` +
-      `<td>${d.wallet}</td><td>${d.side}</td>` +
-      `<td>${(d.market||'').slice(0,40)}</td>` +
-      `<td>$${(d.paper_size_usd||0).toFixed(2)}</td>` +
-      `<td>${d.action}</td></tr>`);
-  }
+  try {
+    const r = await fetch('/api/copytrade');
+    if (!r.ok) return;
+    const data = await r.json();
+    const w = document.getElementById('cp-wallets');
+    if (!w) return;
+    w.innerHTML = '';
+    let totalEq = 0;
+    for (const [pseudo, pf] of Object.entries(data.portfolio || {})) {
+      const eq = (pf.cash_usd || 0) + (pf.positions || [])
+        .reduce((s, p) => s + (p.size || 0) * (p.avg_price || 0), 0);
+      totalEq += eq;
+      w.insertAdjacentHTML('beforeend',
+        `<div style="padding:8px;border:1px solid var(--border);border-radius:4px">` +
+        `<b>${pseudo}</b>: cash $${(pf.cash_usd||0).toFixed(2)} · ` +
+        `${(pf.positions||[]).length} pos · equity $${eq.toFixed(2)} ` +
+        `· realized $${(pf.realized_pnl_usd||0).toFixed(2)}</div>`);
+    }
+    const badge = document.getElementById('nb-cp');
+    if (badge) badge.textContent = `$${totalEq.toFixed(0)}`;
+    const tb = document.querySelector('#cp-decisions tbody');
+    if (tb) {
+      tb.innerHTML = '';
+      const recent = (data.recent_decisions || []).slice(-20).reverse();
+      for (const d of recent) {
+        const ts = new Date((d.ts||0)*1000).toISOString().slice(0,16).replace('T',' ');
+        tb.insertAdjacentHTML('beforeend',
+          `<tr style="border-bottom:1px solid var(--border)">` +
+          `<td style="padding:4px">${ts}</td>` +
+          `<td>${d.wallet||''}</td>` +
+          `<td style="text-align:center">${d.side||''}</td>` +
+          `<td>${(d.market||'').slice(0,40)}</td>` +
+          `<td style="text-align:right">$${(d.paper_size_usd||0).toFixed(2)}</td>` +
+          `<td style="text-align:center">${d.action||''}</td></tr>`);
+      }
+    }
+  } catch (e) { console.warn('loadCopytrade failed', e); }
 }
-// hook into existing tab activation: when 'copytrade' shown → loadCopytrade()
+loadCopytrade();
+setInterval(loadCopytrade, 60000);
 </script>
 ```
 
-The exact tab-activation hook will depend on existing code. If unclear, ask before editing — index.html is large.
+The badge and table refresh every 60s. No tab-activation hook needed since the initial load + setInterval keeps the data fresh whether the tab is visible or not.
 
 - [ ] **Step 3: Manual visual check**
 
@@ -2258,9 +2344,16 @@ git commit -m "feat(dashboard): CopyTrade tab"
 
 ### Task 19: Deploy to VPS
 
-**Files:** none in repo
+**Files:** `CLAUDE.md`
 
-- [ ] **Step 1: Push branch / merge to main**
+**Pre-flight rollback plan** (read before starting): if any step from 2 onwards fails, the safe undo is:
+```bash
+ssh ubuntu@51.210.13.248 'sudo systemctl disable --now bot-cp 2>/dev/null; sudo rm -f /etc/systemd/system/bot-cp.service; sudo systemctl daemon-reload'
+git revert HEAD && git push   # revert the last code commit if push already happened
+```
+`bot.service` and `shadow.service` are not touched by any step below — they keep running. The only shared component is `dashboard/app.py` and the `/api/copytrade` route is purely additive (read-only file probes); if the dashboard fails to start, revert the dashboard commit only.
+
+- [ ] **Step 1: Push to main**
 
 ```bash
 git status
@@ -2268,7 +2361,13 @@ git log --oneline -20
 git push origin main
 ```
 
-CI/CD on the VPS pulls main and restarts services. Wait ~30s.
+CI/CD on the VPS pulls main and restarts `bot.service` + `dashboard.service` (≈30s). `bot-cp.service` is NOT yet on the VPS so it stays absent — no harm from this push.
+
+After ~45s, sanity check that the dashboard still works:
+```bash
+curl -s -o /dev/null -w "%{http_code}\n" https://vps-957c8713.vps.ovh.net/
+```
+Expected: `200`. If 500/502, revert the dashboard commit (`git revert <sha> && git push`) and stop here.
 
 - [ ] **Step 2: Install the new service on the VPS**
 
@@ -2277,43 +2376,97 @@ ssh ubuntu@51.210.13.248 'sudo cp /home/botuser/bot-trading/deploy/bot-cp.servic
 ```
 
 Expected: `active (running)`.
+If `failed`: run the rollback block above before debugging.
 
-- [ ] **Step 3: Tail the log for the first cycle**
+- [ ] **Step 3: Inspect the first cycle (no `-f`)**
 
 ```bash
-ssh ubuntu@51.210.13.248 'sudo tail -n 50 -f /home/botuser/bot-trading/logs/copytrade/copytrade.log'
+sleep 90
+ssh ubuntu@51.210.13.248 'sudo tail -n 80 /home/botuser/bot-trading/logs/copytrade/copytrade.log'
 ```
 
-Expected output within 2 minutes:
+Expected lines:
 - `bot-cp starting: capital=$1000.00, 3 wallets, poll=60s`
 - `smoke test ok: Data API reachable`
-- For each wallet: either `0 new trade(s)` or `N new trade(s) processed`
-- Telegram: `🟢 bot-cp démarré`
+- For each wallet : `0 new trade(s)` or `N new trade(s) processed`
+- Telegram message received : `🟢 bot-cp démarré`
+
+If the smoke test failed (`aborting` in the log) → Data API is unreachable from the VPS (rare but possible if Polymarket adds geo on read endpoints). Disable the service and investigate before re-enabling.
 
 - [ ] **Step 4: Verify the dashboard endpoint**
 
 ```bash
-curl https://vps-957c8713.vps.ovh.net/api/copytrade | python -m json.tool | head -40
+curl -s https://vps-957c8713.vps.ovh.net/api/copytrade | python -m json.tool | head -40
 ```
 
-Expected: JSON with `portfolio`, `recent_decisions`, `equity_curve` keys (may be empty initially).
+Expected: JSON with `portfolio`, `recent_decisions`, `equity_curve` keys (may be empty initially — that's fine).
 
-- [ ] **Step 5: Final commit if any deploy adjustments were needed**
+- [ ] **Step 5: Watch for 30 minutes**
+
+Open Telegram. Within 30 minutes there should either be at least one copy-trade alert (`🟩 CP ... BUY ...` or `🟥 CP ... SELL ...`) or nothing if no target traded — both are acceptable. If you see error-level log spam on the VPS:
+```bash
+ssh ubuntu@51.210.13.248 'sudo grep -i error /home/botuser/bot-trading/logs/copytrade/copytrade.log | tail -20'
+```
+Error rate > 5/cycle → rollback.
+
+- [ ] **Step 6: Update CLAUDE.md and MEMORY.md**
+
+Edit `CLAUDE.md`. Locate the `## Shadow Bot — Moteur unifie en parallele` section (the one ending just before `## Revue 2026-04-30`). After its `### Reset complet` block, insert a new top-level section before `## Revue 2026-04-30`:
+
+```markdown
+## Bot CopyTrade — Paper mirror Polymarket (2026-05-15)
+
+Bot paper qui mirror 3 wallets profitables Polymarket (RN1, bossoskil1, surfandturf)
+via la Data API publique. Lecture seule, aucun ordre réel.
+Capital simulé : 1000 USDC (333.33 par wallet).
+
+### Service
 
 ```bash
-git status
-# If any files changed during deploy, commit them
+sudo systemctl status bot-cp
+sudo systemctl restart bot-cp
+sudo tail -f /home/botuser/bot-trading/logs/copytrade/copytrade.log
 ```
 
-- [ ] **Step 6: Update CLAUDE.md / memory**
+### State
 
-Add a paragraph to `CLAUDE.md` (Shadow Bot section style) documenting `bot-cp.service`, location of state, reset procedure. Also append a session entry to MEMORY.md.
+```
+/home/botuser/bot-trading/logs/copytrade/
+├── state.json          ← last_seen_ts par wallet
+├── portfolio.json      ← cash + positions par wallet
+├── decisions.jsonl     ← chaque trade détecté + copie
+├── equity.jsonl        ← snapshot quotidien MTM
+└── copytrade.log       ← stdout
+```
+
+### Reset
+
+```bash
+sudo systemctl stop bot-cp
+sudo rm /home/botuser/bot-trading/logs/copytrade/{state,portfolio}.json \
+        /home/botuser/bot-trading/logs/copytrade/{decisions,equity}.jsonl
+sudo systemctl start bot-cp
+```
+
+### Critères 30j → décision capitalisation
+
+Capital final > $1000, Sharpe > 1.0, ≥20 trades, MaxDD < 20%, ≥50% trades résolus.
+Si tous validés → projet "go live" (geoblock + USDC funding) séparé.
+```
+
+Also append to `MEMORY.md` (one-line entry under `## Sessions`):
+```markdown
+- [2026-05-15 bot-cp](session_2026-05-15_botcp.md) : **Bot CopyTrade paper déployé** — 3 wallets Polymarket (RN1, bossoskil1, surfandturf), 1000 USDC simulé, service bot-cp.service, dashboard /api/copytrade. 30j d'observation avant décision capitalisation.
+```
+
+- [ ] **Step 7: Commit docs and push**
 
 ```bash
 git add CLAUDE.md
-git commit -m "docs: add bot-cp section to operator manual"
+git commit -m "docs: bot-cp operator section in CLAUDE.md"
 git push
 ```
+The CI/CD will pull but `CLAUDE.md` is not loaded by any service → no restart impact.
 
 ---
 
