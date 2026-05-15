@@ -1,5 +1,6 @@
 """Tests for live/copytrade/data_api.py — mocked-HTTP behaviour."""
 import json
+import urllib.error
 from unittest.mock import patch, MagicMock
 
 import pytest
@@ -123,3 +124,35 @@ def test_target_position_size_at_zero_when_none_before():
     with patch("urllib.request.urlopen", return_value=_mock_resp([])):
         size = data_api.target_position_size_at("0xW", "0xC", outcome_index=0, ts=999)
     assert size == 0.0
+
+
+def test_403_raises_immediately():
+    err = urllib.error.HTTPError("u", 403, "forbidden", {}, None)
+    with patch("urllib.request.urlopen", side_effect=err):
+        with pytest.raises(data_api.DataAPIError):
+            data_api._get("https://example.com/x", retries=2)
+
+
+def test_429_retries_then_succeeds(monkeypatch):
+    """First two calls return 429, third returns 200 — final result is the 200."""
+    monkeypatch.setattr(data_api.time, "sleep", lambda *_: None)
+    err = urllib.error.HTTPError("u", 429, "rate-limited", {}, None)
+    seq = [err, err, _mock_resp({"ok": True})]
+
+    def fake(req, timeout=None):
+        v = seq.pop(0)
+        if isinstance(v, Exception):
+            raise v
+        return v
+
+    with patch("urllib.request.urlopen", side_effect=fake):
+        out = data_api._get("https://example.com/x", retries=3)
+    assert out == {"ok": True}
+
+
+def test_500_retries_exhausted(monkeypatch):
+    monkeypatch.setattr(data_api.time, "sleep", lambda *_: None)
+    err = urllib.error.HTTPError("u", 500, "ise", {}, None)
+    with patch("urllib.request.urlopen", side_effect=err):
+        with pytest.raises(data_api.DataAPIError):
+            data_api._get("https://example.com/x", retries=2)
