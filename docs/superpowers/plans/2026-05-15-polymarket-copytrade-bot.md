@@ -2323,7 +2323,7 @@ setInterval(loadCopytrade, 60000);
 
 The badge and table refresh every 60s. No tab-activation hook needed since the initial load + setInterval keeps the data fresh whether the tab is visible or not.
 
-- [ ] **Step 3: Manual visual check**
+- [ ] **Step 5: Manual visual check**
 
 Start the dashboard locally:
 ```bash
@@ -2333,7 +2333,7 @@ curl http://localhost:5000/api/copytrade
 
 Then open `http://localhost:5000` in a browser and click the CopyTrade tab. Empty data is fine (bot hasn't run yet).
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
 git add dashboard/templates/index.html
