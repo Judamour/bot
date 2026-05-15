@@ -181,7 +181,7 @@ def _reconcile_stops_once() -> None:
             continue  # no metadata (legacy v1 position) — skip
         checked += 1
         sid = m.get("stop_order_id")
-        qty = float(alp_pos.get("qty_available") or alp_pos.get("qty") or 0)
+        qty = float(alp_pos.get("qty") or 0)
         stop_level = float(m.get("stop") or 0)
         if qty <= 0 or stop_level <= 0:
             continue
@@ -466,7 +466,7 @@ def run_cycle():
         m = pos_meta.get(sym, {})
         entry = float(m.get("entry_price") or 0)
         if (shielded or halted) and entry > 0 and (close - entry) / entry >= MACRO_EXIT_PROFIT_PCT:
-            qty_avail = float(p.get("qty_available") or p.get("qty") or 0)
+            qty_avail = float(p.get("qty") or 0)
             if qty_avail > 0:
                 old_id = m.get("stop_order_id")
                 if old_id:
@@ -537,7 +537,11 @@ def run_cycle():
             log_event("trail_eval", eval_log)
 
         if should_update:
-            qty = float(p.get("qty_available") or p.get("qty") or 0)
+            # Alpaca renvoie qty_available="0" (string truthy) quand un stop GTC
+            # tient déjà la position → ancien fallback `qty_available or qty`
+            # bloquait toujours sur "0". On utilise qty (position totale) car
+            # le ratchet cancel/replace le stop existant.
+            qty = float(p.get("qty") or 0)
             if qty <= 0:
                 eval_log["decision"] = "qty_zero"
                 log_event("trail_eval", eval_log)
