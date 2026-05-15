@@ -54,6 +54,27 @@ def _read_last_jsonl(path: Path, default: dict) -> dict:
         return default
 
 
+def _read_tail_jsonl(path: Path, n: int = 30) -> list[dict]:
+    """Return last n parsed lines from a JSONL file (or []) for sparklines."""
+    if not path.exists():
+        return []
+    try:
+        with open(path) as f:
+            lines = f.readlines()[-n:]
+        out = []
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                out.append(json.loads(line))
+            except Exception:
+                pass
+        return out
+    except Exception:
+        return []
+
+
 # ─── Bot Z (multi_runner OMEGA) ──────────────────────────────────────────
 
 def _bot_z(base: Path) -> dict:
@@ -76,16 +97,25 @@ def _bot_z(base: Path) -> dict:
 
     engine = s.get("current_engine") or "?"
     days = int(s.get("days_running") or 0)
+
+    history = s.get("z_capital_history") or []
+    if isinstance(history, list):
+        sparkline = [float(x) for x in history[-30:] if isinstance(x, (int, float))]
+    else:
+        sparkline = []
+
     return {
         "id": "bot",
-        "name": "Bot Z (Trading)",
+        "name": "Bot Z",
         "service": "bot.service",
         "active": _systemctl_active("bot"),
         "capital_usd": capital,
         "open_positions": n_positions,
         "pnl_total_pct": float(s.get("perf_pct") or 0),
         "tab": "portfolio",
-        "details": f"OMEGA engine={engine}, {len(budget)} sub-bots, {days}j paper",
+        "details": f"OMEGA · {engine} · {len(budget)} sub-bots · {days}j paper",
+        "sparkline": sparkline,
+        "subtitle": f"Multi-bot Alpaca paper",
     }
 
 
@@ -102,17 +132,23 @@ def _shadow(base: Path) -> dict:
         pnl_pct = float(eq.get("perf_pct") or ((equity - initial) / initial * 100))
     else:
         pnl_pct = 0.0
+
+    tail = _read_tail_jsonl(equity_path, 30)
+    sparkline = [float(p.get("equity", 0)) for p in tail if p.get("equity")]
+
     return {
         "id": "shadow",
-        "name": "Shadow Bot",
+        "name": "Shadow",
         "service": "shadow.service",
         "active": _systemctl_active("shadow"),
         "capital_usd": equity,
         "open_positions": n_pos,
         "pnl_total_pct": pnl_pct,
         "tab": "strategies",
-        "details": "Single-engine top-N on Alpaca paper #2" if has_data else "Shadow — no data yet",
+        "details": "Single-engine top-N · Alpaca paper #2" if has_data else "Shadow — no data yet",
+        "subtitle": "Alpaca paper sim",
         "last_activity": eq.get("ts"),
+        "sparkline": sparkline,
     }
 
 
@@ -145,9 +181,12 @@ def _copytrade(base: Path) -> dict:
     else:
         pnl_pct = 0.0
 
+    tail = _read_tail_jsonl(base / "logs/copytrade/equity.jsonl", 30)
+    sparkline = [float(p.get("total_eq", 0)) for p in tail if p.get("total_eq") is not None]
+
     return {
         "id": "bot-cp",
-        "name": "Bot CopyTrade",
+        "name": "CopyTrade",
         "service": "bot-cp.service",
         "active": _systemctl_active("bot-cp"),
         "capital_usd": mtm,
@@ -156,10 +195,12 @@ def _copytrade(base: Path) -> dict:
         "realized_pnl_usd": total_realized,
         "tab": "copytrade",
         "details": (
-            f"Polymarket paper mirror — {len(pf) if isinstance(pf, dict) else 0} wallets"
+            f"Polymarket · {len(pf) if isinstance(pf, dict) else 0} wallets · {total_positions} pos"
             if has_data else "Bot CopyTrade — no data yet"
         ),
+        "subtitle": "Polymarket paper mirror",
         "last_activity": eq.get("date") if isinstance(eq, dict) else None,
+        "sparkline": sparkline,
     }
 
 
@@ -205,8 +246,10 @@ def _freqtrade() -> dict:
     exchange = cfg.get("exchange", "?")
     dry = cfg.get("dry_run", True)
     stake = cfg.get("stake_currency", "?")
-    result["details"] = f"{strategy} on {exchange} ({'paper' if dry else 'LIVE'}, {stake})"
+    result["details"] = f"{strategy} · {exchange} · {'paper' if dry else 'LIVE'} {stake}"
+    result["subtitle"] = f"{strategy[:25]}"
     result["stake_currency"] = stake
+    result["name"] = "Freqtrade"
 
     try:
         bal = _call("/api/v1/balance")
@@ -229,6 +272,22 @@ def _freqtrade() -> dict:
             result["last_activity"] = latest
     except Exception as e:
         log.warning("freqtrade profit failed: %s", e)
+
+    # Daily equity history for sparkline
+    try:
+        daily = _call("/api/v1/daily?timescale=30")
+        data = daily.get("data") if isinstance(daily, dict) else None
+        if isinstance(data, list) and data:
+            # Each entry has rel_profit (cumulative pct). Reconstruct equity ≈ capital * (1+rel).
+            cap = result.get("capital_usd", 0) or 1.0
+            # data is ordered newest-first → reverse for chronological sparkline
+            spark = []
+            for d in reversed(data):
+                rel = float(d.get("rel_profit", 0) or 0)
+                spark.append(cap * (1 + rel))
+            result["sparkline"] = spark
+    except Exception as e:
+        log.warning("freqtrade daily failed: %s", e)
 
     return result
 

@@ -58,6 +58,67 @@
     .header-kpi-val { font-size: 15px; font-weight: 700; }
     .header-kpi-lbl { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
 
+    /* ── Overview tab ── */
+    .ov-hero {
+      display: grid; grid-template-columns: 1fr auto; gap: 32px;
+      padding: 24px 28px; margin-bottom: 20px;
+      background: linear-gradient(135deg, var(--surface) 0%, rgba(0,200,255,0.04) 100%);
+      border: 1px solid var(--border); border-radius: var(--radius);
+      box-shadow: var(--shadow-card);
+    }
+    .ov-hero-lbl { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 6px; }
+    .ov-hero-val { font-size: 42px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1; letter-spacing: -0.02em; }
+    .ov-hero-pnl { margin-top: 8px; font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; }
+    .ov-hero-pnl.pos { color: var(--green); }
+    .ov-hero-pnl.neg { color: var(--red); }
+    .ov-hero-pnl.flat { color: var(--muted); }
+    .ov-hero-side { display: flex; gap: 28px; align-items: flex-start; }
+    .ov-hero-stat { text-align: right; }
+    .ov-hero-stat-lbl { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 4px; }
+    .ov-hero-stat-val { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; }
+
+    .ov-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+      gap: 16px;
+    }
+    .ov-card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 18px 20px 14px 20px;
+      box-shadow: var(--shadow-card);
+      cursor: pointer; transition: transform .12s, border-color .12s, box-shadow .12s;
+      position: relative; overflow: hidden;
+    }
+    .ov-card:hover { transform: translateY(-2px); border-color: var(--accent); box-shadow: var(--glow-accent); }
+    .ov-card.down { opacity: 0.55; }
+    .ov-card-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+    .ov-card-name { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; }
+    .ov-card-emoji { font-size: 18px; }
+    .ov-card-status { font-size: 9px; font-weight: 700; padding: 3px 8px; border-radius: 99px; text-transform: uppercase; letter-spacing: 0.08em; }
+    .ov-card-status.up { background: rgba(0,230,118,0.12); color: var(--green); }
+    .ov-card-status.dn { background: rgba(255,68,68,0.12); color: var(--red); }
+    .ov-card-sub { font-size: 11px; color: var(--muted); margin-bottom: 16px; }
+    .ov-card-pnl {
+      font-size: 32px; font-weight: 700; font-variant-numeric: tabular-nums;
+      line-height: 1; letter-spacing: -0.02em; margin-bottom: 4px;
+    }
+    .ov-card-pnl.pos { color: var(--green); }
+    .ov-card-pnl.neg { color: var(--red); }
+    .ov-card-pnl.flat { color: var(--text); }
+    .ov-card-cap { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; margin-bottom: 12px; }
+    .ov-spark { display: block; width: 100%; height: 36px; margin-bottom: 10px; }
+    .ov-spark.empty { background: linear-gradient(90deg, transparent 0, var(--border) 50%, transparent 100%); opacity: 0.15; border-radius: 4px; }
+    .ov-card-foot { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); padding-top: 8px; border-top: 1px dashed var(--border); }
+    .ov-card-foot b { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+
+    @media (max-width: 720px) {
+      .ov-hero { grid-template-columns: 1fr; gap: 20px; padding: 18px; }
+      .ov-hero-val { font-size: 32px; }
+      .ov-hero-side { gap: 16px; }
+      .ov-hero-stat-val { font-size: 18px; }
+      .ov-grid { grid-template-columns: 1fr; }
+    }
+
     /* ── Engine chip (header) ── */
     .engine-chip {
       display: inline-flex; align-items: center; gap: 6px;
@@ -436,9 +497,31 @@
 <div class="main">
 
 <div id="tab-overview" class="tab-content active">
-  <h2 style="margin:0 0 16px 0">Overview — All bots</h2>
-  <div id="ov-meta" style="margin-bottom:12px;color:var(--muted);font-size:13px">Loading…</div>
-  <div id="ov-cards" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px"></div>
+  <!-- Hero panel -->
+  <div class="ov-hero">
+    <div class="ov-hero-main">
+      <div class="ov-hero-lbl">Total equity (all bots)</div>
+      <div class="ov-hero-val" id="ov-total-eq">—</div>
+      <div class="ov-hero-pnl" id="ov-total-pnl">—</div>
+    </div>
+    <div class="ov-hero-side">
+      <div class="ov-hero-stat">
+        <div class="ov-hero-stat-lbl">Bots</div>
+        <div class="ov-hero-stat-val" id="ov-running">—</div>
+      </div>
+      <div class="ov-hero-stat">
+        <div class="ov-hero-stat-lbl">Open positions</div>
+        <div class="ov-hero-stat-val" id="ov-positions">—</div>
+      </div>
+      <div class="ov-hero-stat">
+        <div class="ov-hero-stat-lbl">Last refresh</div>
+        <div class="ov-hero-stat-val" id="ov-last" style="font-size:13px">—</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Cards grid -->
+  <div id="ov-cards" class="ov-grid"></div>
 </div>
 
 <!-- ═══════════════════════════════════════════════════════════════
@@ -1988,75 +2071,134 @@ loadCopytrade();
 setInterval(loadCopytrade, 60000);
 
 // ────────── OVERVIEW (all bots at a glance) ──────────
-const BOT_EMOJI = {bot:'⚡', shadow:'🌒', 'bot-cp':'📋', freqtrade:'🦊'};
-function _fmtCur(n, ccy) {
-  const v = (n||0).toFixed(2);
-  return ccy === 'EUR' ? `€${v}` : `$${v}`;
+const BOT_EMOJI = {bot:'⚡', shadow:'🌒', 'bot-cp':'🎯', freqtrade:'🦊'};
+
+function _fmtCurrency(n, ccy) {
+  const isEUR = ccy === 'EUR';
+  const v = Math.abs(n||0);
+  let s;
+  if (v >= 1000000) s = (n/1000000).toFixed(2) + 'M';
+  else if (v >= 10000) s = Math.round(n).toLocaleString('en-US');
+  else if (v >= 100) s = (n||0).toFixed(0);
+  else s = (n||0).toFixed(2);
+  return (isEUR ? '€' : '$') + s;
 }
-function _fmtPct(p) {
+function _pnlClass(p) {
+  if (Math.abs(p||0) < 0.001) return 'flat';
+  return (p||0) > 0 ? 'pos' : 'neg';
+}
+function _fmtPnlPct(p) {
   const v = (p||0).toFixed(2);
-  const c = (p||0) > 0 ? '#22c55e' : (p||0) < 0 ? '#ef4444' : 'var(--muted)';
-  return `<span style="color:${c}">${(p||0)>=0?'+':''}${v}%</span>`;
+  return ((p||0) > 0 ? '+' : '') + v + '%';
 }
-function _activeBadge(active) {
-  return active
-    ? '<span style="background:#16a34a22;color:#16a34a;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600">● running</span>'
-    : '<span style="background:#ef444422;color:#ef4444;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600">● down</span>';
+function _fmtAgo(iso) {
+  if (!iso) return '—';
+  try {
+    const t = (typeof iso === 'string' && iso.length === 10)
+      ? new Date(iso + 'T00:00:00Z').getTime()
+      : new Date(iso).getTime();
+    if (!t) return '—';
+    const sec = Math.floor((Date.now() - t) / 1000);
+    if (sec < 60) return sec + 's ago';
+    if (sec < 3600) return Math.floor(sec/60) + 'm ago';
+    if (sec < 86400) return Math.floor(sec/3600) + 'h ago';
+    return Math.floor(sec/86400) + 'd ago';
+  } catch (e) { return '—'; }
 }
+
+function _renderSparkline(svgId, data) {
+  const svg = document.getElementById(svgId);
+  if (!svg) return;
+  if (!data || data.length < 2) {
+    svg.classList.add('empty');
+    svg.innerHTML = '';
+    return;
+  }
+  svg.classList.remove('empty');
+  const W = svg.clientWidth || 280, H = 36;
+  const min = Math.min(...data), max = Math.max(...data);
+  const range = max - min || 1;
+  const stepX = W / (data.length - 1);
+  const pts = data.map((v, i) => {
+    const x = i * stepX;
+    const y = H - ((v - min) / range) * (H - 4) - 2;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(' ');
+  const lastVsFirst = data[data.length-1] - data[0];
+  const stroke = lastVsFirst > 0 ? 'var(--green)' : lastVsFirst < 0 ? 'var(--red)' : 'var(--muted)';
+  const fill = lastVsFirst > 0 ? 'rgba(0,230,118,0.10)' : lastVsFirst < 0 ? 'rgba(255,68,68,0.10)' : 'rgba(106,138,170,0.10)';
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  svg.innerHTML =
+    `<polygon points="${pts} ${W.toFixed(1)},${H} 0,${H}" fill="${fill}" stroke="none"/>` +
+    `<polyline points="${pts}" fill="none" stroke="${stroke}" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/>`;
+}
+
 async function loadOverview() {
   try {
     const r = await fetch('/api/overview');
     if (!r.ok) return;
     const data = await r.json();
     const c = document.getElementById('ov-cards');
-    const meta = document.getElementById('ov-meta');
     if (!c) return;
     c.innerHTML = '';
-    let totalUsd = 0, runningCount = 0;
-    for (const b of (data.bots || [])) {
+    let totalUsd = 0, totalPositions = 0, runningCount = 0;
+    let weightedPnl = 0, totalForWeight = 0;
+
+    const bots = data.bots || [];
+    bots.forEach((b, idx) => {
+      if (b.active) runningCount++;
+      const cap = b.capital_usd || 0;
+      totalUsd += cap;
+      totalPositions += (b.open_positions || 0);
+      if (cap > 0) { weightedPnl += (b.pnl_total_pct || 0) * cap; totalForWeight += cap; }
+
       const emoji = BOT_EMOJI[b.id] || '🤖';
       const ccy = b.stake_currency || 'USD';
-      totalUsd += (b.capital_usd || 0);
-      if (b.active) runningCount++;
-      const tabHandler = b.tab
-        ? `onclick="switchTab('${b.tab}')" style="cursor:pointer"`
-        : '';
+      const tab = b.tab || '';
+      const click = tab ? `onclick="switchTab('${tab}')"` : 'style="cursor:default"';
+      const pnlClass = _pnlClass(b.pnl_total_pct);
+      const cardClass = b.active ? 'ov-card' : 'ov-card down';
+      const sparkId = `sp-${b.id}`;
+
       c.insertAdjacentHTML('beforeend',
-        `<div ${tabHandler} style="padding:14px;border:1px solid var(--border);border-radius:8px;background:var(--card,#0f172a08);transition:background .15s"
-              onmouseover="this.style.background='var(--card-hover,#0f172a14)'"
-              onmouseout="this.style.background='var(--card,#0f172a08)'">
-           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-             <div style="font-size:16px;font-weight:600">${emoji} ${b.name}</div>
-             ${_activeBadge(b.active)}
+        `<div class="${cardClass}" ${click}>
+           <div class="ov-card-head">
+             <div class="ov-card-name"><span class="ov-card-emoji">${emoji}</span>${b.name}</div>
+             <span class="ov-card-status ${b.active?'up':'dn'}">${b.active?'● running':'● down'}</span>
            </div>
-           <div style="font-size:11px;color:var(--muted);margin-bottom:10px">${b.details || ''}</div>
-           <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:13px">
-             <div>
-               <div style="color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.5px">Capital</div>
-               <div style="font-weight:600;font-variant-numeric:tabular-nums">${_fmtCur(b.capital_usd, ccy)}</div>
-             </div>
-             <div>
-               <div style="color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.5px">PnL</div>
-               <div style="font-weight:600;font-variant-numeric:tabular-nums">${_fmtPct(b.pnl_total_pct)}</div>
-             </div>
-             <div>
-               <div style="color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.5px">Positions</div>
-               <div style="font-weight:600">${b.open_positions || 0}</div>
-             </div>
-             <div>
-               <div style="color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.5px">Service</div>
-               <div style="font-size:11px;color:var(--muted);font-family:monospace">${b.service || '?'}</div>
-             </div>
+           <div class="ov-card-sub">${b.subtitle || b.details || ''}</div>
+           <div class="ov-card-pnl ${pnlClass}">${_fmtPnlPct(b.pnl_total_pct)}</div>
+           <div class="ov-card-cap">${_fmtCurrency(cap, ccy)}</div>
+           <svg id="${sparkId}" class="ov-spark" preserveAspectRatio="none"></svg>
+           <div class="ov-card-foot">
+             <span><b>${b.open_positions || 0}</b> pos</span>
+             <span>${b.last_activity ? _fmtAgo(b.last_activity) : (b.details || '').slice(0, 22)}</span>
            </div>
          </div>`);
+
+      // Render sparkline after DOM append (next tick to ensure clientWidth is correct)
+      requestAnimationFrame(() => _renderSparkline(sparkId, b.sparkline || []));
+    });
+
+    // Hero panel
+    const eqEl = document.getElementById('ov-total-eq');
+    const pnlEl = document.getElementById('ov-total-pnl');
+    const runEl = document.getElementById('ov-running');
+    const posEl = document.getElementById('ov-positions');
+    const lastEl = document.getElementById('ov-last');
+    if (eqEl) eqEl.textContent = _fmtCurrency(totalUsd, 'USD');
+    const aggPnl = totalForWeight ? (weightedPnl / totalForWeight) : 0;
+    if (pnlEl) {
+      pnlEl.className = 'ov-hero-pnl ' + _pnlClass(aggPnl);
+      pnlEl.textContent = _fmtPnlPct(aggPnl) + ' (weighted by capital)';
     }
-    if (meta) {
-      meta.innerHTML = `<b>${runningCount}/${(data.bots||[]).length}</b> bots running · ` +
-                       `total capital ≈ $${totalUsd.toFixed(0)} · ` +
-                       `<span style="color:var(--muted)">click a card to drill into its tab</span>`;
-    }
+    if (runEl) runEl.textContent = `${runningCount}/${bots.length}`;
+    if (posEl) posEl.textContent = totalPositions;
+    if (lastEl) lastEl.textContent = new Date().toLocaleTimeString('fr-FR', {hour: '2-digit', minute: '2-digit', second: '2-digit'});
+
+    // Top-nav badge
     const badge = document.getElementById('nb-ov');
-    if (badge) badge.textContent = `${runningCount}/${(data.bots||[]).length}`;
+    if (badge) badge.textContent = `${runningCount}/${bots.length}`;
   } catch (e) { console.warn('loadOverview failed', e); }
 }
 loadOverview();
