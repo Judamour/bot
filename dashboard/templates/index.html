@@ -58,64 +58,195 @@
     .header-kpi-val { font-size: 15px; font-weight: 700; }
     .header-kpi-lbl { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
 
-    /* ── Overview tab ── */
+    /* ═══════════════════════════════════════════════════════════
+       OVERVIEW TAB — "financial mission control" v3
+       Dense monospace data, Bloomberg-style corner brackets,
+       cyan + magenta accents, terminal-style sparklines.
+    ═══════════════════════════════════════════════════════════ */
+    #tab-overview { --ov-accent: var(--accent); --ov-accent2: #ff3d92; --ov-grid: rgba(106,138,170,0.05); }
+    #tab-overview {
+      background-image:
+        linear-gradient(to right, var(--ov-grid) 1px, transparent 1px),
+        linear-gradient(to bottom, var(--ov-grid) 1px, transparent 1px);
+      background-size: 64px 64px;
+      background-position: 0 0;
+      background-attachment: local;
+      padding-bottom: 60px;
+    }
+
+    /* — Status bar — */
+    .ov-statusbar {
+      display: flex; align-items: center; gap: 14px;
+      padding: 8px 14px; margin-bottom: 20px;
+      background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+      font-size: 11px; letter-spacing: 0.10em; text-transform: uppercase;
+      box-shadow: inset 0 0 0 1px rgba(255,255,255,0.02);
+    }
+    .ov-statusbar-dot {
+      width: 8px; height: 8px; border-radius: 50%; background: var(--green);
+      box-shadow: 0 0 0 0 rgba(0,230,118,0.7);
+      animation: ov-ping 1.6s ease-out infinite;
+    }
+    @keyframes ov-ping {
+      0%   { box-shadow: 0 0 0 0 rgba(0,230,118,0.6); }
+      70%  { box-shadow: 0 0 0 8px rgba(0,230,118,0); }
+      100% { box-shadow: 0 0 0 0 rgba(0,230,118,0); }
+    }
+    .ov-statusbar-title { color: var(--ov-accent); font-weight: 700; }
+    .ov-statusbar-sep { color: var(--border); }
+    .ov-statusbar-muted { color: var(--muted); }
+    .ov-statusbar-spacer { flex: 1; }
+    .ov-statusbar-id { color: var(--ov-accent2); font-weight: 600; }
+
+    /* — Hero block — */
     .ov-hero {
-      display: grid; grid-template-columns: 1fr auto; gap: 32px;
-      padding: 24px 28px; margin-bottom: 20px;
-      background: linear-gradient(135deg, var(--surface) 0%, rgba(0,200,255,0.04) 100%);
+      position: relative;
+      display: grid; grid-template-columns: 1.4fr 1fr; gap: 0;
+      margin-bottom: 24px;
+      background: linear-gradient(135deg, var(--surface) 0%, rgba(0,200,255,0.025) 60%, rgba(255,61,146,0.015) 100%);
       border: 1px solid var(--border); border-radius: var(--radius);
       box-shadow: var(--shadow-card);
+      overflow: hidden;
     }
-    .ov-hero-lbl { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 6px; }
-    .ov-hero-val { font-size: 42px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1; letter-spacing: -0.02em; }
-    .ov-hero-pnl { margin-top: 8px; font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; }
-    .ov-hero-pnl.pos { color: var(--green); }
-    .ov-hero-pnl.neg { color: var(--red); }
-    .ov-hero-pnl.flat { color: var(--muted); }
-    .ov-hero-side { display: flex; gap: 28px; align-items: flex-start; }
-    .ov-hero-stat { text-align: right; }
-    .ov-hero-stat-lbl { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 4px; }
-    .ov-hero-stat-val { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; }
+    .ov-hero::before, .ov-hero::after {
+      content: ""; position: absolute; width: 14px; height: 14px;
+      border: 2px solid var(--ov-accent);
+    }
+    .ov-hero::before { top: 8px; left: 8px;   border-right: none; border-bottom: none; }
+    .ov-hero::after  { top: 8px; right: 8px;  border-left: none;  border-bottom: none; }
+
+    .ov-hero-left { padding: 28px 32px 24px 32px; }
+    .ov-hero-eyebrow {
+      display: flex; align-items: center; gap: 10px;
+      font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.18em;
+      margin-bottom: 12px;
+    }
+    .ov-hero-eyebrow::before { content: ""; width: 24px; height: 1px; background: var(--ov-accent); }
+    .ov-hero-eq {
+      font-size: 64px; font-weight: 700; line-height: 1; letter-spacing: -0.04em;
+      font-variant-numeric: tabular-nums;
+      color: var(--text);
+      text-shadow: 0 0 32px rgba(0,200,255,0.08);
+    }
+    .ov-hero-eq .ov-currency { color: var(--muted); font-size: 0.5em; font-weight: 500; vertical-align: top; margin-right: 4px; letter-spacing: 0; }
+    .ov-hero-pnl-row { display: flex; align-items: baseline; gap: 14px; margin-top: 14px; font-variant-numeric: tabular-nums; }
+    .ov-hero-pnl-pct { font-size: 22px; font-weight: 600; letter-spacing: -0.01em; }
+    .ov-hero-pnl-pct.pos { color: var(--green); }
+    .ov-hero-pnl-pct.neg { color: var(--red); }
+    .ov-hero-pnl-pct.flat { color: var(--muted); }
+    .ov-hero-pnl-lbl { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.12em; }
+    .ov-hero-spark { margin-top: 22px; height: 56px; width: 100%; display: block; }
+
+    .ov-hero-right {
+      padding: 28px 32px 24px 32px;
+      border-left: 1px solid var(--border);
+      display: grid; grid-template-columns: 1fr 1fr; gap: 18px 24px; align-content: center;
+    }
+    .ov-kpi { position: relative; }
+    .ov-kpi-lbl { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.14em; margin-bottom: 6px; }
+    .ov-kpi-val { font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; line-height: 1; }
+    .ov-kpi-bar {
+      margin-top: 8px; height: 3px; background: var(--border); border-radius: 2px; overflow: hidden;
+    }
+    .ov-kpi-bar-fill { height: 100%; background: var(--ov-accent); border-radius: 2px; }
+
+    /* — Cards grid — */
+    .ov-section-title {
+      display: flex; align-items: center; gap: 12px;
+      font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.14em;
+      margin: 28px 0 14px 0;
+    }
+    .ov-section-title::after { content: ""; flex: 1; height: 1px; background: var(--border); }
 
     .ov-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-      gap: 16px;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 14px;
     }
     .ov-card {
+      position: relative;
       background: var(--surface); border: 1px solid var(--border);
-      border-radius: var(--radius); padding: 18px 20px 14px 20px;
+      border-radius: var(--radius); padding: 0;
       box-shadow: var(--shadow-card);
-      cursor: pointer; transition: transform .12s, border-color .12s, box-shadow .12s;
-      position: relative; overflow: hidden;
+      cursor: pointer; overflow: hidden;
+      transition: transform .18s cubic-bezier(.4,0,.2,1), border-color .18s, box-shadow .18s;
+      animation: ov-card-in .5s cubic-bezier(.4,0,.2,1) both;
     }
-    .ov-card:hover { transform: translateY(-2px); border-color: var(--accent); box-shadow: var(--glow-accent); }
+    .ov-card[data-i="0"] { animation-delay: 0.00s; }
+    .ov-card[data-i="1"] { animation-delay: 0.06s; }
+    .ov-card[data-i="2"] { animation-delay: 0.12s; }
+    .ov-card[data-i="3"] { animation-delay: 0.18s; }
+    @keyframes ov-card-in {
+      from { opacity: 0; transform: translateY(8px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .ov-card:hover { transform: translateY(-3px); border-color: var(--ov-accent); box-shadow: 0 8px 28px rgba(0,200,255,0.10); }
     .ov-card.down { opacity: 0.55; }
-    .ov-card-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
-    .ov-card-name { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; }
-    .ov-card-emoji { font-size: 18px; }
-    .ov-card-status { font-size: 9px; font-weight: 700; padding: 3px 8px; border-radius: 99px; text-transform: uppercase; letter-spacing: 0.08em; }
-    .ov-card-status.up { background: rgba(0,230,118,0.12); color: var(--green); }
-    .ov-card-status.dn { background: rgba(255,68,68,0.12); color: var(--red); }
-    .ov-card-sub { font-size: 11px; color: var(--muted); margin-bottom: 16px; }
+    .ov-card.down:hover { opacity: 0.85; }
+    .ov-card::before, .ov-card::after,
+    .ov-card .ov-corner-bl, .ov-card .ov-corner-br {
+      content: ""; position: absolute; width: 10px; height: 10px;
+      border-color: var(--ov-accent); pointer-events: none; transition: border-color .18s;
+    }
+    .ov-card::before { top: 6px; left: 6px;   border-top: 1.5px solid; border-left: 1.5px solid; }
+    .ov-card::after  { top: 6px; right: 6px;  border-top: 1.5px solid; border-right: 1.5px solid; }
+    .ov-card .ov-corner-bl { bottom: 6px; left: 6px;   border-bottom: 1.5px solid var(--ov-accent); border-left: 1.5px solid var(--ov-accent); }
+    .ov-card .ov-corner-br { bottom: 6px; right: 6px;  border-bottom: 1.5px solid var(--ov-accent); border-right: 1.5px solid var(--ov-accent); }
+    .ov-card.down::before, .ov-card.down::after,
+    .ov-card.down .ov-corner-bl, .ov-card.down .ov-corner-br { border-color: var(--muted); }
+
+    /* Status edge bar */
+    .ov-card-edge {
+      position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
+      background: var(--green);
+    }
+    .ov-card.down .ov-card-edge { background: var(--red); }
+    .ov-card.neg .ov-card-edge { background: var(--red); }
+    .ov-card.flat .ov-card-edge { background: var(--muted); }
+
+    .ov-card-inner { padding: 18px 18px 14px 22px; }
+    .ov-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; margin-bottom: 2px; }
+    .ov-card-name { font-size: 13px; font-weight: 700; letter-spacing: 0.02em; line-height: 1.2; }
+    .ov-card-name .ov-card-emoji { margin-right: 6px; }
+    .ov-card-status { font-size: 9px; font-weight: 700; padding: 3px 7px; border-radius: 3px; text-transform: uppercase; letter-spacing: 0.10em; white-space: nowrap; line-height: 1; }
+    .ov-card-status.up { background: rgba(0,230,118,0.10); color: var(--green); border: 1px solid rgba(0,230,118,0.25); }
+    .ov-card-status.dn { background: rgba(255,68,68,0.10); color: var(--red); border: 1px solid rgba(255,68,68,0.25); }
+    .ov-card-sub {
+      font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.10em;
+      margin-bottom: 18px; padding-bottom: 8px; border-bottom: 1px dashed var(--border);
+    }
     .ov-card-pnl {
-      font-size: 32px; font-weight: 700; font-variant-numeric: tabular-nums;
-      line-height: 1; letter-spacing: -0.02em; margin-bottom: 4px;
+      font-size: 36px; font-weight: 700; line-height: 1; letter-spacing: -0.03em;
+      font-variant-numeric: tabular-nums; margin-bottom: 6px;
     }
     .ov-card-pnl.pos { color: var(--green); }
     .ov-card-pnl.neg { color: var(--red); }
     .ov-card-pnl.flat { color: var(--text); }
-    .ov-card-cap { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; margin-bottom: 12px; }
-    .ov-spark { display: block; width: 100%; height: 36px; margin-bottom: 10px; }
-    .ov-spark.empty { background: linear-gradient(90deg, transparent 0, var(--border) 50%, transparent 100%); opacity: 0.15; border-radius: 4px; }
-    .ov-card-foot { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); padding-top: 8px; border-top: 1px dashed var(--border); }
-    .ov-card-foot b { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+    .ov-card-cap-row { display: flex; align-items: baseline; gap: 8px; margin-bottom: 14px; }
+    .ov-card-cap { font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--text); }
+    .ov-card-cap-lbl { font-size: 9px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.12em; }
+    .ov-spark { display: block; width: 100%; height: 44px; margin-bottom: 12px; }
+    .ov-spark.empty { background: repeating-linear-gradient(45deg, transparent 0 4px, var(--border) 4px 5px); opacity: 0.18; border-radius: 4px; }
+    .ov-card-foot {
+      display: grid; grid-template-columns: auto 1fr auto; gap: 10px;
+      align-items: center; font-size: 10px; color: var(--muted);
+      text-transform: uppercase; letter-spacing: 0.10em;
+    }
+    .ov-card-foot b { color: var(--text); font-weight: 700; font-variant-numeric: tabular-nums; }
+    .ov-pos-bars { display: flex; gap: 2px; height: 6px; }
+    .ov-pos-bar { flex: 1; min-width: 2px; max-width: 6px; background: var(--ov-accent); border-radius: 1px; opacity: 0.7; }
+    .ov-pos-bar.dim { background: var(--border); opacity: 1; }
 
-    @media (max-width: 720px) {
-      .ov-hero { grid-template-columns: 1fr; gap: 20px; padding: 18px; }
-      .ov-hero-val { font-size: 32px; }
-      .ov-hero-side { gap: 16px; }
-      .ov-hero-stat-val { font-size: 18px; }
+    @media (max-width: 880px) {
+      .ov-hero { grid-template-columns: 1fr; }
+      .ov-hero-right { border-left: none; border-top: 1px solid var(--border); }
+      .ov-hero-eq { font-size: 48px; }
+      .ov-statusbar { font-size: 10px; padding: 7px 12px; gap: 10px; flex-wrap: wrap; }
+      #tab-overview { background-size: 32px 32px; }
+    }
+    @media (max-width: 560px) {
+      .ov-hero-eq { font-size: 36px; }
+      .ov-card-pnl { font-size: 28px; }
       .ov-grid { grid-template-columns: 1fr; }
     }
 
@@ -497,31 +628,56 @@
 <div class="main">
 
 <div id="tab-overview" class="tab-content active">
-  <!-- Hero panel -->
+
+  <!-- Status bar -->
+  <div class="ov-statusbar">
+    <span class="ov-statusbar-dot"></span>
+    <span class="ov-statusbar-title">FLEET STATUS</span>
+    <span class="ov-statusbar-sep">/</span>
+    <span class="ov-statusbar-muted" id="ov-sb-running">— bots online</span>
+    <span class="ov-statusbar-sep">/</span>
+    <span class="ov-statusbar-muted" id="ov-sb-positions">— positions</span>
+    <span class="ov-statusbar-spacer"></span>
+    <span class="ov-statusbar-muted">SYNC</span>
+    <span class="ov-statusbar-id" id="ov-sb-clock">--:--:--</span>
+  </div>
+
+  <!-- Hero block -->
   <div class="ov-hero">
-    <div class="ov-hero-main">
-      <div class="ov-hero-lbl">Total equity (all bots)</div>
-      <div class="ov-hero-val" id="ov-total-eq">—</div>
-      <div class="ov-hero-pnl" id="ov-total-pnl">—</div>
+    <div class="ov-hero-left">
+      <div class="ov-hero-eyebrow">Total equity · all bots aggregated</div>
+      <div class="ov-hero-eq"><span class="ov-currency" id="ov-eq-sym">$</span><span id="ov-eq-num">—</span></div>
+      <div class="ov-hero-pnl-row">
+        <span class="ov-hero-pnl-pct" id="ov-eq-pnl">—</span>
+        <span class="ov-hero-pnl-lbl">weighted PnL · since inception</span>
+      </div>
+      <svg id="ov-hero-spark" class="ov-hero-spark" preserveAspectRatio="none"></svg>
     </div>
-    <div class="ov-hero-side">
-      <div class="ov-hero-stat">
-        <div class="ov-hero-stat-lbl">Bots</div>
-        <div class="ov-hero-stat-val" id="ov-running">—</div>
+    <div class="ov-hero-right">
+      <div class="ov-kpi">
+        <div class="ov-kpi-lbl">Bots online</div>
+        <div class="ov-kpi-val" id="ov-kpi-run">—</div>
+        <div class="ov-kpi-bar"><div class="ov-kpi-bar-fill" id="ov-kpi-run-bar" style="width:0%"></div></div>
       </div>
-      <div class="ov-hero-stat">
-        <div class="ov-hero-stat-lbl">Open positions</div>
-        <div class="ov-hero-stat-val" id="ov-positions">—</div>
+      <div class="ov-kpi">
+        <div class="ov-kpi-lbl">Open positions</div>
+        <div class="ov-kpi-val" id="ov-kpi-pos">—</div>
       </div>
-      <div class="ov-hero-stat">
-        <div class="ov-hero-stat-lbl">Last refresh</div>
-        <div class="ov-hero-stat-val" id="ov-last" style="font-size:13px">—</div>
+      <div class="ov-kpi">
+        <div class="ov-kpi-lbl">Total capital</div>
+        <div class="ov-kpi-val" id="ov-kpi-cap">—</div>
+      </div>
+      <div class="ov-kpi">
+        <div class="ov-kpi-lbl">Best performer</div>
+        <div class="ov-kpi-val" id="ov-kpi-best" style="font-size:18px">—</div>
       </div>
     </div>
   </div>
 
-  <!-- Cards grid -->
+  <!-- Section -->
+  <div class="ov-section-title">Bots · click to drill in</div>
   <div id="ov-cards" class="ov-grid"></div>
+
 </div>
 
 <!-- ═══════════════════════════════════════════════════════════════
@@ -2070,67 +2226,129 @@ async function loadCopytrade() {
 loadCopytrade();
 setInterval(loadCopytrade, 60000);
 
-// ────────── OVERVIEW (all bots at a glance) ──────────
+// ════════ OVERVIEW v3 — financial mission control ════════
 const BOT_EMOJI = {bot:'⚡', shadow:'🌒', 'bot-cp':'🎯', freqtrade:'🦊'};
 
-function _fmtCurrency(n, ccy) {
-  const isEUR = ccy === 'EUR';
+function _fmtNum(n) {
   const v = Math.abs(n||0);
-  let s;
-  if (v >= 1000000) s = (n/1000000).toFixed(2) + 'M';
-  else if (v >= 10000) s = Math.round(n).toLocaleString('en-US');
-  else if (v >= 100) s = (n||0).toFixed(0);
-  else s = (n||0).toFixed(2);
-  return (isEUR ? '€' : '$') + s;
+  if (v >= 1e6) return (n/1e6).toFixed(2) + 'M';
+  if (v >= 1e4) return Math.round(n).toLocaleString('en-US');
+  if (v >= 100) return (n||0).toFixed(0);
+  return (n||0).toFixed(2);
+}
+function _fmtCurrency(n, ccy) {
+  return (ccy === 'EUR' ? '€' : '$') + _fmtNum(n);
 }
 function _pnlClass(p) {
   if (Math.abs(p||0) < 0.001) return 'flat';
   return (p||0) > 0 ? 'pos' : 'neg';
 }
 function _fmtPnlPct(p) {
-  const v = (p||0).toFixed(2);
-  return ((p||0) > 0 ? '+' : '') + v + '%';
+  return ((p||0) > 0 ? '+' : '') + (p||0).toFixed(2) + '%';
 }
 function _fmtAgo(iso) {
-  if (!iso) return '—';
+  if (!iso) return '';
   try {
     const t = (typeof iso === 'string' && iso.length === 10)
       ? new Date(iso + 'T00:00:00Z').getTime()
       : new Date(iso).getTime();
-    if (!t) return '—';
+    if (!t) return '';
     const sec = Math.floor((Date.now() - t) / 1000);
     if (sec < 60) return sec + 's ago';
     if (sec < 3600) return Math.floor(sec/60) + 'm ago';
     if (sec < 86400) return Math.floor(sec/3600) + 'h ago';
     return Math.floor(sec/86400) + 'd ago';
-  } catch (e) { return '—'; }
+  } catch (e) { return ''; }
 }
 
-function _renderSparkline(svgId, data) {
-  const svg = document.getElementById(svgId);
-  if (!svg) return;
+// Build a smooth cubic-bezier path with gradient fill.
+function _renderSparkSvg(svg, data, opts) {
+  opts = opts || {};
+  const H = opts.height || 44;
+  const showDot = opts.showDot !== false;
+  const W = svg.clientWidth || 280;
   if (!data || data.length < 2) {
     svg.classList.add('empty');
     svg.innerHTML = '';
     return;
   }
   svg.classList.remove('empty');
-  const W = svg.clientWidth || 280, H = 36;
-  const min = Math.min(...data), max = Math.max(...data);
+  const min = Math.min.apply(null, data), max = Math.max.apply(null, data);
   const range = max - min || 1;
   const stepX = W / (data.length - 1);
-  const pts = data.map((v, i) => {
-    const x = i * stepX;
-    const y = H - ((v - min) / range) * (H - 4) - 2;
-    return `${x.toFixed(1)},${y.toFixed(1)}`;
-  }).join(' ');
-  const lastVsFirst = data[data.length-1] - data[0];
-  const stroke = lastVsFirst > 0 ? 'var(--green)' : lastVsFirst < 0 ? 'var(--red)' : 'var(--muted)';
-  const fill = lastVsFirst > 0 ? 'rgba(0,230,118,0.10)' : lastVsFirst < 0 ? 'rgba(255,68,68,0.10)' : 'rgba(106,138,170,0.10)';
+  const pts = data.map((v, i) => ({
+    x: i * stepX,
+    y: H - ((v - min) / range) * (H - 6) - 3,
+  }));
+
+  // Smooth Catmull-Rom -> bezier
+  let path = `M ${pts[0].x.toFixed(1)} ${pts[0].y.toFixed(1)}`;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const p0 = pts[i === 0 ? 0 : i - 1];
+    const p1 = pts[i];
+    const p2 = pts[i + 1];
+    const p3 = pts[i + 2 < pts.length ? i + 2 : i + 1];
+    const tension = 0.18;
+    const c1x = p1.x + (p2.x - p0.x) * tension;
+    const c1y = p1.y + (p2.y - p0.y) * tension;
+    const c2x = p2.x - (p3.x - p1.x) * tension;
+    const c2y = p2.y - (p3.y - p1.y) * tension;
+    path += ` C ${c1x.toFixed(1)} ${c1y.toFixed(1)}, ${c2x.toFixed(1)} ${c2y.toFixed(1)}, ${p2.x.toFixed(1)} ${p2.y.toFixed(1)}`;
+  }
+
+  const lastVsFirst = data[data.length - 1] - data[0];
+  const isPos = lastVsFirst > 0;
+  const isFlat = Math.abs(lastVsFirst) < (range * 0.002);
+  const stroke = isFlat ? '#6a8aaa' : (isPos ? '#00e676' : '#ff4444');
+  const fillId = `sg-${Math.random().toString(36).slice(2, 8)}`;
+  const fillColor = isFlat ? '106,138,170' : (isPos ? '0,230,118' : '255,68,68');
+  const last = pts[pts.length - 1];
+
   svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
-  svg.innerHTML =
-    `<polygon points="${pts} ${W.toFixed(1)},${H} 0,${H}" fill="${fill}" stroke="none"/>` +
-    `<polyline points="${pts}" fill="none" stroke="${stroke}" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/>`;
+  svg.innerHTML = `
+    <defs>
+      <linearGradient id="${fillId}" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%"   stop-color="rgb(${fillColor})" stop-opacity="0.28"/>
+        <stop offset="100%" stop-color="rgb(${fillColor})" stop-opacity="0.00"/>
+      </linearGradient>
+    </defs>
+    <path d="${path} L ${W} ${H} L 0 ${H} Z" fill="url(#${fillId})" stroke="none"/>
+    <path d="${path}" fill="none" stroke="${stroke}" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/>
+    ${showDot ? `<circle cx="${last.x.toFixed(1)}" cy="${last.y.toFixed(1)}" r="2.5" fill="${stroke}">
+      <animate attributeName="opacity" values="1;0.3;1" dur="1.6s" repeatCount="indefinite"/>
+    </circle>` : ''}
+  `;
+}
+
+// Render N small bars representing position count (cap at 12 visible)
+function _posBars(n) {
+  const total = 12;
+  const filled = Math.min(total, Math.max(0, n));
+  let html = '<span class="ov-pos-bars" aria-hidden="true">';
+  for (let i = 0; i < total; i++) {
+    html += `<span class="ov-pos-bar${i < filled ? '' : ' dim'}"></span>`;
+  }
+  html += '</span>';
+  return html;
+}
+
+// Build hero aggregate sparkline by normalizing per-bot equity histories,
+// summing per index, and resampling to a common length.
+function _heroAggregate(bots) {
+  // Align by tail: take last min(N) common samples from each non-empty sparkline.
+  const series = bots.map(b => Array.isArray(b.sparkline) ? b.sparkline : []).filter(s => s.length >= 2);
+  if (!series.length) return [];
+  const n = Math.min.apply(null, series.map(s => s.length));
+  if (n < 2) {
+    // fall back: total of last value of each bot, single point pair
+    return null;
+  }
+  const out = new Array(n).fill(0);
+  for (const s of series) {
+    const offset = s.length - n;
+    for (let i = 0; i < n; i++) out[i] += s[offset + i];
+  }
+  return out;
 }
 
 async function loadOverview() {
@@ -2138,69 +2356,114 @@ async function loadOverview() {
     const r = await fetch('/api/overview');
     if (!r.ok) return;
     const data = await r.json();
-    const c = document.getElementById('ov-cards');
-    if (!c) return;
-    c.innerHTML = '';
-    let totalUsd = 0, totalPositions = 0, runningCount = 0;
-    let weightedPnl = 0, totalForWeight = 0;
-
     const bots = data.bots || [];
-    bots.forEach((b, idx) => {
-      if (b.active) runningCount++;
+    const grid = document.getElementById('ov-cards');
+    if (!grid) return;
+
+    let totalUsd = 0, totalPos = 0, running = 0, weighted = 0, weight = 0;
+    let best = null, bestPnl = -Infinity;
+
+    grid.innerHTML = '';
+    bots.forEach((b, i) => {
       const cap = b.capital_usd || 0;
+      const pnl = b.pnl_total_pct || 0;
       totalUsd += cap;
-      totalPositions += (b.open_positions || 0);
-      if (cap > 0) { weightedPnl += (b.pnl_total_pct || 0) * cap; totalForWeight += cap; }
+      totalPos += (b.open_positions || 0);
+      if (b.active) running++;
+      if (cap > 0) { weighted += pnl * cap; weight += cap; }
+      if (pnl > bestPnl) { bestPnl = pnl; best = b; }
 
       const emoji = BOT_EMOJI[b.id] || '🤖';
       const ccy = b.stake_currency || 'USD';
       const tab = b.tab || '';
-      const click = tab ? `onclick="switchTab('${tab}')"` : 'style="cursor:default"';
-      const pnlClass = _pnlClass(b.pnl_total_pct);
-      const cardClass = b.active ? 'ov-card' : 'ov-card down';
+      const click = tab ? `onclick="switchTab('${tab}')"` : '';
+      const pCls = _pnlClass(pnl);
+      const cls = ['ov-card', pCls];
+      if (!b.active) cls.push('down');
       const sparkId = `sp-${b.id}`;
+      const ago = _fmtAgo(b.last_activity);
 
-      c.insertAdjacentHTML('beforeend',
-        `<div class="${cardClass}" ${click}>
-           <div class="ov-card-head">
-             <div class="ov-card-name"><span class="ov-card-emoji">${emoji}</span>${b.name}</div>
-             <span class="ov-card-status ${b.active?'up':'dn'}">${b.active?'● running':'● down'}</span>
-           </div>
-           <div class="ov-card-sub">${b.subtitle || b.details || ''}</div>
-           <div class="ov-card-pnl ${pnlClass}">${_fmtPnlPct(b.pnl_total_pct)}</div>
-           <div class="ov-card-cap">${_fmtCurrency(cap, ccy)}</div>
-           <svg id="${sparkId}" class="ov-spark" preserveAspectRatio="none"></svg>
-           <div class="ov-card-foot">
-             <span><b>${b.open_positions || 0}</b> pos</span>
-             <span>${b.last_activity ? _fmtAgo(b.last_activity) : (b.details || '').slice(0, 22)}</span>
+      grid.insertAdjacentHTML('beforeend',
+        `<div class="${cls.join(' ')}" data-i="${i}" ${click}>
+           <span class="ov-card-edge"></span>
+           <span class="ov-corner-bl"></span><span class="ov-corner-br"></span>
+           <div class="ov-card-inner">
+             <div class="ov-card-head">
+               <div class="ov-card-name"><span class="ov-card-emoji">${emoji}</span>${b.name}</div>
+               <span class="ov-card-status ${b.active?'up':'dn'}">● ${b.active?'live':'down'}</span>
+             </div>
+             <div class="ov-card-sub">${(b.subtitle || b.details || '').toUpperCase()}</div>
+             <div class="ov-card-pnl ${pCls}">${_fmtPnlPct(pnl)}</div>
+             <div class="ov-card-cap-row">
+               <span class="ov-card-cap">${_fmtCurrency(cap, ccy)}</span>
+               <span class="ov-card-cap-lbl">equity</span>
+             </div>
+             <svg id="${sparkId}" class="ov-spark" preserveAspectRatio="none"></svg>
+             <div class="ov-card-foot">
+               <span><b>${b.open_positions || 0}</b> pos</span>
+               ${_posBars(b.open_positions || 0)}
+               <span>${ago || (b.service || '').replace('.service','').toUpperCase()}</span>
+             </div>
            </div>
          </div>`);
-
-      // Render sparkline after DOM append (next tick to ensure clientWidth is correct)
-      requestAnimationFrame(() => _renderSparkline(sparkId, b.sparkline || []));
+      requestAnimationFrame(() => {
+        const svg = document.getElementById(sparkId);
+        if (svg) _renderSparkSvg(svg, b.sparkline || []);
+      });
     });
 
-    // Hero panel
-    const eqEl = document.getElementById('ov-total-eq');
-    const pnlEl = document.getElementById('ov-total-pnl');
-    const runEl = document.getElementById('ov-running');
-    const posEl = document.getElementById('ov-positions');
-    const lastEl = document.getElementById('ov-last');
-    if (eqEl) eqEl.textContent = _fmtCurrency(totalUsd, 'USD');
-    const aggPnl = totalForWeight ? (weightedPnl / totalForWeight) : 0;
-    if (pnlEl) {
-      pnlEl.className = 'ov-hero-pnl ' + _pnlClass(aggPnl);
-      pnlEl.textContent = _fmtPnlPct(aggPnl) + ' (weighted by capital)';
+    // Hero
+    const aggPnl = weight ? (weighted / weight) : 0;
+    const eqSym = document.getElementById('ov-eq-sym');
+    const eqNum = document.getElementById('ov-eq-num');
+    const eqPnl = document.getElementById('ov-eq-pnl');
+    if (eqSym) eqSym.textContent = '$';
+    if (eqNum) eqNum.textContent = _fmtNum(totalUsd);
+    if (eqPnl) {
+      eqPnl.className = 'ov-hero-pnl-pct ' + _pnlClass(aggPnl);
+      eqPnl.textContent = _fmtPnlPct(aggPnl);
     }
-    if (runEl) runEl.textContent = `${runningCount}/${bots.length}`;
-    if (posEl) posEl.textContent = totalPositions;
-    if (lastEl) lastEl.textContent = new Date().toLocaleTimeString('fr-FR', {hour: '2-digit', minute: '2-digit', second: '2-digit'});
+    const k1 = document.getElementById('ov-kpi-run');
+    const k1b = document.getElementById('ov-kpi-run-bar');
+    if (k1) k1.textContent = `${running}/${bots.length}`;
+    if (k1b) k1b.style.width = bots.length ? ((running/bots.length)*100).toFixed(0) + '%' : '0';
+    const k2 = document.getElementById('ov-kpi-pos');
+    if (k2) k2.textContent = totalPos;
+    const k3 = document.getElementById('ov-kpi-cap');
+    if (k3) k3.textContent = _fmtCurrency(totalUsd, 'USD');
+    const k4 = document.getElementById('ov-kpi-best');
+    if (k4 && best) {
+      const cls = _pnlClass(bestPnl);
+      k4.innerHTML = `<span style="font-size:11px;color:var(--muted);font-weight:600">${BOT_EMOJI[best.id] || '🤖'} ${best.name.toUpperCase()}</span><br/><span class="ov-card-pnl ${cls}" style="font-size:20px">${_fmtPnlPct(bestPnl)}</span>`;
+    }
+    // Status bar
+    const sbR = document.getElementById('ov-sb-running');
+    const sbP = document.getElementById('ov-sb-positions');
+    if (sbR) sbR.textContent = `${running} bots online`;
+    if (sbP) sbP.textContent = `${totalPos} positions`;
+
+    // Aggregate hero sparkline
+    const heroSvg = document.getElementById('ov-hero-spark');
+    if (heroSvg) {
+      const agg = _heroAggregate(bots);
+      requestAnimationFrame(() => _renderSparkSvg(heroSvg, agg || [], {height: 56}));
+    }
 
     // Top-nav badge
     const badge = document.getElementById('nb-ov');
-    if (badge) badge.textContent = `${runningCount}/${bots.length}`;
+    if (badge) badge.textContent = `${running}/${bots.length}`;
   } catch (e) { console.warn('loadOverview failed', e); }
 }
+
+function _ovTickClock() {
+  const el = document.getElementById('ov-sb-clock');
+  if (!el) return;
+  const d = new Date();
+  el.textContent = d.toISOString().slice(11, 19) + ' UTC';
+}
+_ovTickClock();
+setInterval(_ovTickClock, 1000);
+
 loadOverview();
 setInterval(loadOverview, 30000);
 </script>
