@@ -1,0 +1,17 @@
+[Unit]
+Description=Bot CopyTrade Paper (Polymarket)
+After=network.target
+
+[Service]
+Type=simple
+User=botuser
+WorkingDirectory=/home/botuser/bot-trading
+EnvironmentFile=-/home/botuser/bot-trading/.env
+ExecStart=/home/botuser/bot-trading/venv/bin/python -m live.copytrade.runner
+Restart=on-failure
+RestartSec=30
+StandardOutput=append:/home/botuser/bot-trading/logs/copytrade/copytrade.log
+StandardError=append:/home/botuser/bot-trading/logs/copytrade/copytrade.log
+
+[Install]
+WantedBy=multi-user.target
