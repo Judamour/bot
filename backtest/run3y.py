@@ -25,14 +25,20 @@ RESULTS = "backtest/results"
 os.makedirs(RESULTS, exist_ok=True)
 
 XSTOCK_MAP = {
-    "NVDAx/EUR":"NVDA","AAPLx/EUR":"AAPL","MSFTx/EUR":"MSFT",
-    "METAx/EUR":"META","GOOGx/EUR":"GOOGL","PLTRx/EUR":"PLTR",
-    "AMDx/EUR":"AMD","AVGOx/EUR":"AVGO","GLDx/EUR":"GLD",
-    "NFLXx/EUR":"NFLX","CRWDx/EUR":"CRWD",
+    # Migration 2026-05-01 : config.SYMBOLS sans suffixe x/USD. Keys = config.SYMBOLS, values = ticker yfinance.
+    "NVDA":"NVDA","GOOGL":"GOOGL","META":"META",
+    "PLTR":"PLTR","CRWD":"CRWD",
+    "LLY":"LLY","ABBV":"ABBV",
+    "XOM":"XOM","CVX":"CVX",
+    "JPM":"JPM","BAC":"BAC",
+    "KO":"KO","PG":"PG",
+    "SPY":"SPY","QQQ":"QQQ",
+    "GLD":"GLD",
 }
 CRYPTO_MAP = {
-    "BTC/EUR":"BTC-EUR","ETH/EUR":"ETH-EUR",
-    "SOL/EUR":"SOL-EUR","BNB/EUR":"BNB-EUR",
+    "BTC/USD":"BTC-USD","ETH/USD":"ETH-USD",
+    "SOL/USD":"SOL-USD","AVAX/USD":"AVAX-USD",
+    "LINK/USD":"LINK-USD",
 }
 
 def fetch(ticker, to_eur=False):
@@ -62,7 +68,7 @@ daily = {}
 for sym, tk in XSTOCK_MAP.items():
     if sym not in config.SYMBOLS:
         continue
-    df = fetch(tk, to_eur=True)
+    df = fetch(tk, to_eur=False)  # Migration USD : pas de conversion (xStocks Kraken /USD)
     if df is not None:
         daily[sym] = df
         print(f"  {sym:<20} {df.index[0].date()} → {df.index[-1].date()}  {len(df)} barres")

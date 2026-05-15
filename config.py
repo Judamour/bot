@@ -101,7 +101,7 @@ RSI_PERIOD = 14     # Période RSI
 RSI_OVERBOUGHT = 70 # RSI > 70 → on n'achète pas
 RSI_OVERSOLD = 25   # RSI < 25 → seuil de survente
 ADX_PERIOD = 14     # Période ADX
-ADX_THRESHOLD = 22  # ADX > 22 = tendance suffisante
+ADX_THRESHOLD = 25  # ADX > 25 = tendance forte (was 22 — réduit faux signaux d'entrée en marché hésitant)
 
 # ── Gestion du risque ───────────────────────────────────────────────────────
 # Profil A agressif : sizing plus large, stops plus larges, vol cible plus haute.

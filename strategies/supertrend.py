@@ -146,7 +146,7 @@ def generate_signals(df: pd.DataFrame) -> pd.DataFrame:
     bullish_structure = df["ema50"] > df["ema200"]            # Golden Cross lent
     momentum_up      = df["ema9"] > df["ema21"]               # Golden Cross rapide
     not_overbought   = df["rsi"] < config.RSI_OVERBOUGHT      # Pas de surachat
-    strong_volume    = df["volume_ratio"] > 1.1               # Volume > 110% moyenne
+    strong_volume    = df["volume_ratio"] > 1.3               # Volume > 130% moyenne (was 1.1 — exige confirmation institutionnelle plus forte)
 
     # ── Colonnes booléennes pour analyse contrefactuelle ──
     df["f_supertrend_up"] = supertrend_up
@@ -211,10 +211,16 @@ def generate_signals(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def calculate_position_size(position_eur: float, entry_price: float, atr: float) -> dict:
-    """Calcule la taille de position avec montant fixe en EUR."""
+def calculate_position_size(position_eur: float, entry_price: float, atr: float, symbol: str = "") -> dict:
+    """Calcule la taille de position avec montant fixe en EUR.
+
+    Stop initial crypto-aware : 6×ATR pour crypto (vol 2x), 4×ATR pour stocks.
+    Évite les whipsaws AVAX/BTC vus en mai 2026 où ATR×4 = juste sous le bruit intraday.
+    """
     size = position_eur / entry_price
-    stop_distance = atr * config.ATR_MULTIPLIER
+    is_crypto = symbol in config.CRYPTO if hasattr(config, "CRYPTO") else False
+    atr_mult = 6.0 if is_crypto else config.ATR_MULTIPLIER
+    stop_distance = atr * atr_mult
 
     stop_loss = entry_price - stop_distance
     take_profit = entry_price + (stop_distance * config.TAKE_PROFIT_RATIO)

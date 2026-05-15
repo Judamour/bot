@@ -5,7 +5,7 @@ import os
 import sys
 from datetime import datetime, timedelta, timezone  # timedelta requis par _next_cycle_utc()
 
-COOLDOWN_HOURS_AFTER_EXIT = 12  # Anti-whipsaw : block re-entry pendant 12h après tout exit
+COOLDOWN_HOURS_AFTER_EXIT = 24  # Anti-whipsaw : block re-entry pendant 24h après tout exit (was 12h — 7/7 SL post 30/04 sur ré-entrées rapides)
 
 
 def _is_in_cooldown(state: dict, symbol: str) -> tuple[bool, datetime | None]:
@@ -133,7 +133,9 @@ def apply_trailing_stop(position: dict, current_price: float, atr: float, symbol
     """
     entry = float(position.get("entry") or 0)
     gain_pct = (current_price - entry) / entry if entry > 0 else 0.0
-    atr_mult = 2.0 if gain_pct >= 0.15 else config.ATR_MULTIPLIER
+    is_crypto = symbol in config.CRYPTO if hasattr(config, "CRYPTO") else False
+    base_mult = 6.0 if is_crypto else config.ATR_MULTIPLIER  # crypto vol 2x stock → stop plus large
+    atr_mult = (base_mult * 0.5) if gain_pct >= 0.15 else base_mult
     if df is not None and len(df) >= 22:
         recent_high = float(df["high"].tail(22).max())
         new_stop = round(recent_high - atr_mult * atr, 4)
@@ -580,7 +582,10 @@ def process_symbol(
         # Floor en % du capital initial (capital-agnostic) plutôt qu'en € hardcodé
         init_cap_for_floor = state.get("original_capital", state.get("initial_capital", config.INITIAL_CAPITAL_PER_BOT))
         floor_eur = init_cap_for_floor * config.POSITION_MIN_PCT
-        base_eur = max(floor_eur, total_value * config.POSITION_SIZE_PCT)
+        # Cap crypto à 15% (vs 25% stocks) : vol 2x → mêmes pertes nominales avec moitié du sizing.
+        # AVAX -650€ (3% mvt sur 18 164€) aurait été -390€ avec cap 15%.
+        size_pct_effective = (config.POSITION_SIZE_PCT * 0.6) if (symbol in config.CRYPTO if hasattr(config, "CRYPTO") else False) else config.POSITION_SIZE_PCT
+        base_eur = max(floor_eur, total_value * size_pct_effective)
         # Dynamic sizing : réduire les positions en drawdown (protection anti-ruin)
         init_cap = state.get("original_capital", state.get("initial_capital", config.PAPER_CAPITAL))
         if init_cap > 0:
@@ -608,7 +613,7 @@ def process_symbol(
             )
         else:
             log(f"{symbol} — Position {position_eur:.0f}€ ({config.POSITION_SIZE_PCT*100:.0f}% du capital {state['capital']:.0f}€)", "INFO")
-        pos = calculate_position_size(position_eur, effective_buy, atr)
+        pos = calculate_position_size(position_eur, effective_buy, atr, symbol=symbol)
         fee_entry = effective_buy * pos["size"] * config.EXCHANGE_FEE
         total_cost = pos["size"] * effective_buy + fee_entry
 

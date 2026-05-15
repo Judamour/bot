@@ -236,6 +236,10 @@ def backtest_bot_a(daily_cache):
     capital = INITIAL
     positions = {}
     MAX_POS, SIZE_PCT = 6, 0.15
+    # Mirror live A+B+C : cooldown 24h post-exit (1 bar daily ≈ 24h), atr×4.5 crypto vs ×3 stocks,
+    # cap crypto à 60% du sizing (0.15 × 0.6 = 0.09 = 9% — équivalent live 25%×0.6=15%).
+    COOLDOWN_DAYS = 1
+    recent_exits = {}  # {sym: dt_exit}
 
     # Precompute signals
     dfs = {}
@@ -252,6 +256,9 @@ def backtest_bot_a(daily_cache):
 
     all_dates = sorted(set.union(*[set(df.index) for df in dfs.values()]))
 
+    def _is_crypto(sym):
+        return sym in config.CRYPTO if hasattr(config, "CRYPTO") else False
+
     for dt in all_dates:
         # Trailing stops + exits
         for sym in list(positions.keys()):
@@ -262,9 +269,14 @@ def backtest_bot_a(daily_cache):
             row = df.loc[dt]
             atr = float(row.get("atr", row["close"] * 0.02))
             stype = pos.get("stype", "trend")
-            base_mult = 3.0 if stype == "trend" else 1.0
+            is_crypto = _is_crypto(sym)
+            # B: ATR×4.5 crypto, ×3 stocks pour stype=trend (ratio 1.5x = live 6.0/4.0)
+            if stype == "trend":
+                base_mult = 4.5 if is_crypto else 3.0
+            else:
+                base_mult = 1.0
             gain = (row["close"] - pos["entry"]) / pos["entry"] if pos.get("entry", 0) > 0 else 0.0
-            mult = base_mult * 0.5 if gain >= 0.15 else base_mult  # trail dynamique: ATR×3→×1.5 après +15%
+            mult = base_mult * 0.5 if gain >= 0.15 else base_mult  # trail dynamique après +15%
             new_stop = row["close"] - mult * atr
             if new_stop > pos["stop"]:
                 pos["stop"] = new_stop
@@ -282,11 +294,18 @@ def backtest_bot_a(daily_cache):
                 proceeds, tr = _close_pos(pos, ep, exit_reason, dt)
                 capital += proceeds
                 trades.append(tr)
+                # A: cooldown post-exit (24h ≈ 1 bar daily)
+                if exit_reason in ("trailing_stop", "stop_loss"):
+                    recent_exits[sym] = dt
                 del positions[sym]
 
         # Entries
         for sym, df in dfs.items():
             if sym in positions or dt not in df.index or len(positions) >= MAX_POS:
+                continue
+            # A: skip si en cooldown post stop_loss
+            last_exit = recent_exits.get(sym)
+            if last_exit is not None and (dt - last_exit).days < COOLDOWN_DAYS:
                 continue
             row = df.loc[dt]
             atr = float(row.get("atr", row["close"] * 0.02))
@@ -297,10 +316,17 @@ def backtest_bot_a(daily_cache):
                 stype, buy = "mr", True
             if buy and capital > 10:
                 ep = _entry(row["close"])
-                size = (capital * SIZE_PCT) / ep
+                is_crypto = _is_crypto(sym)
+                # C: cap crypto sizing à 60% du sizing stocks (= 9% vs 15%)
+                size_pct = SIZE_PCT * 0.6 if is_crypto else SIZE_PCT
+                size = (capital * size_pct) / ep
                 cost = _cost(size, ep)
                 if cost <= capital:
-                    mult = 3.0 if stype == "trend" else 1.0
+                    # B: même logique atr_mult crypto-aware
+                    if stype == "trend":
+                        mult = 4.5 if is_crypto else 3.0
+                    else:
+                        mult = 1.0
                     capital -= cost
                     positions[sym] = {"sym": sym, "size": size, "cost": cost,
                                       "entry": ep, "stop": ep - mult * atr, "date": dt, "stype": stype}
@@ -475,8 +501,14 @@ def backtest_bot_g(daily_cache):
     capital = INITIAL
     positions = {}
     TARGET_VOL, MAX_POS_PCT, MAX_POS = 0.15, 0.10, 8
+    # Mirror A+B+C+D : cooldown 1j, ATR×4.5 crypto, cap crypto 60% sizing, ADX 20→25
+    COOLDOWN_DAYS = 1
+    recent_exits = {}
 
     syms = [s for s in config.SYMBOLS if s in daily_cache and len(daily_cache[s]) > 230]
+
+    def _is_crypto(sym):
+        return sym in config.CRYPTO if hasattr(config, "CRYPTO") else False
 
     sigs = {}
     for sym in syms:
@@ -502,8 +534,11 @@ def backtest_bot_g(daily_cache):
                 continue
             row = df.loc[dt]
             px = row["close"]
+            is_crypto = _is_crypto(sym)
             gain = (px - pos["entry"]) / pos["entry"] if pos.get("entry", 0) > 0 else 0.0
-            mult = 1.5 if gain >= 0.15 else 3.0  # trail dynamique: 3×→1.5× après +15%
+            # B: ATR×4.5 crypto, ×3 stocks
+            base_mult = 4.5 if is_crypto else 3.0
+            mult = base_mult * 0.5 if gain >= 0.15 else base_mult
             new_stop = px - mult * float(row["atr20"])
             if new_stop > pos["stop"]:
                 pos["stop"] = new_stop
@@ -515,30 +550,43 @@ def backtest_bot_g(daily_cache):
                 exit_reason = "sma200_break"
             if exit_reason:
                 proceeds, tr = _close_pos(pos, ep, exit_reason, dt)
-                capital += proceeds; trades.append(tr); del positions[sym]
+                capital += proceeds; trades.append(tr)
+                if exit_reason in ("trailing_stop", "stop_loss"):
+                    recent_exits[sym] = dt
+                del positions[sym]
 
         # Entries
         if len(positions) < MAX_POS:
             for sym, df in sigs.items():
                 if sym in positions or dt not in df.index or len(positions) >= MAX_POS:
                     continue
+                # A: cooldown
+                last_exit = recent_exits.get(sym)
+                if last_exit is not None and (dt - last_exit).days < COOLDOWN_DAYS:
+                    continue
                 row = df.loc[dt]
                 if pd.isna(row["sma200"]) or pd.isna(row["high50"]) or pd.isna(row["vol20"]):
                     continue
+                # D: ADX 20→25 (filtre tendance plus stricte)
                 cond = (row["close"] > row["sma200"] and row["close"] > row["sma50"]
-                        and row["close"] > row["high50"] and row["adx"] > 20
+                        and row["close"] > row["high50"] and row["adx"] > 25
                         and row["vol20"] > 0)
                 if cond and capital > 10:
                     vol = float(row["vol20"])
                     ep = _entry(row["close"])
-                    size_pct = min(TARGET_VOL / vol, MAX_POS_PCT)
+                    is_crypto = _is_crypto(sym)
+                    # C: cap crypto sizing à 60%
+                    cap_pct = MAX_POS_PCT * 0.6 if is_crypto else MAX_POS_PCT
+                    size_pct = min(TARGET_VOL / vol, cap_pct)
                     size = (capital * size_pct) / ep
                     cost = _cost(size, ep)
                     atr = float(row["atr20"])
                     if cost <= capital and size > 0:
                         capital -= cost
+                        # B: initial stop crypto-aware
+                        init_mult = 4.5 if is_crypto else 3.0
                         positions[sym] = {"sym": sym, "size": size, "cost": cost,
-                                          "entry": ep, "stop": ep - 3 * atr, "date": dt}
+                                          "entry": ep, "stop": ep - init_mult * atr, "date": dt}
 
         pv = capital + sum(prices.get(s, p["cost"] / p["size"]) * p["size"]
                            for s, p in positions.items())
