@@ -876,6 +876,50 @@ def api_equity_curve():
     return jsonify({"curve": curve, "count": total})
 
 
+@app.route("/api/copytrade")
+def api_copytrade():
+    """Read-only snapshot of the bot-cp paper portfolio + recent decisions."""
+    import json
+    import os
+    from pathlib import Path
+
+    log_dir = Path(os.getenv("BOT_CP_LOG_DIR", "logs/copytrade"))
+    portfolio_path = log_dir / "portfolio.json"
+    decisions_path = log_dir / "decisions.jsonl"
+    equity_path = log_dir / "equity.jsonl"
+
+    portfolio: dict = {}
+    if portfolio_path.exists():
+        try:
+            with open(portfolio_path) as f:
+                portfolio = json.load(f)
+        except Exception:
+            pass
+
+    recent: list = []
+    if decisions_path.exists():
+        try:
+            with open(decisions_path) as f:
+                lines = f.readlines()[-50:]
+            recent = [json.loads(line) for line in lines if line.strip()]
+        except Exception:
+            pass
+
+    equity_curve: list = []
+    if equity_path.exists():
+        try:
+            with open(equity_path) as f:
+                equity_curve = [json.loads(line) for line in f if line.strip()]
+        except Exception:
+            pass
+
+    return jsonify({
+        "portfolio": portfolio,
+        "recent_decisions": recent,
+        "equity_curve": equity_curve,
+    })
+
+
 def run(host: str = "0.0.0.0", port: int = 5000, debug: bool = False):
     """Lance le serveur Flask."""
     t = threading.Thread(target=background_thread, daemon=True)
