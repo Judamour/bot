@@ -89,3 +89,45 @@ def value(wallet: str) -> float:
     if not data:
         return 0.0
     return float(data[0].get("value", 0.0))
+
+
+def price(token_id: str, side: str = "BUY") -> float | None:
+    """Current orderbook mid for an outcome token. Returns None if endpoint
+    returns no price (e.g. resolved market)."""
+    url = f"{_CLOB_API}/price?token_id={token_id}&side={side}"
+    data = _get(url) or {}
+    p = data.get("price")
+    if p is None:
+        return None
+    try:
+        return float(p)
+    except (TypeError, ValueError):
+        return None
+
+
+def target_position_size_at(
+    wallet: str,
+    condition_id: str,
+    outcome_index: int,
+    ts: int,
+    fetch_limit: int = 500,
+) -> float:
+    """Return target's outcome-token size on (condition_id, outcome_index)
+    at-or-just-before `ts`, by summing signed trades with timestamp ≤ ts.
+
+    BUY adds size, SELL subtracts. We fetch up to `fetch_limit` recent trades
+    of the wallet, which is enough for our 3 chosen targets (high-frequency
+    but most positions opened in last 1-2 weeks).
+    """
+    all_trades = trades(wallet, limit=fetch_limit)
+    relevant = [
+        t for t in all_trades
+        if t.get("conditionId") == condition_id
+        and int(t.get("outcomeIndex", -1)) == outcome_index
+        and int(t.get("timestamp", 0)) <= ts
+    ]
+    size = 0.0
+    for t in sorted(relevant, key=lambda x: int(x["timestamp"])):
+        delta = float(t.get("size", 0.0))
+        size += delta if t.get("side") == "BUY" else -delta
+    return max(size, 0.0)
