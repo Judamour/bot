@@ -262,7 +262,9 @@ def backtest_bot_a(daily_cache):
             row = df.loc[dt]
             atr = float(row.get("atr", row["close"] * 0.02))
             stype = pos.get("stype", "trend")
-            mult = 3.0 if stype == "trend" else 1.0
+            base_mult = 3.0 if stype == "trend" else 1.0
+            gain = (row["close"] - pos["entry"]) / pos["entry"] if pos.get("entry", 0) > 0 else 0.0
+            mult = base_mult * 0.5 if gain >= 0.15 else base_mult  # trail dynamique: ATR×3→×1.5 après +15%
             new_stop = row["close"] - mult * atr
             if new_stop > pos["stop"]:
                 pos["stop"] = new_stop
@@ -301,7 +303,7 @@ def backtest_bot_a(daily_cache):
                     mult = 3.0 if stype == "trend" else 1.0
                     capital -= cost
                     positions[sym] = {"sym": sym, "size": size, "cost": cost,
-                                      "stop": ep - mult * atr, "date": dt, "stype": stype}
+                                      "entry": ep, "stop": ep - mult * atr, "date": dt, "stype": stype}
 
         pv = capital + sum(dfs[s].loc[dt, "close"] * p["size"]
                            for s, p in positions.items() if s in dfs and dt in dfs[s].index)
@@ -456,7 +458,7 @@ def backtest_bot_c(daily_cache):
                 if size > 0 and cost <= capital:
                     capital -= cost
                     positions[sym] = {"sym": sym, "size": size, "cost": cost,
-                                      "stop": stop, "date": dt}
+                                      "entry": ep, "stop": stop, "date": dt}
 
         pv = capital + sum(sigs[s].loc[dt, "close"] * p["size"]
                            for s, p in positions.items() if dt in sigs[s].index)
@@ -500,7 +502,9 @@ def backtest_bot_g(daily_cache):
                 continue
             row = df.loc[dt]
             px = row["close"]
-            new_stop = px - 3 * float(row["atr20"])
+            gain = (px - pos["entry"]) / pos["entry"] if pos.get("entry", 0) > 0 else 0.0
+            mult = 1.5 if gain >= 0.15 else 3.0  # trail dynamique: 3×→1.5× après +15%
+            new_stop = px - mult * float(row["atr20"])
             if new_stop > pos["stop"]:
                 pos["stop"] = new_stop
             exit_reason = None
@@ -534,7 +538,7 @@ def backtest_bot_g(daily_cache):
                     if cost <= capital and size > 0:
                         capital -= cost
                         positions[sym] = {"sym": sym, "size": size, "cost": cost,
-                                          "stop": ep - 3 * atr, "date": dt}
+                                          "entry": ep, "stop": ep - 3 * atr, "date": dt}
 
         pv = capital + sum(prices.get(s, p["cost"] / p["size"]) * p["size"]
                            for s, p in positions.items())
@@ -584,7 +588,9 @@ def backtest_bot_h(daily_cache):
                 continue
             row = df.loc[dt]
             px = row["close"]
-            new_stop = px - 3 * float(row["atr14"])
+            gain = (px - pos["entry"]) / pos["entry"] if pos.get("entry", 0) > 0 else 0.0
+            mult = 1.5 if gain >= 0.15 else 3.0  # trail dynamique: 3×→1.5× après +15%
+            new_stop = px - mult * float(row["atr14"])
             if new_stop > pos["stop"]:
                 pos["stop"] = new_stop
             if px <= pos["stop"]:
@@ -611,7 +617,7 @@ def backtest_bot_h(daily_cache):
                     if cost <= capital and size > 0:
                         capital -= cost
                         positions[sym] = {"sym": sym, "size": size, "cost": cost,
-                                          "stop": stop, "date": dt}
+                                          "entry": ep, "stop": stop, "date": dt}
 
         pv = capital + sum(prices.get(s, p["cost"] / p["size"]) * p["size"]
                            for s, p in positions.items())
@@ -661,7 +667,9 @@ def backtest_bot_i(daily_cache):
             row = df.loc[dt]
             px = row["close"]
             atr = float(row["atr14"])
-            new_stop = px - ATR_TRAIL * atr
+            gain = (px - pos["entry"]) / pos["entry"] if pos.get("entry", 0) > 0 else 0.0
+            mult = ATR_TRAIL * 0.5 if gain >= 0.15 else ATR_TRAIL  # trail dynamique après +15%
+            new_stop = px - mult * atr
             if new_stop > pos["stop"]:
                 pos["stop"] = new_stop
             exit_reason = None

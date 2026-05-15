@@ -125,13 +125,20 @@ def apply_trailing_stop(position: dict, current_price: float, atr: float, symbol
     Suit la structure du marché (plus haut récent) au lieu du prix instantané.
     Évite les stops à -0.0R/-0.2R (entrées en plein bruit). QuantifiedStrategies, StockCharts.
 
+    Trail dynamique : si gain ≥ +15%, resserre ATR×4 → ATR×2. Protège
+    ~2/3 du peak au lieu de 1/2 sur les gros gagnants (NVDA, CRWD)
+    sans changer la philosophie trend-following.
+
     Fallback ATR classique si df absent ou < 22 barres.
     """
+    entry = float(position.get("entry") or 0)
+    gain_pct = (current_price - entry) / entry if entry > 0 else 0.0
+    atr_mult = 2.0 if gain_pct >= 0.15 else config.ATR_MULTIPLIER
     if df is not None and len(df) >= 22:
         recent_high = float(df["high"].tail(22).max())
-        new_stop = round(recent_high - config.ATR_MULTIPLIER * atr, 4)
+        new_stop = round(recent_high - atr_mult * atr, 4)
     else:
-        new_stop = round(current_price - config.ATR_MULTIPLIER * atr, 4)
+        new_stop = round(current_price - atr_mult * atr, 4)
     if new_stop > position["stop"]:
         position["stop"] = new_stop
         log(f"{symbol} — Trailing stop → {new_stop:.4f}€", "INFO")
@@ -509,10 +516,14 @@ def process_symbol(
             return state
 
         # Corrélation secteur — max MAX_PER_SECTOR positions par secteur (intra-bot)
+        # Crypto autorisée à 3 (vs 2 défaut) : sector breadth de 5 actifs vs ~2 par
+        # autre secteur. Avec MTF veto + BTC.D filter, le risque concentration crypto
+        # reste sous contrôle. Aide Bot A à déployer son cash dormant.
         sector = config.SECTORS.get(symbol)
         if sector:
             occupied = [s for s in state["positions"] if config.SECTORS.get(s) == sector]
-            if len(occupied) >= config.MAX_PER_SECTOR:
+            sector_cap = 3 if sector == "crypto" else config.MAX_PER_SECTOR
+            if len(occupied) >= sector_cap:
                 log(f"{symbol} — Signal ignoré (secteur '{sector}' saturé intra-bot: {occupied})", "INFO")
                 log_signal("BUY_SKIP_SECTOR", symbol, {"sector": sector, "occupied_by": occupied, "price": current_price})
                 return state
@@ -536,7 +547,14 @@ def process_symbol(
         ok_1d, reason_1d = _confirm_daily_trend(symbol, ohlcv_daily=ohlcv_daily)
         log(f"{symbol} — MTF 1d: {'✓' if ok_1d else '⚠'} {reason_1d}", "INFO")
         log_signal("MTF_FILTER", symbol, {"ok_1d": ok_1d, "reason": reason_1d, "price": current_price})
-        # Claude décide — pas de blocage hard sur le MTF
+        # MTF 1d veto HARD pour crypto : 2 SL AVAX (-$1145) en 1 semaine confirmant
+        # qu'un crypto en bearish daily n'a pas de business à être acheté en 4h.
+        # Stocks restent informatifs (Claude décide) — volatilité plus faible et
+        # mean-reversion intraday plus fréquente justifie de laisser passer.
+        if symbol in config.CRYPTO and not ok_1d:
+            log(f"{symbol} — Signal ignoré (MTF 1d veto crypto: {reason_1d})", "INFO")
+            log_signal("BUY_SKIP_MTF_CRYPTO", symbol, {"reason": reason_1d, "price": current_price})
+            return state
 
         log(
             f"{symbol} — Signal BUY | ADX: {adx:.1f} | Vol×{volume_ratio:.2f} | "
