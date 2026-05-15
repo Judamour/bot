@@ -64,3 +64,28 @@ def _get(url: str, retries: int = 3, timeout: float = 10.0) -> Any:
                 continue
             raise DataAPIError(f"network error for {url}: {e}") from e
     raise DataAPIError(f"exhausted retries for {url}") from last_exc
+
+
+def trades(wallet: str, limit: int = 50, since_ts: int | None = None) -> list[dict]:
+    """Recent trades for `wallet`. If `since_ts` is set, only return trades with
+    timestamp strictly > since_ts (used for incremental polling)."""
+    url = f"{_DATA_API}/trades?user={wallet.lower()}&limit={limit}"
+    out = _get(url) or []
+    if since_ts is not None:
+        out = [t for t in out if int(t.get("timestamp", 0)) > since_ts]
+    return out
+
+
+def positions(wallet: str) -> list[dict]:
+    """Open positions for `wallet`, each with size/curPrice/currentValue."""
+    url = f"{_DATA_API}/positions?user={wallet.lower()}"
+    return _get(url) or []
+
+
+def value(wallet: str) -> float:
+    """Total portfolio value for `wallet`, in USD."""
+    url = f"{_DATA_API}/value?user={wallet.lower()}"
+    data = _get(url) or []
+    if not data:
+        return 0.0
+    return float(data[0].get("value", 0.0))

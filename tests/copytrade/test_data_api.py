@@ -36,3 +36,50 @@ def test_get_sends_required_headers():
     assert captured["headers"].get("Origin") == "https://polymarket.com"
     assert captured["headers"].get("Referer") == "https://polymarket.com/"
     assert "Mozilla" in captured["headers"].get("User-agent", "")
+
+
+def test_trades_url_format():
+    captured = {}
+
+    def fake_urlopen(req, timeout=None):
+        captured["url"] = req.full_url
+        return _mock_resp([{"timestamp": 1, "side": "BUY"}])
+
+    with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+        out = data_api.trades("0xABC", limit=50)
+    assert "user=0xabc" in captured["url"].lower()
+    assert "limit=50" in captured["url"]
+    assert isinstance(out, list)
+
+
+def test_trades_since_filters_older():
+    body = [
+        {"timestamp": 100, "side": "BUY", "transactionHash": "0xa"},
+        {"timestamp": 200, "side": "SELL", "transactionHash": "0xb"},
+        {"timestamp": 50,  "side": "BUY",  "transactionHash": "0xc"},
+    ]
+    with patch("urllib.request.urlopen", return_value=_mock_resp(body)):
+        out = data_api.trades("0xABC", since_ts=100)
+    # since_ts is strictly greater-than → 50 and 100 are excluded
+    hashes = [t["transactionHash"] for t in out]
+    assert hashes == ["0xb"]
+
+
+def test_positions_returns_list():
+    body = [{"conditionId": "0xC", "size": 10, "curPrice": 0.5, "currentValue": 5}]
+    with patch("urllib.request.urlopen", return_value=_mock_resp(body)):
+        out = data_api.positions("0xABC")
+    assert out == body
+
+
+def test_value_returns_scalar():
+    body = [{"user": "0xabc", "value": 1234.56}]
+    with patch("urllib.request.urlopen", return_value=_mock_resp(body)):
+        v = data_api.value("0xABC")
+    assert v == pytest.approx(1234.56)
+
+
+def test_value_handles_empty():
+    with patch("urllib.request.urlopen", return_value=_mock_resp([])):
+        v = data_api.value("0xABC")
+    assert v == 0.0
