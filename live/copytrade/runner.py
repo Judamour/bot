@@ -238,6 +238,8 @@ def _reconcile_resolved_once(portfolios: dict[str, PaperPortfolio]) -> int:
             if cid is None or oi is None:
                 continue
             payoff = payoffs[asset]
+            cost = float(p.get("cost_usd", 0.0))
+            size = float(p.get("size", 0.0))
             pf.sell(
                 condition_id=cid,
                 outcome_index=oi,
@@ -248,9 +250,9 @@ def _reconcile_resolved_once(portfolios: dict[str, PaperPortfolio]) -> int:
             )
             closed += 1
             log.info(
-                "reconcile %s: %s / %s payoff=%.2f cost=$%.2f",
+                "reconcile %s: %s / %s payoff=%.2f cost=$%.2f pnl=$%+.2f",
                 pseudo, str(p.get("market_title", "?"))[:50],
-                p.get("outcome", "?"), payoff, p.get("cost_usd", 0.0),
+                p.get("outcome", "?"), payoff, cost, size * payoff - cost,
             )
 
     _last_reconcile_date = today
