@@ -186,8 +186,9 @@ _last_equity_date: str | None = None
 def _maybe_snapshot_equity(portfolios: dict[str, PaperPortfolio]) -> None:
     """Append a daily MTM snapshot to equity.jsonl when the UTC date changes.
 
-    For MTM we use the position avg_price as fallback (no live price fetch
-    each cycle to stay light). The dashboard can compute richer MTM on demand.
+    Fetches the CLOB bid (SELL side) for each held asset so equity reflects
+    true liquidation value. Falls back to avg_price per-asset when the price
+    endpoint returns None (resolved market, missing data).
     """
     from datetime import datetime, timezone
 
@@ -196,10 +197,20 @@ def _maybe_snapshot_equity(portfolios: dict[str, PaperPortfolio]) -> None:
     if _last_equity_date == today:
         return
 
+    assets = {p["asset"] for pf in portfolios.values() for p in pf.positions}
+    current_prices: dict[str, float] = {}
+    for asset in assets:
+        try:
+            px = data_api.price(asset, side="SELL")
+            if px is not None:
+                current_prices[asset] = px
+        except Exception as e:
+            log.warning("price fetch failed for asset %s: %s", asset, e)
+
     per_wallet = {}
     total = 0.0
     for pseudo, pf in portfolios.items():
-        eq = pf.equity({})  # avg_price fallback
+        eq = pf.equity(current_prices)
         per_wallet[pseudo] = eq
         total += eq
 
@@ -210,7 +221,10 @@ def _maybe_snapshot_equity(portfolios: dict[str, PaperPortfolio]) -> None:
         "total_eq": total,
     })
     _last_equity_date = today
-    log.info("equity snapshot for %s: total=$%.2f", today, total)
+    log.info(
+        "equity snapshot for %s: total=$%.2f (priced %d/%d assets)",
+        today, total, len(current_prices), len(assets),
+    )
 
 
 def _smoke_test() -> None:
