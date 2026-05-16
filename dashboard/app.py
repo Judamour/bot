@@ -920,6 +920,39 @@ def api_copytrade():
     })
 
 
+@app.route("/api/copytrade_live")
+def api_copytrade_live():
+    """Snapshot of the live copytrade docker bot (Polymarket CLOB, surfandturf)."""
+    import json
+    import os
+    from pathlib import Path
+
+    log_dir = Path(os.getenv("BOT_CP_LOG_DIR", "logs/copytrade"))
+    status_path = log_dir / "copytrade_live_status.json"
+    trades_path = log_dir / "trades.jsonl"
+
+    status: dict = {}
+    if status_path.exists():
+        try:
+            status = json.loads(status_path.read_text())
+        except Exception:
+            pass
+
+    recent_trades: list = []
+    if trades_path.exists():
+        try:
+            with open(trades_path) as f:
+                lines = f.readlines()[-30:]
+            recent_trades = [json.loads(line) for line in lines if line.strip()]
+        except Exception:
+            pass
+
+    return jsonify({
+        "status": status,
+        "recent_trades": recent_trades,
+    })
+
+
 @app.route("/api/overview")
 def api_overview():
     """At-a-glance status of all bots (Bot Z, Shadow, CopyTrade, Freqtrade)."""

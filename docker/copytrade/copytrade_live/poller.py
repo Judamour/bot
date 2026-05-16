@@ -10,7 +10,7 @@ import signal
 import sys
 import time
 
-from . import config, state, executor, notifier
+from . import config, state, executor, notifier, status_writer
 
 config.LOGS_DIR.mkdir(parents=True, exist_ok=True)
 logging.basicConfig(
@@ -167,10 +167,11 @@ def handle_sell(decision: dict, positions: dict) -> None:
                                   "fraction": fraction, "exec_result": result})
 
 
-def cycle(meta: dict, positions: dict) -> None:
+def cycle(meta: dict, positions: dict) -> tuple[int, int]:
+    """Returns (n_decisions_new, n_relevant_executed)."""
     decisions = fetch_local_decisions(since_ts=meta["last_seen_ts"])
     if not decisions:
-        return
+        return 0, 0
     relevant = filter_relevant(decisions)
     log.info(f"Cycle: {len(decisions)} new, {len(relevant)} surfandturf executed")
     for d in sorted(relevant, key=lambda x: x["ts"]):
@@ -183,6 +184,7 @@ def cycle(meta: dict, positions: dict) -> None:
             state.save_meta(meta)
         except Exception as e:
             log.error(f"Erreur ts={d.get('ts')}: {type(e).__name__}: {e}")
+    return len(decisions), len(relevant)
 
 
 def main() -> None:
@@ -202,6 +204,7 @@ def main() -> None:
     positions = state.load_positions()
     log.info(f"State: last_seen_ts={meta['last_seen_ts']}, {len(positions)} positions")
 
+    clob_bal: float | None = None
     try:
         clob_bal = executor.get_clob_balance_usd()
         log.info(f"CLOB balance: ${clob_bal:.4f}")
@@ -211,11 +214,32 @@ def main() -> None:
     except Exception as e:
         log.error(f"Boot: get_clob_balance échec: {type(e).__name__}: {e}")
 
+    cycle_count = 0
+    # Balance is fetched at boot then every BALANCE_REFRESH_CYCLES cycles
+    # (Polymarket CLOB API rate-limited; ~5 min refresh is plenty).
+    BALANCE_REFRESH_CYCLES = 5
     while _running:
+        cycle_count += 1
+        last_new = last_exec = 0
         try:
-            cycle(meta, positions)
+            last_new, last_exec = cycle(meta, positions)
         except Exception as e:
             log.error(f"Cycle exception: {type(e).__name__}: {e}")
+        if cycle_count % BALANCE_REFRESH_CYCLES == 0 or last_exec > 0:
+            try:
+                clob_bal = executor.get_clob_balance_usd()
+            except Exception as e:
+                log.warning(f"Balance refresh échec: {type(e).__name__}: {e}")
+        try:
+            status_writer.write_status(
+                meta, positions,
+                clob_balance_usd=clob_bal,
+                cycle_count=cycle_count,
+                last_cycle_decisions=last_new,
+                last_cycle_executed=last_exec,
+            )
+        except Exception as e:
+            log.warning(f"status_writer échec: {type(e).__name__}: {e}")
         time.sleep(config.POLL_INTERVAL_SEC)
 
     log.info("Stopped")

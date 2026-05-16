@@ -1405,9 +1405,80 @@
 </div><!-- /tab-docs -->
 
 <div id="tab-copytrade" class="tab-content">
-  <h2 style="margin:0 0 12px 0">CopyTrade (paper)</h2>
+  <!-- ═══ LIVE bot (docker, Polymarket CLOB) ═══ -->
+  <div style="display:flex;align-items:center;gap:10px;margin:0 0 12px 0">
+    <h2 style="margin:0">CopyTrade LIVE</h2>
+    <span id="cpl-mode-badge" style="font-size:11px;padding:3px 8px;border-radius:10px;background:#1f6feb;color:#fff;font-weight:700">LIVE</span>
+    <span id="cpl-fresh-badge" style="font-size:11px;color:var(--muted)">—</span>
+  </div>
+
+  <div id="cpl-cards" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin-bottom:14px">
+    <div class="cpl-stat">
+      <div class="cpl-stat-lbl">Equity (CLOB + cost)</div>
+      <div class="cpl-stat-val" id="cpl-equity">—</div>
+    </div>
+    <div class="cpl-stat">
+      <div class="cpl-stat-lbl">CLOB balance</div>
+      <div class="cpl-stat-val" id="cpl-balance">—</div>
+    </div>
+    <div class="cpl-stat">
+      <div class="cpl-stat-lbl">Positions</div>
+      <div class="cpl-stat-val" id="cpl-positions-count">—</div>
+    </div>
+    <div class="cpl-stat">
+      <div class="cpl-stat-lbl">Cost basis</div>
+      <div class="cpl-stat-val" id="cpl-costbasis">—</div>
+    </div>
+    <div class="cpl-stat">
+      <div class="cpl-stat-lbl">Cycles run</div>
+      <div class="cpl-stat-val" id="cpl-cycles">—</div>
+    </div>
+    <div class="cpl-stat">
+      <div class="cpl-stat-lbl">Target</div>
+      <div class="cpl-stat-val" id="cpl-target" style="font-size:14px">—</div>
+    </div>
+  </div>
+
+  <div id="cpl-wallet-row" style="padding:8px 10px;border:1px solid var(--border);border-radius:4px;margin-bottom:14px;font-size:12px;font-family:monospace;display:flex;justify-content:space-between;align-items:center;gap:8px">
+    <span style="color:var(--muted)">Wallet</span>
+    <span id="cpl-wallet" style="word-break:break-all">—</span>
+    <a id="cpl-wallet-link" href="#" target="_blank" rel="noopener" style="color:var(--blue);text-decoration:none;white-space:nowrap">↗ polygonscan</a>
+  </div>
+
+  <details style="margin-bottom:14px;border:1px solid var(--border);border-radius:4px;padding:6px 10px">
+    <summary style="cursor:pointer;font-size:13px;color:var(--muted)">Filters & config</summary>
+    <div id="cpl-filters" style="margin-top:8px;font-size:12px;font-family:monospace;color:var(--muted);white-space:pre">—</div>
+  </details>
+
+  <h3 style="margin:10px 0 8px 0;font-size:14px">Open positions</h3>
+  <table id="cpl-positions" style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:18px">
+    <thead><tr style="border-bottom:1px solid var(--border)">
+      <th style="text-align:left;padding:6px">Opened</th>
+      <th style="text-align:left">Market</th>
+      <th style="text-align:left">Outcome</th>
+      <th style="text-align:right">Shares</th>
+      <th style="text-align:right">Avg px</th>
+      <th style="text-align:right">Cost</th>
+    </tr></thead>
+    <tbody><tr><td colspan="6" style="padding:8px;color:var(--muted)">No open positions yet.</td></tr></tbody>
+  </table>
+
+  <h3 style="margin:10px 0 8px 0;font-size:14px">Recent activity (last 30)</h3>
+  <table id="cpl-trades" style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:24px">
+    <thead><tr style="border-bottom:1px solid var(--border)">
+      <th style="text-align:left;padding:6px">UTC</th>
+      <th style="text-align:left">Side</th>
+      <th style="text-align:left">Market</th>
+      <th style="text-align:right">Price</th>
+      <th style="text-align:left">Action</th>
+    </tr></thead>
+    <tbody><tr><td colspan="5" style="padding:8px;color:var(--muted)">Waiting for next surfandturf trade…</td></tr></tbody>
+  </table>
+
+  <!-- ═══ Paper scanner (legacy, alimente le live) ═══ -->
+  <h2 style="margin:24px 0 12px 0;color:var(--muted);font-size:16px">CopyTrade scanner (paper) — feed only</h2>
   <div id="cp-wallets" style="display:grid;gap:8px;margin-bottom:16px">Loading…</div>
-  <h3 style="margin:16px 0 8px 0">Recent decisions (last 20)</h3>
+  <h3 style="margin:16px 0 8px 0;font-size:14px">Recent scanner decisions (last 20)</h3>
   <table id="cp-decisions" style="width:100%;border-collapse:collapse;font-size:13px">
     <thead><tr style="border-bottom:1px solid var(--border)">
       <th style="text-align:left;padding:6px">UTC</th>
@@ -1420,6 +1491,12 @@
     <tbody></tbody>
   </table>
 </div>
+
+<style>
+  .cpl-stat { padding:10px 12px; border:1px solid var(--border); border-radius:4px; background:rgba(255,255,255,0.02); }
+  .cpl-stat-lbl { font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.5px; }
+  .cpl-stat-val { font-size:18px; font-weight:700; margin-top:4px; font-variant-numeric:tabular-nums; }
+</style>
 
 <!-- ═══════════════════════════════════════════════════════════════
      TAB: TARGETS — live view of the wallets we're copying
@@ -2379,6 +2456,132 @@ async function loadCopytrade() {
 }
 loadCopytrade();
 setInterval(loadCopytrade, 60000);
+
+// ════════ CopyTrade LIVE (docker bot) ════════
+function _cplFmtUsd(n) {
+  if (n == null) return '—';
+  return '$' + (Math.round(n * 100) / 100).toFixed(2);
+}
+function _cplFmtTs(ts) {
+  if (!ts) return '—';
+  const d = new Date(ts * 1000);
+  return d.toISOString().slice(0, 16).replace('T', ' ');
+}
+function _cplFmtAgo(ts) {
+  if (!ts) return '—';
+  const sec = Math.floor(Date.now() / 1000) - ts;
+  if (sec < 60) return sec + 's ago';
+  if (sec < 3600) return Math.floor(sec / 60) + 'm ago';
+  if (sec < 86400) return Math.floor(sec / 3600) + 'h ago';
+  return Math.floor(sec / 86400) + 'd ago';
+}
+
+async function loadCopytradeLive() {
+  let data;
+  try {
+    const r = await fetch('/api/copytrade_live');
+    if (!r.ok) return;
+    data = await r.json();
+  } catch (e) {
+    console.warn('loadCopytradeLive failed', e);
+    return;
+  }
+  const s = data.status || {};
+  const trades = data.recent_trades || [];
+
+  // Freshness badge
+  const fresh = document.getElementById('cpl-fresh-badge');
+  if (fresh) fresh.textContent = s.ts ? 'updated ' + _cplFmtAgo(s.ts) : 'no snapshot yet';
+
+  // Mode badge
+  const mb = document.getElementById('cpl-mode-badge');
+  if (mb) {
+    if (s.mode === 'dry_run') {
+      mb.textContent = 'DRY RUN';
+      mb.style.background = '#9e6a00';
+    } else {
+      mb.textContent = 'LIVE';
+      mb.style.background = '#1f6feb';
+    }
+  }
+
+  // Stat cards
+  const setText = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = v; };
+  setText('cpl-equity', _cplFmtUsd(s.equity_estimate_usd));
+  setText('cpl-balance', _cplFmtUsd(s.clob_balance_usd));
+  setText('cpl-positions-count', (s.n_positions != null ? s.n_positions : '—') + ' / ' + (s.filters && s.filters.max_positions || '—'));
+  setText('cpl-costbasis', _cplFmtUsd(s.positions_cost_basis_usd));
+  setText('cpl-cycles', s.cycle_count != null ? s.cycle_count : '—');
+  setText('cpl-target', s.target_wallet || '—');
+
+  // Wallet
+  const wEl = document.getElementById('cpl-wallet');
+  const wLink = document.getElementById('cpl-wallet-link');
+  if (s.wallet_address) {
+    if (wEl) wEl.textContent = s.wallet_address;
+    if (wLink) wLink.href = 'https://polygonscan.com/address/' + s.wallet_address;
+  }
+
+  // Filters
+  const filtersEl = document.getElementById('cpl-filters');
+  if (filtersEl && s.filters) {
+    const f = s.filters;
+    filtersEl.textContent =
+      'fixed_size_usd       = $' + f.fixed_size_usd + '\n' +
+      'max_positions        = ' + f.max_positions + '\n' +
+      'min_target_size_usd  = $' + f.min_target_size_usd + '\n' +
+      'min_entry_price      = ' + f.min_entry_price + '\n' +
+      'max_entry_price      = ' + f.max_entry_price + '\n' +
+      'max_price_drift      = ' + f.max_price_drift + 'x\n' +
+      'max_usd_per_market   = $' + f.max_usd_per_market + '\n' +
+      'kill_equity_usd      = $' + f.kill_equity_usd + (f.kill_equity_usd === 0 ? '  (disabled)' : '');
+  }
+
+  // Positions table
+  const pTb = document.querySelector('#cpl-positions tbody');
+  if (pTb) {
+    pTb.innerHTML = '';
+    const positions = s.positions || [];
+    if (positions.length === 0) {
+      pTb.innerHTML = '<tr><td colspan="6" style="padding:8px;color:var(--muted)">No open positions yet.</td></tr>';
+    } else {
+      for (const p of positions) {
+        pTb.insertAdjacentHTML('beforeend',
+          '<tr style="border-bottom:1px solid var(--border)">' +
+          '<td style="padding:4px">' + _cplFmtTs(p.opened_ts) + '</td>' +
+          '<td>' + (p.market || '').slice(0, 50) + '</td>' +
+          '<td>' + (p.outcome || '') + '</td>' +
+          '<td style="text-align:right">' + (p.size_shares || 0).toFixed(4) + '</td>' +
+          '<td style="text-align:right">' + (p.avg_price || 0).toFixed(3) + '</td>' +
+          '<td style="text-align:right">' + _cplFmtUsd(p.cost_usd) + '</td></tr>');
+      }
+    }
+  }
+
+  // Trades table
+  const tTb = document.querySelector('#cpl-trades tbody');
+  if (tTb) {
+    tTb.innerHTML = '';
+    const filteredTrades = trades.slice().reverse();
+    if (filteredTrades.length === 0) {
+      tTb.innerHTML = '<tr><td colspan="5" style="padding:8px;color:var(--muted)">Waiting for next surfandturf trade…</td></tr>';
+    } else {
+      for (const t of filteredTrades) {
+        const action = t.local_action || '';
+        const actionClass = action === 'buy' ? 'color:#3fb950' : (action === 'sell' ? '#f7c948' : 'var(--muted)');
+        tTb.insertAdjacentHTML('beforeend',
+          '<tr style="border-bottom:1px solid var(--border)">' +
+          '<td style="padding:4px">' + _cplFmtTs(t.ts) + '</td>' +
+          '<td>' + (t.side || '') + '</td>' +
+          '<td>' + (t.market || '').slice(0, 50) + '</td>' +
+          '<td style="text-align:right">' + (t.price || 0).toFixed(3) + '</td>' +
+          '<td style="color:' + actionClass + '">' + action + '</td></tr>');
+      }
+    }
+  }
+}
+loadCopytradeLive();
+setInterval(loadCopytradeLive, 30000);
 
 // ════════ OVERVIEW v3 — financial mission control ════════
 const BOT_EMOJI = {bot:'⚡', shadow:'🌒', 'bot-cp':'🎯', freqtrade:'🦊'};
