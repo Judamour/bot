@@ -84,7 +84,7 @@ def handle_buy(decision: dict, positions: dict) -> None:
         write_jsonl("trades.jsonl", {**decision, "local_action": "skip_target_too_small"})
         return
     if decision.get("price", 1.0) > config.MAX_ENTRY_PRICE:
-        log.info(f"SKIP BUY: prix > {config.MAX_ENTRY_PRICE}")
+        log.info(f"SKIP BUY: entry {decision['price']:.3f} > MAX_ENTRY_PRICE {config.MAX_ENTRY_PRICE} (underdog filter)")
         write_jsonl("trades.jsonl", {**decision, "local_action": "skip_price_too_high"})
         return
 
@@ -92,6 +92,24 @@ def handle_buy(decision: dict, positions: dict) -> None:
     if not resolved:
         log.warning(f"SKIP BUY: outcome non résolu '{decision['market'][:40]}' / '{decision['outcome']}'")
         write_jsonl("trades.jsonl", {**decision, "local_action": "skip_resolve_failed"})
+        return
+
+    cond_id = resolved.get("condition_id", "")
+    existing_cost_same_market = sum(
+        p["cost_usd"] for p in positions.values()
+        if p.get("condition_id") == cond_id
+    )
+    if existing_cost_same_market + config.FIXED_SIZE_USD > config.MAX_USD_PER_MARKET:
+        log.info(f"SKIP BUY: market saturé (${existing_cost_same_market:.2f} + ${config.FIXED_SIZE_USD} > ${config.MAX_USD_PER_MARKET})")
+        write_jsonl("trades.jsonl", {**decision, "local_action": "skip_market_saturated"})
+        return
+
+    his_entry = decision.get("price", 0)
+    current_ask = executor.get_market_price(resolved["token_id"], "buy")
+    if current_ask and his_entry > 0 and current_ask > his_entry * config.MAX_PRICE_DRIFT:
+        log.info(f"SKIP BUY: chasing ({current_ask:.3f} > his_entry {his_entry:.3f} × {config.MAX_PRICE_DRIFT})")
+        write_jsonl("trades.jsonl", {**decision, "local_action": "skip_price_drift",
+                                      "his_entry": his_entry, "current_ask": current_ask})
         return
 
     result = executor.place_buy(
@@ -171,6 +189,10 @@ def main() -> None:
     config.validate()
     log.info(f"Boot — target={config.TARGET_WALLET}, size=${config.FIXED_SIZE_USD}, "
              f"max_pos={config.MAX_POSITIONS}, kill_eq=${config.KILL_EQUITY_USD}, dry_run={config.DRY_RUN}")
+    log.info(f"Filters — max_entry={config.MAX_ENTRY_PRICE}, "
+             f"max_drift={config.MAX_PRICE_DRIFT}x, "
+             f"max_per_market=${config.MAX_USD_PER_MARKET}, "
+             f"min_target=${config.MIN_TARGET_SIZE_USD}")
 
     meta = state.load_meta()
     positions = state.load_positions()

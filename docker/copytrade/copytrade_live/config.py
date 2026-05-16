@@ -31,7 +31,12 @@ FIXED_SIZE_USD = float(os.getenv("COPYTRADE_FIXED_SIZE_USD", "1.5"))
 MAX_POSITIONS = int(os.getenv("COPYTRADE_MAX_POSITIONS", "20"))
 KILL_EQUITY_USD = float(os.getenv("COPYTRADE_KILL_EQUITY_USD", "20.0"))
 MIN_TARGET_SIZE_USD = float(os.getenv("COPYTRADE_MIN_TARGET_SIZE_USD", "5.0"))
-MAX_ENTRY_PRICE = float(os.getenv("COPYTRADE_MAX_ENTRY_PRICE", "0.95"))
+# Bias underdog confirmé sur surfandturf (Pistons 0.39, Svitolina 0.42, Spurs 0.33, Chennai 0.49)
+MAX_ENTRY_PRICE = float(os.getenv("COPYTRADE_MAX_ENTRY_PRICE", "0.55"))
+# Skip si current ask > his_entry × drift (évite de chasser quand le book a bougé)
+MAX_PRICE_DRIFT = float(os.getenv("COPYTRADE_MAX_PRICE_DRIFT", "1.05"))
+# Cap d'exposition par marché (anti-concentration, surfandturf empile $250K mais nous max $5)
+MAX_USD_PER_MARKET = float(os.getenv("COPYTRADE_MAX_USD_PER_MARKET", "5.0"))
 DRY_RUN = os.getenv("COPYTRADE_DRY_RUN", "true").lower() == "true"
 
 GAMMA_API = "https://gamma-api.polymarket.com"
