@@ -103,6 +103,42 @@ def test_mtm_uses_avg_price_when_no_quote(pf):
     assert eq == pytest.approx(333.33)
 
 
+def test_equity_at_cost_empty_wallet_equals_cash(pf):
+    assert pf.equity_at_cost() == pytest.approx(333.33)
+
+
+def test_equity_at_cost_unchanged_after_buy(pf):
+    pf.buy(condition_id="0xC", asset="42", outcome="Yes", outcome_index=0,
+           price=0.5, usd_size=10.0, target_hash="0xtxA",
+           market_title="m", opened_ts=1000)
+    # cash 323.33 + cost 10 = 333.33 — base de sizing inchangée par un BUY
+    assert pf.equity_at_cost() == pytest.approx(333.33)
+
+
+def test_equity_at_cost_shifts_only_by_realized_pnl(pf):
+    pf.buy(condition_id="0xC", asset="42", outcome="Yes", outcome_index=0,
+           price=0.5, usd_size=10.0, target_hash="0xtxA",
+           market_title="m", opened_ts=1000)
+    # Sell half at 0.7 → realized PnL = +2.0
+    pf.sell(condition_id="0xC", outcome_index=0, fraction=0.5, price=0.7,
+            target_hash="0xtxB", ts=2000)
+    # cash 330.33 + cost restant 5 = 335.33 = 333.33 + 2 (PnL réalisé)
+    assert pf.equity_at_cost() == pytest.approx(335.33)
+
+
+def test_equity_at_cost_ignores_mtm(pf):
+    """Critère clé : MTM (curPrice) ne doit JAMAIS impacter la base de sizing."""
+    pf.buy(condition_id="0xC", asset="42", outcome="Yes", outcome_index=0,
+           price=0.04, usd_size=10.0, target_hash="0xtxA",
+           market_title="m", opened_ts=1000)
+    # Même si MTM montait à 0.99 (curPrice virtuel), equity_at_cost reste figée
+    # sur le cost basis. On vérifie que la méthode n'accepte AUCUN prix courant.
+    import inspect
+    sig = inspect.signature(pf.equity_at_cost)
+    assert len(sig.parameters) == 0, "equity_at_cost ne doit pas prendre de prix"
+    assert pf.equity_at_cost() == pytest.approx(333.33)
+
+
 def test_to_dict_roundtrip(pf):
     pf.buy(condition_id="0xC", asset="42", outcome="Yes", outcome_index=0,
            price=0.5, usd_size=10.0, target_hash="0xtxA",

@@ -101,6 +101,12 @@ class PaperPortfolio:
             eq += p["size"] * px
         return eq
 
+    def equity_at_cost(self) -> float:
+        """Sizing base: cash + cost basis of open positions. Excludes MTM by
+        design — only realized PnL shifts the base, so a position MTM-ing from
+        $0.04 → $0.99 doesn't inflate the next BUY size."""
+        return self.cash_usd + sum(p["cost_usd"] for p in self.positions)
+
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
