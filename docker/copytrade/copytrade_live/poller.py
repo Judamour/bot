@@ -10,7 +10,7 @@ import signal
 import sys
 import time
 
-from . import config, state, executor
+from . import config, state, executor, notifier
 
 config.LOGS_DIR.mkdir(parents=True, exist_ok=True)
 logging.basicConfig(
@@ -123,6 +123,13 @@ def handle_buy(decision: dict, positions: dict) -> None:
             condition_id=resolved.get("condition_id",""),
         )
         state.save_positions(positions)
+        if result.get("status") == "submitted":
+            notifier.notify_buy(
+                market=decision["market"], outcome=decision["outcome"],
+                size_shares=result["size_shares"], price=result["price"],
+                cost_usd=result["cost_usd"], his_entry=his_entry,
+                target_size_usd=decision.get("target_size_usd", 0),
+            )
     write_jsonl("trades.jsonl", {**decision, "local_action": "buy", "exec_result": result})
 
 
@@ -149,6 +156,13 @@ def handle_sell(decision: dict, positions: dict) -> None:
                                         size_shares=size_to_sell, exit_price=result["price"])
         state.save_positions(positions)
         result["realized_pnl_usd"] = realized
+        if result.get("status") == "submitted":
+            notifier.notify_sell(
+                market=decision["market"], outcome=decision["outcome"],
+                size_shares=result["size_shares"], price=result["price"],
+                proceeds_usd=result["proceeds_usd"],
+                realized_pnl_usd=realized, fraction=fraction,
+            )
     write_jsonl("trades.jsonl", {**decision, "local_action": "sell",
                                   "fraction": fraction, "exec_result": result})
 
@@ -191,6 +205,7 @@ def main() -> None:
     try:
         clob_bal = executor.get_clob_balance_usd()
         log.info(f"CLOB balance: ${clob_bal:.4f}")
+        notifier.notify_boot(equity_usd=clob_bal, dry_run=config.DRY_RUN)
         if clob_bal < config.KILL_EQUITY_USD:
             log.warning(f"Solde sous kill_eq (${clob_bal:.2f}) — pause préventive")
     except Exception as e:
