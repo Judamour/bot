@@ -181,6 +181,82 @@ def _save_portfolios(portfolios: dict[str, PaperPortfolio]) -> None:
 
 # Track last-snapshotted UTC date so we append at most once per day
 _last_equity_date: str | None = None
+_last_reconcile_date: str | None = None
+
+
+def _reconcile_resolved_once(portfolios: dict[str, PaperPortfolio]) -> int:
+    """Close positions on resolved markets: credit/debit cash to reflect the
+    final payoff (1.0 for winners, 0.0 for losers), record realized PnL,
+    drop the position. Runs at most once per UTC day. Returns count closed.
+    """
+    from datetime import datetime, timezone
+
+    global _last_reconcile_date
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    if _last_reconcile_date == today:
+        return 0
+
+    cond_ids = {
+        p.get("condition_id")
+        for pf in portfolios.values()
+        for p in pf.positions
+        if p.get("condition_id")
+    }
+
+    # Only accept strict resolution (price ∈ {0, 1}) — skip disputed/pending
+    payoffs: dict[str, float] = {}
+    for cid in cond_ids:
+        try:
+            m = data_api.market(cid)
+            if not m or not m.get("closed"):
+                continue
+            for tok in m.get("tokens", []):
+                tid = tok.get("token_id")
+                px = tok.get("price")
+                if tid is None or px is None:
+                    continue
+                fpx = float(px)
+                if fpx == 0.0 or fpx == 1.0:
+                    payoffs[tid] = fpx
+        except Exception as e:
+            log.warning("reconcile: market fetch failed for %s: %s", cid, e)
+
+    if not payoffs:
+        _last_reconcile_date = today
+        return 0
+
+    closed = 0
+    now_ts = int(time.time())
+    for pseudo, pf in portfolios.items():
+        # snapshot list because pf.sell() mutates pf.positions
+        for p in list(pf.positions):
+            asset = p["asset"]
+            if asset not in payoffs:
+                continue
+            cid = p.get("condition_id")
+            oi = p.get("outcome_index")
+            if cid is None or oi is None:
+                continue
+            payoff = payoffs[asset]
+            pf.sell(
+                condition_id=cid,
+                outcome_index=oi,
+                fraction=1.0,
+                price=payoff,
+                target_hash=f"resolved:{cid[:10]}",
+                ts=now_ts,
+            )
+            closed += 1
+            log.info(
+                "reconcile %s: %s / %s payoff=%.2f cost=$%.2f",
+                pseudo, str(p.get("market_title", "?"))[:50],
+                p.get("outcome", "?"), payoff, p.get("cost_usd", 0.0),
+            )
+
+    _last_reconcile_date = today
+    if closed:
+        log.info("reconcile: closed %d resolved position(s)", closed)
+    return closed
 
 
 def _maybe_snapshot_equity(portfolios: dict[str, PaperPortfolio]) -> None:
@@ -329,7 +405,9 @@ def run() -> None:
         state_mod.save_state(str(LOG_DIR / "state.json"), {"last_seen_ts": last_seen})
         _save_portfolios(portfolios)
 
-        # Daily equity snapshot (UTC date change triggers append)
+        # Daily: close resolved positions (realize PnL), then snapshot equity
+        if _reconcile_resolved_once(portfolios) > 0:
+            _save_portfolios(portfolios)
         _maybe_snapshot_equity(portfolios)
 
         # Sleep, but check stop flag every second
