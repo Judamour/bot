@@ -75,9 +75,14 @@ def handle_buy(decision: dict, positions: dict) -> None:
         log.info(f"SKIP BUY: target < ${config.MIN_TARGET_SIZE_USD}")
         write_jsonl("trades.jsonl", {**decision, "local_action": "skip_target_too_small"})
         return
-    if decision.get("price", 1.0) > config.MAX_ENTRY_PRICE:
-        log.info(f"SKIP BUY: entry {decision['price']:.3f} > MAX_ENTRY_PRICE {config.MAX_ENTRY_PRICE} (underdog filter)")
+    p = decision.get("price", 1.0)
+    if p > config.MAX_ENTRY_PRICE:
+        log.info(f"SKIP BUY: entry {p:.3f} > MAX_ENTRY_PRICE {config.MAX_ENTRY_PRICE} (underdog filter)")
         write_jsonl("trades.jsonl", {**decision, "local_action": "skip_price_too_high"})
+        return
+    if p < config.MIN_ENTRY_PRICE:
+        log.info(f"SKIP BUY: entry {p:.3f} < MIN_ENTRY_PRICE {config.MIN_ENTRY_PRICE} (lottery ticket filter)")
+        write_jsonl("trades.jsonl", {**decision, "local_action": "skip_lottery_ticket"})
         return
 
     resolved = executor.resolve_outcome_to_token_id(decision["market"], decision["outcome"])
@@ -173,7 +178,7 @@ def main() -> None:
     log.info(f"Boot — target={config.TARGET_WALLET}, size=${config.FIXED_SIZE_USD}, "
              f"max_pos={config.MAX_POSITIONS}, kill_eq=${config.KILL_EQUITY_USD}, "
              f"dry_run={config.DRY_RUN}")
-    log.info(f"Filters — max_entry={config.MAX_ENTRY_PRICE}, "
+    log.info(f"Filters — entry∈[{config.MIN_ENTRY_PRICE}, {config.MAX_ENTRY_PRICE}], "
              f"max_drift={config.MAX_PRICE_DRIFT}x, "
              f"max_per_market=${config.MAX_USD_PER_MARKET}, "
              f"min_target=${config.MIN_TARGET_SIZE_USD}")

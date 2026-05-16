@@ -32,6 +32,8 @@ MAX_POSITIONS = int(os.getenv("COPYTRADE_MAX_POSITIONS", "20"))
 KILL_EQUITY_USD = float(os.getenv("COPYTRADE_KILL_EQUITY_USD", "20.0"))
 MIN_TARGET_SIZE_USD = float(os.getenv("COPYTRADE_MIN_TARGET_SIZE_USD", "5.0"))
 # Bias underdog confirmé sur surfandturf (Pistons 0.39, Svitolina 0.42, Spurs 0.33, Chennai 0.49)
+# Min: skip "lottery tickets" extrêmes (entries <0.06) qui finissent à $0 ~90% du temps
+MIN_ENTRY_PRICE = float(os.getenv("COPYTRADE_MIN_ENTRY_PRICE", "0.06"))
 MAX_ENTRY_PRICE = float(os.getenv("COPYTRADE_MAX_ENTRY_PRICE", "0.55"))
 # Skip si current ask > his_entry × drift (évite de chasser quand le book a bougé)
 MAX_PRICE_DRIFT = float(os.getenv("COPYTRADE_MAX_PRICE_DRIFT", "1.05"))
