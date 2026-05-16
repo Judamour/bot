@@ -1,0 +1,68 @@
+# Polymarket CopyTrade Live — stack VPS Docker
+#
+# Topologie:
+#   vpn (bubuntux/nordlynx) ─ tunnel WireGuard NordVPN Canada
+#   copytrade-live (notre bot) ─ utilise network_mode: service:vpn
+#                                 → tout son trafic passe par le VPN
+#
+# Le reste du VPS (bot.service, bot-cp.service, dashboard, etc.) est inchangé.
+# Si vpn drop, copytrade-live perd accès réseau (mais le reste tourne normalement).
+
+services:
+  vpn:
+    image: qmcgaw/gluetun:latest
+    container_name: copytrade_vpn
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    environment:
+      - VPN_SERVICE_PROVIDER=nordvpn
+      - VPN_TYPE=openvpn
+      - OPENVPN_USER=${NORDVPN_OPENVPN_USER}
+      - OPENVPN_PASSWORD=${NORDVPN_OPENVPN_PASSWORD}
+      - SERVER_COUNTRIES=Canada
+      - TZ=Europe/Paris
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/gluetun-entrypoint", "healthcheck"]
+      interval: 60s
+      timeout: 15s
+      retries: 3
+      start_period: 30s
+
+  copytrade-live:
+    build: .
+    container_name: copytrade_live
+    network_mode: "service:vpn"
+    depends_on:
+      vpn:
+        condition: service_healthy
+    environment:
+      - POLYMARKET_PRIVATE_KEY=${POLYMARKET_PRIVATE_KEY}
+      - POLYMARKET_API_KEY=${POLYMARKET_API_KEY}
+      - POLYMARKET_API_SECRET=${POLYMARKET_API_SECRET}
+      - POLYMARKET_API_PASSPHRASE=${POLYMARKET_API_PASSPHRASE}
+      - POLYMARKET_SIGNER_ADDRESS=${POLYMARKET_SIGNER_ADDRESS}
+      - POLYMARKET_FUNDER_ADDRESS=${POLYMARKET_FUNDER_ADDRESS}
+      - COPYTRADE_TARGET_WALLET=${COPYTRADE_TARGET_WALLET:-surfandturf}
+      - COPYTRADE_FIXED_SIZE_USD=${COPYTRADE_FIXED_SIZE_USD:-1.5}
+      - COPYTRADE_MAX_POSITIONS=${COPYTRADE_MAX_POSITIONS:-20}
+      - COPYTRADE_KILL_EQUITY_USD=${COPYTRADE_KILL_EQUITY_USD:-20.0}
+      - COPYTRADE_MIN_TARGET_SIZE_USD=${COPYTRADE_MIN_TARGET_SIZE_USD:-5.0}
+      - COPYTRADE_MAX_ENTRY_PRICE=${COPYTRADE_MAX_ENTRY_PRICE:-0.95}
+      - COPYTRADE_DRY_RUN=${COPYTRADE_DRY_RUN:-true}
+      - COPYTRADE_DECISIONS_PATH=/decisions/decisions.jsonl
+      - COPYTRADE_DATA_DIR=/data
+    volumes:
+      # Lecture directe du fichier décisions du bot-cp (paper) qui tourne déjà
+      - /home/botuser/bot-trading/logs/copytrade:/decisions:ro
+      # Persistance state + positions + logs
+      - copytrade_data:/data
+    restart: unless-stopped
+    mem_limit: 200m
+    cpus: 0.5
+
+volumes:
+  copytrade_data:
+    driver: local

@@ -24,6 +24,13 @@ logs/*.png
 
 # Local only
 CLAUDE.md
+polymarket.md
+
+# Polymarket CopyTrade Live — runtime state + venv local
+.venv-copytrade/
+local/copytrade_live/logs/
+local/copytrade_live/state.json
+local/copytrade_live/positions.json
 
 # IDE
 .vscode/
