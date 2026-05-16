@@ -54,13 +54,13 @@ def test_process_new_buy_creates_position(tmp_path):
     with patch("live.copytrade.runner.data_api.trades", return_value=trades), \
          patch("live.copytrade.runner.aum_estimator.aum", return_value=10_000.0):
         new_last_seen, decisions = runner_mod.process_wallet(
-            target, pf, last_seen, capital_per_wallet=1000.0,
+            target, pf, last_seen,
         )
 
     assert new_last_seen == 100
     assert len(decisions) == 1
     assert decisions[0]["action"] == "executed"
-    # trade_pct = (500 * 0.5) / 10_000 = 0.025 → paper_size = 25
+    # trade_pct = (500 * 0.5) / 10_000 = 0.025 → paper_size = 25 (sur $1000 equity)
     assert pf.cash_usd == pytest.approx(1000.0 - 25.0)
     assert len(pf.positions) == 1
 
@@ -68,11 +68,10 @@ def test_process_new_buy_creates_position(tmp_path):
 def test_skip_already_seen(tmp_path):
     target = {"pseudonym": "T1", "wallet": "0xW", "allocation_pct": 1.0}
     pf = PaperPortfolio(wallet="T1", cash_usd=1000.0)
-    trades = [_trade(ts=50, side="BUY", size=500, price=0.5)]
 
     with patch("live.copytrade.runner.data_api.trades", return_value=[]):
         new_last_seen, decisions = runner_mod.process_wallet(
-            target, pf, last_seen_ts=100, capital_per_wallet=1000.0,
+            target, pf, last_seen_ts=100,
         )
 
     assert new_last_seen == 100
@@ -96,7 +95,7 @@ def test_sell_reduces_position(tmp_path):
                return_value=100.0), \
          patch("live.copytrade.runner.aum_estimator.aum", return_value=10_000.0):
         new_last_seen, decisions = runner_mod.process_wallet(
-            target, pf, last_seen_ts=0, capital_per_wallet=1000.0,
+            target, pf, last_seen_ts=0,
         )
 
     # Paper position size was 10 (5 USD / 0.5), half sold → 5 left
@@ -120,7 +119,7 @@ def test_bootstrap_cutoff_skips_old_trades(tmp_path):
 
     with patch("live.copytrade.runner.data_api.trades", side_effect=fake_trades):
         new_last_seen, decisions = runner_mod.process_wallet(
-            target, pf, last_seen_ts=0, capital_per_wallet=1000.0,
+            target, pf, last_seen_ts=0,
         )
 
     # since_ts must be ~now - BOOTSTRAP_CUTOFF_S (within 5s for clock slack)
@@ -144,7 +143,7 @@ def test_bootstrap_cutoff_does_not_apply_when_resuming(tmp_path):
 
     with patch("live.copytrade.runner.data_api.trades", side_effect=fake_trades):
         runner_mod.process_wallet(
-            target, pf, last_seen_ts=12345, capital_per_wallet=1000.0,
+            target, pf, last_seen_ts=12345,
         )
 
     assert captured["since_ts"] == 12345  # untouched
@@ -153,39 +152,78 @@ def test_bootstrap_cutoff_does_not_apply_when_resuming(tmp_path):
 def test_insufficient_cash_skips_buy(tmp_path):
     """A BUY whose paper_size exceeds current cash is skipped, not executed."""
     target = {"pseudonym": "T1", "wallet": "0xW", "allocation_pct": 1.0}
-    pf = PaperPortfolio(wallet="T1", cash_usd=10.0)  # only $10 left
+    pf = PaperPortfolio(wallet="T1", cash_usd=10.0)  # only $10 left, equity_at_cost = $10
     # Trade that would compute to a big paper_size: target trades 5000 @ $0.5
     # with AUM 1000 → trade_pct = 2500/1000 = 2.5, clamped to 0.5
-    # paper_size = capital_per_wallet * 0.5 = $50 → exceeds $10 cash
-    trades = [_trade(ts=100, side="BUY", size=5000, price=0.5)]
+    # paper_size = equity_at_cost * 0.5 = $5 → fits in $10 cash, but let's
+    # construct a wallet where cost-based equity > cash to trigger insufficient_cash.
+    pf.buy(condition_id="0xSeed", asset="seed", outcome="Yes", outcome_index=0,
+           price=0.5, usd_size=90.0, target_hash="0xseed",
+           market_title="m", opened_ts=10)
+    # Now: cash=10 - 90 = WAIT, cash would go negative. Let me redo.
+    # Reset: cash=10, then no seed buy. Use a giant trade so cap of 50% of
+    # equity_at_cost ($10) → $5. Still fits. Need to make cost-equity > cash.
+    # Easiest: seed cash=100, then BUY seed for $90 → cash=10, cost=90, equity=100.
+    # Then attempt copy whose paper_size = 50%*$100 = $50 > $10 cash → skipped.
+    pf2 = PaperPortfolio(wallet="T1", cash_usd=100.0)
+    pf2.buy(condition_id="0xSeed", asset="seed", outcome="Yes", outcome_index=0,
+            price=0.5, usd_size=90.0, target_hash="0xseed",
+            market_title="m", opened_ts=10)
+    assert pf2.cash_usd == pytest.approx(10.0)
+    assert pf2.equity_at_cost() == pytest.approx(100.0)
 
+    trades = [_trade(ts=100, side="BUY", size=5000, price=0.5)]
     with patch("live.copytrade.runner.data_api.trades", return_value=trades), \
          patch("live.copytrade.runner.aum_estimator.aum", return_value=1000.0):
         new_last_seen, decisions = runner_mod.process_wallet(
-            target, pf, last_seen_ts=50, capital_per_wallet=100.0,
+            target, pf2, last_seen_ts=50,
         )
 
     assert new_last_seen == 100
-    assert len(decisions) == 1
-    assert decisions[0]["action"] == "skipped"
-    assert "insufficient_cash" in decisions[0]["rationale"]
-    # Cash and positions untouched
-    assert pf.cash_usd == pytest.approx(10.0)
-    assert pf.positions == []
+    # Last decision is the copy attempt (skipped for insufficient_cash)
+    copy_decisions = [d for d in decisions if d.get("ts") == 100]
+    assert len(copy_decisions) == 1
+    assert copy_decisions[0]["action"] == "skipped"
+    assert "insufficient_cash" in copy_decisions[0]["rationale"]
+    # Cash untouched (still $10 after the seed buy)
+    assert pf2.cash_usd == pytest.approx(10.0)
+    # Position count unchanged (only the seed)
+    assert len(pf2.positions) == 1
 
 
 def test_sufficient_cash_allows_buy(tmp_path):
     """Sanity counterpart: when cash >= paper_size, BUY proceeds normally."""
     target = {"pseudonym": "T1", "wallet": "0xW", "allocation_pct": 1.0}
-    pf = PaperPortfolio(wallet="T1", cash_usd=100.0)
+    pf = PaperPortfolio(wallet="T1", cash_usd=1000.0)
     trades = [_trade(ts=100, side="BUY", size=500, price=0.5)]  # 250 USD trade
 
     with patch("live.copytrade.runner.data_api.trades", return_value=trades), \
          patch("live.copytrade.runner.aum_estimator.aum", return_value=10_000.0):
         new_last_seen, decisions = runner_mod.process_wallet(
-            target, pf, last_seen_ts=50, capital_per_wallet=1000.0,
+            target, pf, last_seen_ts=50,
         )
 
-    # trade_pct = 250/10000 = 0.025 → paper_size = $25 (fits in $100 cash)
+    # trade_pct = 250/10000 = 0.025 → paper_size = $25 (sur $1000 equity)
     assert decisions[0]["action"] == "executed"
-    assert pf.cash_usd == pytest.approx(75.0)
+    assert pf.cash_usd == pytest.approx(975.0)
+
+
+def test_sizing_uses_live_equity_not_initial(tmp_path):
+    """KEY: après réalisation de PnL, sizing scale avec l'equity courante,
+    pas avec un capital initial figé. C'est le coeur du fix."""
+    target = {"pseudonym": "T1", "wallet": "0xW", "allocation_pct": 1.0}
+    # Wallet a perdu 50% sur des positions résolues : cash 500, pas de position
+    pf = PaperPortfolio(wallet="T1", cash_usd=500.0)
+    pf.realized_pnl_usd = -500.0
+    assert pf.equity_at_cost() == pytest.approx(500.0)
+
+    # Target met 10% de son AUM → on doit mettre 10% de $500 = $50 (pas 10% de $1000)
+    trades = [_trade(ts=100, side="BUY", size=200, price=0.5)]  # 100 USD trade
+
+    with patch("live.copytrade.runner.data_api.trades", return_value=trades), \
+         patch("live.copytrade.runner.aum_estimator.aum", return_value=1000.0):
+        _, decisions = runner_mod.process_wallet(target, pf, last_seen_ts=0)
+
+    # trade_pct = 100/1000 = 0.10 → paper_size = 500 * 0.10 = $50
+    assert decisions[0]["paper_size_usd"] == pytest.approx(50.0)
+    assert pf.cash_usd == pytest.approx(450.0)

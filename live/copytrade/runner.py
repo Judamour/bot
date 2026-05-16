@@ -36,14 +36,18 @@ def process_wallet(
     target: dict,
     portfolio: PaperPortfolio,
     last_seen_ts: int,
-    capital_per_wallet: float,
 ) -> tuple[int, list[dict]]:
     """Fetch new trades for target.wallet, mirror each into `portfolio`.
+
+    Sizing base is derived from `portfolio.equity_at_cost()` (cash + cost
+    basis of open positions). This makes copy sizing scale with the actual
+    wallet value as PnL is realized — no more figé sur le capital initial.
 
     Returns:
         (new_last_seen_ts, decisions) where decisions is a list of structured
         records (one per detected trade, including skipped).
     """
+    capital_per_wallet = portfolio.equity_at_cost()
     import time as _time
     wallet = target["wallet"]
     # First-boot guard: if we've never seen this wallet, only consider trades
@@ -379,7 +383,6 @@ def run() -> None:
                 new_ts, decisions = process_wallet(
                     t, portfolios[pseudo],
                     last_seen_ts=int(last_seen.get(wallet, 0)),
-                    capital_per_wallet=CAPITAL_PER_WALLET,
                 )
                 for d in decisions:
                     state_mod.append_decision(decisions_path, d)
