@@ -48,20 +48,21 @@ services:
       - COPYTRADE_TARGET_WALLET=${COPYTRADE_TARGET_WALLET:-surfandturf}
       - COPYTRADE_FIXED_SIZE_USD=${COPYTRADE_FIXED_SIZE_USD:-1.5}
       - COPYTRADE_MAX_POSITIONS=${COPYTRADE_MAX_POSITIONS:-20}
-      - COPYTRADE_KILL_EQUITY_USD=${COPYTRADE_KILL_EQUITY_USD:-20.0}
+      - COPYTRADE_KILL_EQUITY_USD=${COPYTRADE_KILL_EQUITY_USD:-0}
       - COPYTRADE_MIN_TARGET_SIZE_USD=${COPYTRADE_MIN_TARGET_SIZE_USD:-5.0}
       - COPYTRADE_MIN_ENTRY_PRICE=${COPYTRADE_MIN_ENTRY_PRICE:-0.06}
-      - COPYTRADE_MAX_ENTRY_PRICE=${COPYTRADE_MAX_ENTRY_PRICE:-0.55}
-      - COPYTRADE_MAX_PRICE_DRIFT=${COPYTRADE_MAX_PRICE_DRIFT:-1.05}
+      - COPYTRADE_MAX_ENTRY_PRICE=${COPYTRADE_MAX_ENTRY_PRICE:-0.85}
+      - COPYTRADE_MAX_PRICE_DRIFT=${COPYTRADE_MAX_PRICE_DRIFT:-1.15}
       - COPYTRADE_MAX_USD_PER_MARKET=${COPYTRADE_MAX_USD_PER_MARKET:-5.0}
       - COPYTRADE_DRY_RUN=${COPYTRADE_DRY_RUN:-true}
       - COPYTRADE_DECISIONS_PATH=/decisions/decisions.jsonl
+      - COPYTRADE_STATUS_PATH=/decisions/copytrade_live_status.json
       - COPYTRADE_DATA_DIR=/data
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
       - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
     volumes:
-      # Lecture directe du fichier décisions du bot-cp (paper) qui tourne déjà
-      - /home/botuser/bot-trading/logs/copytrade:/decisions:ro
+      # Decisions: lecture du paper scanner + écriture du status snapshot pour le dashboard
+      - /home/botuser/bot-trading/logs/copytrade:/decisions:rw
       # Persistance state + positions + logs
       - copytrade_data:/data
     restart: unless-stopped
