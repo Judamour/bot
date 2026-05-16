@@ -1475,21 +1475,6 @@
     <tbody><tr><td colspan="5" style="padding:8px;color:var(--muted)">Waiting for next surfandturf trade…</td></tr></tbody>
   </table>
 
-  <!-- ═══ Paper scanner (legacy, alimente le live) ═══ -->
-  <h2 style="margin:24px 0 12px 0;color:var(--muted);font-size:16px">CopyTrade scanner (paper) — feed only</h2>
-  <div id="cp-wallets" style="display:grid;gap:8px;margin-bottom:16px">Loading…</div>
-  <h3 style="margin:16px 0 8px 0;font-size:14px">Recent scanner decisions (last 20)</h3>
-  <table id="cp-decisions" style="width:100%;border-collapse:collapse;font-size:13px">
-    <thead><tr style="border-bottom:1px solid var(--border)">
-      <th style="text-align:left;padding:6px">UTC</th>
-      <th style="text-align:left">Wallet</th>
-      <th>Side</th>
-      <th style="text-align:left">Market</th>
-      <th style="text-align:right">Size</th>
-      <th>Action</th>
-    </tr></thead>
-    <tbody></tbody>
-  </table>
 </div>
 
 <style>
@@ -2415,46 +2400,8 @@ setInterval(() => {
 }, 120000);
 </script>
 <script>
-async function loadCopytrade() {
-  try {
-    const r = await fetch('/api/copytrade');
-    if (!r.ok) return;
-    const data = await r.json();
-    const w = document.getElementById('cp-wallets');
-    if (!w) return;
-    w.innerHTML = '';
-    let totalEq = 0;
-    for (const [pseudo, pf] of Object.entries(data.portfolio || {})) {
-      const eq = (pf.cash_usd || 0) + (pf.positions || [])
-        .reduce((s, p) => s + (p.size || 0) * (p.avg_price || 0), 0);
-      totalEq += eq;
-      w.insertAdjacentHTML('beforeend',
-        `<div style="padding:8px;border:1px solid var(--border);border-radius:4px">` +
-        `<b>${pseudo}</b>: cash $${(pf.cash_usd||0).toFixed(2)} · ` +
-        `${(pf.positions||[]).length} pos · equity $${eq.toFixed(2)} ` +
-        `· realized $${(pf.realized_pnl_usd||0).toFixed(2)}</div>`);
-    }
-    // Nav badge now reflects the LIVE bot, not the paper aggregate — set in loadCopytradeLive
-    const tb = document.querySelector('#cp-decisions tbody');
-    if (tb) {
-      tb.innerHTML = '';
-      const recent = (data.recent_decisions || []).slice(-20).reverse();
-      for (const d of recent) {
-        const ts = new Date((d.ts||0)*1000).toISOString().slice(0,16).replace('T',' ');
-        tb.insertAdjacentHTML('beforeend',
-          `<tr style="border-bottom:1px solid var(--border)">` +
-          `<td style="padding:4px">${ts}</td>` +
-          `<td>${d.wallet||''}</td>` +
-          `<td style="text-align:center">${d.side||''}</td>` +
-          `<td>${(d.market||'').slice(0,40)}</td>` +
-          `<td style="text-align:right">$${(d.paper_size_usd||0).toFixed(2)}</td>` +
-          `<td style="text-align:center">${d.action||''}</td></tr>`);
-      }
-    }
-  } catch (e) { console.warn('loadCopytrade failed', e); }
-}
-loadCopytrade();
-setInterval(loadCopytrade, 60000);
+// Paper scanner UI removed — bot-cp still runs in backend to feed decisions.jsonl
+// but its data is no longer displayed. Only the LIVE bot is shown below.
 
 // ════════ CopyTrade LIVE (docker bot) ════════
 function _cplFmtUsd(n) {
