@@ -105,6 +105,13 @@ def price(token_id: str, side: str = "BUY") -> float | None:
         return None
 
 
+def market(condition_id: str) -> dict | None:
+    """CLOB market detail. For resolved markets each token in `tokens` has a
+    final `price` (0.0 or 1.0) and a `winner` flag, plus `closed=true`."""
+    url = f"{_CLOB_API}/markets/{condition_id}"
+    return _get(url)
+
+
 def target_position_size_at(
     wallet: str,
     condition_id: str,

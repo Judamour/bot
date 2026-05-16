@@ -186,9 +186,10 @@ _last_equity_date: str | None = None
 def _maybe_snapshot_equity(portfolios: dict[str, PaperPortfolio]) -> None:
     """Append a daily MTM snapshot to equity.jsonl when the UTC date changes.
 
-    Fetches the CLOB bid (SELL side) for each held asset so equity reflects
-    true liquidation value. Falls back to avg_price per-asset when the price
-    endpoint returns None (resolved market, missing data).
+    Pricing waterfall per asset:
+      1. CLOB live bid (SELL side) — for open markets
+      2. CLOB market resolution payoff (0.0 / 1.0) — for closed markets
+      3. avg_price — fallback when both endpoints fail
     """
     from datetime import datetime, timezone
 
@@ -199,13 +200,39 @@ def _maybe_snapshot_equity(portfolios: dict[str, PaperPortfolio]) -> None:
 
     assets = {p["asset"] for pf in portfolios.values() for p in pf.positions}
     current_prices: dict[str, float] = {}
+
+    n_live = 0
     for asset in assets:
         try:
             px = data_api.price(asset, side="SELL")
             if px is not None:
                 current_prices[asset] = px
+                n_live += 1
         except Exception as e:
-            log.warning("price fetch failed for asset %s: %s", asset, e)
+            log.debug("live price miss for asset %s (likely resolved): %s", asset, e)
+
+    n_resolved = 0
+    missing = assets - current_prices.keys()
+    if missing:
+        asset_to_cond = {
+            p["asset"]: p.get("condition_id")
+            for pf in portfolios.values()
+            for p in pf.positions
+            if p["asset"] in missing and p.get("condition_id")
+        }
+        for cond_id in set(asset_to_cond.values()):
+            try:
+                m = data_api.market(cond_id)
+                if not m or not m.get("closed"):
+                    continue
+                for tok in m.get("tokens", []):
+                    tid = tok.get("token_id")
+                    px = tok.get("price")
+                    if tid in missing and px is not None:
+                        current_prices[tid] = float(px)
+                        n_resolved += 1
+            except Exception as e:
+                log.warning("market fetch failed for cond %s: %s", cond_id, e)
 
     per_wallet = {}
     total = 0.0
@@ -221,9 +248,10 @@ def _maybe_snapshot_equity(portfolios: dict[str, PaperPortfolio]) -> None:
         "total_eq": total,
     })
     _last_equity_date = today
+    n_fallback = len(assets) - n_live - n_resolved
     log.info(
-        "equity snapshot for %s: total=$%.2f (priced %d/%d assets)",
-        today, total, len(current_prices), len(assets),
+        "equity snapshot for %s: total=$%.2f (live %d, resolved %d, fallback %d / %d)",
+        today, total, n_live, n_resolved, n_fallback, len(assets),
     )
 
 
