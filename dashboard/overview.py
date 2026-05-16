@@ -152,9 +152,42 @@ def _shadow(base: Path) -> dict:
     }
 
 
-# ─── Bot CopyTrade (Polymarket paper) ────────────────────────────────────
+# ─── Bot CopyTrade LIVE (Polymarket docker, target=surfandturf) ──────────
 
 def _copytrade(base: Path) -> dict:
+    """Prefer the LIVE docker bot snapshot; if absent fall back to paper aggregate."""
+    live_path = base / "logs/copytrade/copytrade_live_status.json"
+    live = _read_json(live_path, {})
+
+    if isinstance(live, dict) and live.get("wallet_address"):
+        equity = float(live.get("equity_estimate_usd") or 0)
+        balance = float(live.get("clob_balance_usd") or 0)
+        initial = float(os.getenv("COPYTRADE_LIVE_INITIAL_USD", "40.0"))
+        pnl_pct = (equity - initial) / initial * 100 if initial else 0
+        n_pos = int(live.get("n_positions") or 0)
+        target = live.get("target_wallet") or "?"
+        mode = live.get("mode") or "live"
+        return {
+            "id": "bot-cp",
+            "name": "CopyTrade",
+            "service": "docker:copytrade_live",
+            "active": equity > 0,
+            "capital_usd": equity,
+            "open_positions": n_pos,
+            "pnl_total_pct": pnl_pct,
+            "tab": "copytrade",
+            "details": f"Polymarket CLOB · target={target} · ${balance:.2f} cash · {n_pos} pos · {mode}",
+            "subtitle": "Polymarket LIVE — surfandturf mirror",
+            "last_activity": live.get("ts"),
+            "sparkline": [],
+            "extra": {
+                "wallet": live.get("wallet_address"),
+                "balance_usd": balance,
+                "cost_basis_usd": float(live.get("positions_cost_basis_usd") or 0),
+            },
+        }
+
+    # Fallback (no live snapshot yet) — show paper aggregate
     pf_path = base / "logs/copytrade/portfolio.json"
     has_data = pf_path.exists()
     pf = _read_json(pf_path, {})
@@ -195,10 +228,10 @@ def _copytrade(base: Path) -> dict:
         "realized_pnl_usd": total_realized,
         "tab": "copytrade",
         "details": (
-            f"Polymarket · {len(pf) if isinstance(pf, dict) else 0} wallets · {total_positions} pos"
+            f"Polymarket paper · {len(pf) if isinstance(pf, dict) else 0} wallets · {total_positions} pos"
             if has_data else "Bot CopyTrade — no data yet"
         ),
-        "subtitle": "Polymarket paper mirror",
+        "subtitle": "Polymarket paper mirror (fallback)",
         "last_activity": eq.get("date") if isinstance(eq, dict) else None,
         "sparkline": sparkline,
     }

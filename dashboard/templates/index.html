@@ -2434,8 +2434,7 @@ async function loadCopytrade() {
         `${(pf.positions||[]).length} pos · equity $${eq.toFixed(2)} ` +
         `· realized $${(pf.realized_pnl_usd||0).toFixed(2)}</div>`);
     }
-    const badge = document.getElementById('nb-cp');
-    if (badge) badge.textContent = `$${totalEq.toFixed(0)}`;
+    // Nav badge now reflects the LIVE bot, not the paper aggregate — set in loadCopytradeLive
     const tb = document.querySelector('#cp-decisions tbody');
     if (tb) {
       tb.innerHTML = '';
@@ -2513,6 +2512,12 @@ async function loadCopytradeLive() {
   setText('cpl-costbasis', _cplFmtUsd(s.positions_cost_basis_usd));
   setText('cpl-cycles', s.cycle_count != null ? s.cycle_count : '—');
   setText('cpl-target', s.target_wallet || '—');
+
+  // Top nav badge → live equity
+  const navBadge = document.getElementById('nb-cp');
+  if (navBadge && s.equity_estimate_usd != null) {
+    navBadge.textContent = '$' + (Math.round(s.equity_estimate_usd * 100) / 100).toFixed(2);
+  }
 
   // Wallet
   const wEl = document.getElementById('cpl-wallet');
