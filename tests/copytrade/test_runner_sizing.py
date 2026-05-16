@@ -208,6 +208,85 @@ def test_sufficient_cash_allows_buy(tmp_path):
     assert pf.cash_usd == pytest.approx(975.0)
 
 
+def test_live_buy_routes_through_executor_and_uses_real_fill(tmp_path):
+    """KEY: en mode live, BUY passe par polymarket_executor et le ledger
+    enregistre les vrais filled_shares/price retournés (pas le paper_size planifié)."""
+    target = {"pseudonym": "T1", "wallet": "0xW", "allocation_pct": 1.0}
+    pf = PaperPortfolio(wallet="T1", cash_usd=1000.0)
+    trades = [_trade(ts=100, side="BUY", size=500, price=0.5)]
+
+    fake_result = runner_mod.polymarket_executor.OrderResult(
+        success=True, order_id="0xLIVE", filled_shares=48.0,
+        filled_price=0.52, cost_usd=24.96,  # vrai fill : moins de shares, plus cher
+    )
+    with patch("live.copytrade.runner.data_api.trades", return_value=trades), \
+         patch("live.copytrade.runner.aum_estimator.aum", return_value=10_000.0), \
+         patch("live.copytrade.runner.polymarket_executor.is_live", return_value=True), \
+         patch("live.copytrade.runner.polymarket_executor.execute_buy",
+               return_value=fake_result) as exec_buy:
+        _, decisions = runner_mod.process_wallet(target, pf, last_seen_ts=0)
+
+    exec_buy.assert_called_once()
+    call_kwargs = exec_buy.call_args.kwargs
+    assert call_kwargs["token_id"] == "42"
+    assert call_kwargs["usd_size"] == pytest.approx(25.0)  # paper_size planifié
+    assert call_kwargs["target_price"] == pytest.approx(0.5)
+
+    assert decisions[0]["action"] == "executed"
+    assert decisions[0]["order_id"] == "0xLIVE"
+    assert decisions[0]["price"] == pytest.approx(0.52)         # real fill price
+    assert decisions[0]["paper_size_usd"] == pytest.approx(24.96)  # real cost
+    # Portfolio enregistre les vrais montants
+    assert pf.cash_usd == pytest.approx(1000.0 - 24.96)
+    assert pf.positions[0]["size"] == pytest.approx(48.0)
+    assert pf.positions[0]["avg_price"] == pytest.approx(0.52)
+
+
+def test_live_buy_executor_failure_skips_no_ledger_update(tmp_path):
+    """Si l'executor rejette (insufficient balance, etc), le ledger n'est PAS
+    touché et la décision est skipped avec le rationale executor_failed."""
+    target = {"pseudonym": "T1", "wallet": "0xW", "allocation_pct": 1.0}
+    pf = PaperPortfolio(wallet="T1", cash_usd=1000.0)
+    trades = [_trade(ts=100, side="BUY", size=500, price=0.5)]
+
+    fake_fail = runner_mod.polymarket_executor.OrderResult(
+        success=False, error="insufficient USDC balance",
+    )
+    with patch("live.copytrade.runner.data_api.trades", return_value=trades), \
+         patch("live.copytrade.runner.aum_estimator.aum", return_value=10_000.0), \
+         patch("live.copytrade.runner.polymarket_executor.is_live", return_value=True), \
+         patch("live.copytrade.runner.polymarket_executor.execute_buy",
+               return_value=fake_fail):
+        _, decisions = runner_mod.process_wallet(target, pf, last_seen_ts=0)
+
+    assert decisions[0]["action"] == "skipped"
+    assert "executor_failed" in decisions[0]["rationale"]
+    assert "insufficient USDC balance" in decisions[0]["rationale"]
+    assert pf.cash_usd == pytest.approx(1000.0)  # untouched
+    assert pf.positions == []
+
+
+def test_live_sell_without_local_position_skipped(tmp_path):
+    """En live, si on n'a PAS la position localement, on ne tente PAS de vendre
+    (le wallet target peut avoir un trade qu'on n'a jamais copié)."""
+    target = {"pseudonym": "T1", "wallet": "0xW", "allocation_pct": 1.0}
+    pf = PaperPortfolio(wallet="T1", cash_usd=1000.0)  # vide
+    trades = [_trade(ts=200, side="SELL", size=50, price=0.7)]
+
+    with patch("live.copytrade.runner.data_api.trades", return_value=trades), \
+         patch("live.copytrade.runner.data_api.target_position_size_at",
+               return_value=100.0), \
+         patch("live.copytrade.runner.aum_estimator.aum", return_value=10_000.0), \
+         patch("live.copytrade.runner.polymarket_executor.is_live", return_value=True), \
+         patch("live.copytrade.runner.polymarket_executor.execute_sell") as exec_sell:
+        _, decisions = runner_mod.process_wallet(target, pf, last_seen_ts=0)
+
+    exec_sell.assert_not_called()  # PAS appelé : pas de position locale
+    assert decisions[0]["action"] == "skipped"
+    assert decisions[0]["rationale"] == "no_local_position_to_sell"
+    assert pf.cash_usd == pytest.approx(1000.0)
+
+
 def test_sizing_uses_live_equity_not_initial(tmp_path):
     """KEY: après réalisation de PnL, sizing scale avec l'equity courante,
     pas avec un capital initial figé. C'est le coeur du fix."""

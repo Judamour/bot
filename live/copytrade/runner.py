@@ -28,7 +28,7 @@ def compute_paper_size(
     trade_pct = min(trade_size_usd / target_aum, MAX_TRADE_PCT)
     return capital_per_wallet * trade_pct
 
-from live.copytrade import aum_estimator, data_api
+from live.copytrade import aum_estimator, data_api, polymarket_executor
 from live.copytrade.paper_portfolio import PaperPortfolio
 
 
@@ -107,9 +107,29 @@ def process_wallet(
                 decisions.append(decision)
                 last_seen_ts = max(last_seen_ts, ts)
                 continue
+            # Route through executor : paper = no-op success, live = real CLOB order
+            result = polymarket_executor.execute_buy(
+                token_id=asset, usd_size=paper_size, target_price=price,
+            )
+            if not result.success:
+                decision["action"] = "skipped"
+                decision["rationale"] = f"executor_failed: {result.error}"
+                decisions.append(decision)
+                last_seen_ts = max(last_seen_ts, ts)
+                continue
+            # Record in ledger : real amounts if live filled, planned amounts if paper
+            if polymarket_executor.is_live() and result.filled_shares > 0:
+                fill_price = result.filled_price
+                fill_cost = result.cost_usd
+                decision["order_id"] = result.order_id
+                decision["paper_size_usd"] = fill_cost
+                decision["price"] = fill_price
+            else:
+                fill_price = price
+                fill_cost = paper_size
             portfolio.buy(
                 condition_id=condition_id, asset=asset, outcome=outcome,
-                outcome_index=outcome_index, price=price, usd_size=paper_size,
+                outcome_index=outcome_index, price=fill_price, usd_size=fill_cost,
                 target_hash=target_hash, market_title=market_title, opened_ts=ts,
             )
             decision["action"] = "executed"
@@ -122,12 +142,42 @@ def process_wallet(
                 fraction = 1.0
             else:
                 fraction = min(size_shares / target_size_before, 1.0)
+            # In live mode, only attempt sell if we actually hold this position
+            existing = portfolio._find(condition_id, outcome_index)
+            if polymarket_executor.is_live() and existing is None:
+                decision["action"] = "skipped"
+                decision["rationale"] = "no_local_position_to_sell"
+                decisions.append(decision)
+                last_seen_ts = max(last_seen_ts, ts)
+                continue
+            our_shares_to_sell = (existing["size"] * fraction) if existing else 0.0
+            result = polymarket_executor.execute_sell(
+                token_id=asset, shares_size=our_shares_to_sell, target_price=price,
+            )
+            if not result.success:
+                decision["action"] = "skipped"
+                decision["rationale"] = f"executor_failed: {result.error}"
+                decisions.append(decision)
+                last_seen_ts = max(last_seen_ts, ts)
+                continue
+            if polymarket_executor.is_live() and result.filled_shares > 0:
+                # Use real fill amount as effective fraction sold
+                effective_fraction = (
+                    min(result.filled_shares / existing["size"], 1.0) if existing else fraction
+                )
+                fill_price = result.filled_price
+                decision["order_id"] = result.order_id
+                decision["price"] = fill_price
+            else:
+                effective_fraction = fraction
+                fill_price = price
             portfolio.sell(
                 condition_id=condition_id, outcome_index=outcome_index,
-                fraction=fraction, price=price, target_hash=target_hash, ts=ts,
+                fraction=effective_fraction, price=fill_price,
+                target_hash=target_hash, ts=ts,
             )
             decision["action"] = "executed"
-            decision["rationale"] = f"sell_mirrored_fraction={fraction:.4f}"
+            decision["rationale"] = f"sell_mirrored_fraction={effective_fraction:.4f}"
         else:
             decision["action"] = "skipped"
             decision["rationale"] = f"unknown_side={side}"
@@ -338,7 +388,8 @@ def _maybe_snapshot_equity(portfolios: dict[str, PaperPortfolio]) -> None:
 
 
 def _smoke_test() -> None:
-    """Hit Data API once to fail-fast on geoblock / network at boot."""
+    """Hit Data API once to fail-fast on geoblock / network at boot.
+    Also validates Polymarket executor (no-op in paper, creds + balance in live)."""
     test_wallet = TARGETS[0]["wallet"]
     try:
         data_api.trades(test_wallet, limit=1)
@@ -346,6 +397,16 @@ def _smoke_test() -> None:
     except data_api.DataAPIError as e:
         log.error("smoke test failed: %s — aborting", e)
         sys.exit(2)
+    if not polymarket_executor.startup_check():
+        log.error("polymarket_executor startup_check failed — aborting live boot")
+        sys.exit(3)
+    if polymarket_executor.is_live():
+        bal = polymarket_executor.check_balance()
+        log.warning("🚨 LIVE POLYMARKET TRADING ACTIVE — USDC balance=$%.2f", bal)
+        try:
+            notifier.notify(f"🚨 bot-cp LIVE Polymarket: USDC=${bal:.2f}")
+        except Exception:
+            pass
 
 
 def run() -> None:
