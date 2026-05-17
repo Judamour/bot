@@ -1,0 +1,12 @@
+[Unit]
+Description=RN1 daily — runs once per day at 06:30 UTC (08:30 Paris)
+Requires=rn1-daily.service
+
+[Timer]
+# 06:30 UTC daily — between cycles of other bots, low API contention
+OnCalendar=*-*-* 06:30:00 UTC
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

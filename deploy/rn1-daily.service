@@ -1,0 +1,15 @@
+[Unit]
+Description=RN1 reverse-engineering daily fetch + analyze
+After=network.target
+
+[Service]
+Type=oneshot
+User=botuser
+WorkingDirectory=/home/botuser/bot-trading
+EnvironmentFile=-/home/botuser/bot-trading/.env
+ExecStart=/home/botuser/bot-trading/venv/bin/python -m analysis.rn1.daily_run
+StandardOutput=append:/home/botuser/bot-trading/logs/rn1/daily.log
+StandardError=append:/home/botuser/bot-trading/logs/rn1/daily.log
+
+[Install]
+WantedBy=multi-user.target

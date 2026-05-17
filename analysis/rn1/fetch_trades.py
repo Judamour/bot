@@ -43,14 +43,37 @@ def fetch_page(offset: int, retries: int = 3) -> list[dict]:
     return []
 
 
+def _load_existing_hashes() -> set[str]:
+    """Read existing trades.jsonl and return set of transactionHashes already saved."""
+    if not OUT_PATH.exists():
+        return set()
+    seen: set[str] = set()
+    with open(OUT_PATH) as f:
+        for line in f:
+            line = line.strip()
+            if line:
+                try:
+                    h = json.loads(line).get("transactionHash")
+                    if h:
+                        seen.add(h)
+                except Exception:
+                    pass
+    return seen
+
+
 def main() -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    seen_hashes: set[str] = set()
-    n_total = 0
+    seen_hashes = _load_existing_hashes()
+    n_known = len(seen_hashes)
+    n_new = 0
     offset = 0
     started = time.time()
+    consecutive_empty_pages = 0
 
-    with open(OUT_PATH, "w") as f:
+    print(f"[start] {n_known} trades already in {OUT_PATH.name}, "
+          f"appending new ones")
+
+    with open(OUT_PATH, "a") as f:
         while True:
             page = fetch_page(offset)
             if not page:
@@ -64,25 +87,30 @@ def main() -> None:
                     seen_hashes.add(h)
                     f.write(json.dumps(trade) + "\n")
                     new += 1
-                    n_total += 1
+                    n_new += 1
 
             oldest_ts = page[-1].get("timestamp", 0)
             oldest_date = time.strftime("%Y-%m-%d %H:%M", time.gmtime(oldest_ts))
             print(f"  offset={offset:>6} | got {len(page):>3} ({new:>3} new) | "
-                  f"total={n_total:>6} | oldest={oldest_date}")
+                  f"total={len(seen_hashes):>6} | oldest={oldest_date}")
 
             if new == 0:
-                # API loop (returning same data) — defensive
-                print("\n[warn] no new trades on this page — possible duplicate page, stop")
-                break
+                # Daily mode : if 2 pages straight are all duplicates, we're
+                # reading old data we already have — stop. (1-page duplicate
+                # can happen at exact pagination boundary.)
+                consecutive_empty_pages += 1
+                if consecutive_empty_pages >= 2:
+                    print("\n[done] 2 consecutive pages without new trades — stop")
+                    break
+            else:
+                consecutive_empty_pages = 0
 
             offset += PAGE_SIZE
-            # Be polite to the API
             time.sleep(0.15)
 
     elapsed = time.time() - started
-    print(f"\n[result] {n_total} unique trades saved to {OUT_PATH}")
-    print(f"[result] elapsed {elapsed:.1f}s ({n_total/elapsed:.0f} trades/s)")
+    print(f"\n[result] {n_new} new trades appended (total {len(seen_hashes)})")
+    print(f"[result] elapsed {elapsed:.1f}s")
 
 
 if __name__ == "__main__":
