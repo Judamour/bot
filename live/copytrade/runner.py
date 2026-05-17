@@ -83,6 +83,7 @@ def process_wallet(
         decision = {
             "ts": ts, "wallet": target["pseudonym"], "target_hash": target_hash,
             "side": side, "market": market_title, "outcome": outcome,
+            "conditionId": condition_id, "asset": asset, "outcomeIndex": outcome_index,
             "target_size_usd": trade_usd, "target_aum_estimate": target_aum,
             "trade_pct": (trade_usd / target_aum) if target_aum else 0,
             "paper_size_usd": paper_size, "price": price,

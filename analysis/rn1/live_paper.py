@@ -51,6 +51,10 @@ if not DECISIONS_PATH.exists():
 MARKETS_PATH = DATA_DIR / "markets.jsonl"
 POLL_INTERVAL_S = int(os.environ.get("RN1_PAPER_POLL_S", "60"))
 CLOB_API = "https://clob.polymarket.com"
+# Coalesce RN1 order-splits: same (cid, outcome) within this window = 1 mirror BUY.
+# RN1 splits big orders into 8+ small ones in <10s to minimize market impact;
+# without this we'd 8x our cost basis on one market.
+DEDUP_WINDOW_S = int(os.environ.get("RN1_PAPER_DEDUP_WINDOW_S", "300"))
 
 logging.basicConfig(
     level=logging.INFO,
@@ -105,6 +109,24 @@ def _append_market_to_cache(market: dict) -> None:
             f.write(json.dumps(market) + "\n")
     except Exception:
         pass
+
+
+def _dedup_recent_buy(state: dict, cid: str | None, outcome: str | None, ts: int) -> bool:
+    """Return True if (cid, outcome) was already bought within DEDUP_WINDOW_S.
+
+    Falls back to (title-hash, outcome) when cid is missing so legacy decisions
+    without conditionId still coalesce.
+    """
+    key = f"{cid or 'nocid'}|{outcome or ''}"
+    recent: dict = state.setdefault("recent_buys", {})
+    # Prune expired entries
+    cutoff = ts - DEDUP_WINDOW_S
+    for k in [k for k, v in recent.items() if v < cutoff]:
+        del recent[k]
+    if recent.get(key, 0) >= cutoff:
+        return True
+    recent[key] = ts
+    return False
 
 
 def _tail_decisions(since_ts: int) -> list[dict]:
@@ -187,6 +209,11 @@ def _cycle(state: dict, positions: dict, markets: dict) -> tuple[int, int, int]:
             state["last_seen_ts"] = max(state["last_seen_ts"], trade["timestamp"])
             continue
 
+        if _dedup_recent_buy(state, cid, trade.get("outcome"), trade["timestamp"]):
+            skip_counts["dedup_recent_buy"] = skip_counts.get("dedup_recent_buy", 0) + 1
+            state["last_seen_ts"] = max(state["last_seen_ts"], trade["timestamp"])
+            continue
+
         result = _open_paper_position(state, positions, trade, market)
         if result.get("opened"):
             n_opened += 1
@@ -265,7 +292,9 @@ def main() -> None:
         "n_won": 0,
         "last_seen_ts": 0,
         "boot_ts": int(time.time()),
+        "recent_buys": {},
     })
+    state.setdefault("recent_buys", {})
     positions = _load_json(POSITIONS_PATH, {})
     markets = _load_markets()
 
