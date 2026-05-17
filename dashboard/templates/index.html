@@ -1521,8 +1521,40 @@
   <p style="color:var(--muted);font-size:13px;margin:0 0 14px 0">
     Reverse-engineering of wallet <code>0x2005d16a…875ea</code> — a ~760 trades/day bot.
     Goal: identify replicable edge subset. Daily fetch+analyze via <code>rn1-daily.timer</code>.
-    No money engaged.
+    Paper bot applies our edge filters to RN1's signals — no real money.
   </p>
+
+  <!-- ═══ Paper bot summary ═══ -->
+  <h3 style="margin:0 0 8px 0;font-size:14px;display:flex;align-items:center;gap:8px">
+    🧪 Paper bot — edge simulation
+    <span id="rn1-paper-status" style="font-size:11px;padding:2px 6px;border-radius:6px;background:#1f6feb;color:#fff;font-weight:600">PAPER</span>
+  </h3>
+  <div id="rn1-paper-cards" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:18px">
+    <div class="rn1-stat"><div class="rn1-lbl">Equity</div><div class="rn1-val" id="rn1p-equity">—</div></div>
+    <div class="rn1-stat"><div class="rn1-lbl">Perf</div><div class="rn1-val" id="rn1p-perf">—</div></div>
+    <div class="rn1-stat"><div class="rn1-lbl">Cash</div><div class="rn1-val" id="rn1p-cash">—</div></div>
+    <div class="rn1-stat"><div class="rn1-lbl">Open positions</div><div class="rn1-val" id="rn1p-open">—</div></div>
+    <div class="rn1-stat"><div class="rn1-lbl">Resolved</div><div class="rn1-val" id="rn1p-resolved">—</div></div>
+    <div class="rn1-stat"><div class="rn1-lbl">Win rate</div><div class="rn1-val" id="rn1p-wr">—</div></div>
+  </div>
+
+  <details style="margin-bottom:18px;border:1px solid var(--border);border-radius:4px;padding:6px 10px">
+    <summary style="cursor:pointer;font-size:13px;color:var(--muted)">Open paper positions (<span id="rn1p-open-n">0</span>)</summary>
+    <table class="rn1-tbl" style="margin-top:8px">
+      <thead><tr><th>Title</th><th>Outcome</th><th class="num">Shares</th><th class="num">Avg px</th><th class="num">Cost</th></tr></thead>
+      <tbody id="rn1p-open-tbl"><tr><td colspan="5" style="color:var(--muted);padding:8px">No open positions.</td></tr></tbody>
+    </table>
+  </details>
+
+  <details style="margin-bottom:18px;border:1px solid var(--border);border-radius:4px;padding:6px 10px">
+    <summary style="cursor:pointer;font-size:13px;color:var(--muted)">Recent paper actions (last 30)</summary>
+    <table class="rn1-tbl" style="margin-top:8px">
+      <thead><tr><th>Action</th><th>Title</th><th>Outcome</th><th class="num">Cost</th><th class="num">PnL</th></tr></thead>
+      <tbody id="rn1p-trades-tbl"><tr><td colspan="5" style="color:var(--muted);padding:8px">No actions yet.</td></tr></tbody>
+    </table>
+  </details>
+
+  <h2 style="margin:24px 0 12px 0;font-size:16px;color:var(--muted)">Analysis — what the paper bot is based on</h2>
 
   <div id="rn1-cards" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin-bottom:18px">
     <div class="rn1-stat"><div class="rn1-lbl">Dataset</div><div class="rn1-val" id="rn1-n-trades">—</div></div>
@@ -2663,9 +2695,94 @@ async function loadRn1() {
     ? (v.best_bucket_roi_net_pct > 0 ? '+' : '') + v.best_bucket_roi_net_pct.toFixed(1) + '%'
     : '—');
 
-  // Top nav badge
+  // Top nav badge — show paper equity perf if paper running, else verdict
   const navBadge = document.getElementById('nb-rn1');
-  if (navBadge) navBadge.textContent = v.status || '—';
+  const paper = data.paper || {};
+  const lastEq = paper.latest_equity || {};
+  if (navBadge) {
+    if (lastEq.perf_pct != null) {
+      navBadge.textContent = (lastEq.perf_pct > 0 ? '+' : '') + lastEq.perf_pct.toFixed(1) + '%';
+    } else {
+      navBadge.textContent = v.status || '—';
+    }
+  }
+
+  // ── Paper bot stats ──
+  const ps = paper.state || {};
+  setText('rn1p-equity', lastEq.equity_usd != null ? '$' + lastEq.equity_usd.toFixed(2) : '—');
+  const perfEl = document.getElementById('rn1p-perf');
+  if (perfEl && lastEq.perf_pct != null) {
+    perfEl.textContent = (lastEq.perf_pct > 0 ? '+' : '') + lastEq.perf_pct.toFixed(2) + '%';
+    perfEl.className = 'rn1-val ' + _rn1RoiClass(lastEq.perf_pct / 100);
+  }
+  setText('rn1p-cash', lastEq.cash_usd != null ? '$' + lastEq.cash_usd.toFixed(2) : '—');
+  setText('rn1p-open', (lastEq.n_open || 0));
+  setText('rn1p-resolved', (lastEq.n_resolved || 0) + ' (' + (lastEq.n_won || 0) + ' W / ' +
+    Math.max((lastEq.n_resolved || 0) - (lastEq.n_won || 0), 0) + ' L)');
+  const wrEl = document.getElementById('rn1p-wr');
+  if (wrEl) {
+    const wr = (lastEq.win_rate || 0) * 100;
+    wrEl.textContent = wr.toFixed(1) + '%';
+    wrEl.className = 'rn1-val ' + (wr >= 60 ? 'rn1-roi-pos' : (wr >= 50 ? 'rn1-roi-flat' : 'rn1-roi-neg'));
+  }
+
+  // Open positions table
+  const openPositions = paper.open_positions || [];
+  setText('rn1p-open-n', openPositions.length);
+  const openTb = document.getElementById('rn1p-open-tbl');
+  if (openTb) {
+    openTb.innerHTML = '';
+    if (!openPositions.length) {
+      openTb.innerHTML = '<tr><td colspan="5" style="color:var(--muted);padding:8px">No open positions.</td></tr>';
+    } else {
+      openPositions.slice(0, 30).forEach(p => {
+        openTb.insertAdjacentHTML('beforeend',
+          '<tr>' +
+          '<td>' + (p.title || '').slice(0, 50) + '</td>' +
+          '<td>' + (p.outcome || '') + '</td>' +
+          '<td class="num">' + (p.shares || 0).toFixed(2) + '</td>' +
+          '<td class="num">' + (p.avg_price || 0).toFixed(3) + '</td>' +
+          '<td class="num">$' + (p.cost_basis || 0).toFixed(2) + '</td>' +
+          '</tr>');
+      });
+    }
+  }
+
+  // Recent trades table
+  const trades = (paper.recent_trades || []).slice().reverse();
+  const trTb = document.getElementById('rn1p-trades-tbl');
+  if (trTb) {
+    trTb.innerHTML = '';
+    if (!trades.length) {
+      trTb.innerHTML = '<tr><td colspan="5" style="color:var(--muted);padding:8px">No actions yet.</td></tr>';
+    } else {
+      trades.forEach(t => {
+        const action = t.action || '';
+        let actionEl, pnlEl;
+        if (action === 'buy') {
+          actionEl = '<span style="color:#3fb950">BUY</span>';
+          pnlEl = '—';
+        } else if (action === 'resolve') {
+          actionEl = t.result === 'won'
+            ? '<span style="color:#3fb950">RESOLVE ✓</span>'
+            : '<span style="color:#f85149">RESOLVE ✗</span>';
+          const pnl = t.pnl || 0;
+          pnlEl = '<span class="' + _rn1RoiClass(pnl / 10) + '">' + (pnl > 0 ? '+' : '') + '$' + pnl.toFixed(2) + '</span>';
+        } else {
+          actionEl = action;
+          pnlEl = '—';
+        }
+        trTb.insertAdjacentHTML('beforeend',
+          '<tr>' +
+          '<td>' + actionEl + '</td>' +
+          '<td>' + (t.title || '').slice(0, 45) + '</td>' +
+          '<td>' + (t.outcome || t.outcome_bought || '') + '</td>' +
+          '<td class="num">$' + (t.cost || t.cost_basis || 0).toFixed(2) + '</td>' +
+          '<td class="num">' + pnlEl + '</td>' +
+          '</tr>');
+      });
+    }
+  }
 
   // Buckets table
   const bTb = document.getElementById('rn1-buckets');

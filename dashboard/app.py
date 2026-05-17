@@ -955,7 +955,7 @@ def api_copytrade_live():
 
 @app.route("/api/rn1")
 def api_rn1():
-    """Read-only snapshot of the RN1 reverse-engineering analysis."""
+    """Read-only snapshot of the RN1 reverse-engineering analysis + paper bot."""
     import json
     import os
     from pathlib import Path
@@ -963,23 +963,51 @@ def api_rn1():
     base = Path(os.getenv("BOT_BASE_DIR", "."))
     summary_path = base / "analysis/rn1/data/summary.json"
     deep_path = base / "analysis/rn1/data/deep_analysis.json"
+    paper_state_path = base / "analysis/rn1/data/paper_state.json"
+    paper_equity_path = base / "analysis/rn1/data/paper_equity.jsonl"
+    paper_positions_path = base / "analysis/rn1/data/paper_positions.json"
+    paper_trades_path = base / "analysis/rn1/data/paper_trades.jsonl"
 
-    summary: dict = {}
-    deep: dict = {}
-    if summary_path.exists():
+    def _read_json(p):
+        if not p.exists():
+            return {}
         try:
-            summary = json.loads(summary_path.read_text())
+            return json.loads(p.read_text())
         except Exception:
-            pass
-    if deep_path.exists():
-        try:
-            deep = json.loads(deep_path.read_text())
-        except Exception:
-            pass
+            return {}
+
+    def _tail_jsonl(p, n=50):
+        if not p.exists():
+            return []
+        out = []
+        with open(p) as f:
+            for line in f.readlines()[-n:]:
+                line = line.strip()
+                if line:
+                    try:
+                        out.append(json.loads(line))
+                    except Exception:
+                        pass
+        return out
+
+    summary = _read_json(summary_path)
+    deep = _read_json(deep_path)
+    paper_state = _read_json(paper_state_path)
+    paper_positions = _read_json(paper_positions_path)
+    paper_equity = _tail_jsonl(paper_equity_path, 60)
+    paper_trades = _tail_jsonl(paper_trades_path, 30)
+    latest_equity = paper_equity[-1] if paper_equity else {}
 
     return jsonify({
         "summary": summary,
         "deep": deep,
+        "paper": {
+            "state": paper_state,
+            "latest_equity": latest_equity,
+            "equity_curve": paper_equity,
+            "open_positions": list(paper_positions.values()) if isinstance(paper_positions, dict) else [],
+            "recent_trades": paper_trades,
+        },
     })
 
 
