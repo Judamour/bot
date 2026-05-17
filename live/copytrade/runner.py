@@ -449,6 +449,11 @@ def run() -> None:
                     state_mod.append_decision(decisions_path, d)
                     if d.get("action") != "executed":
                         continue
+                    # Filter: only emit Telegram alerts for the LIVE bot's target wallet.
+                    # RN1 + bossoskil1 still tracked in decisions.jsonl + paper portfolio
+                    # but no longer ping Telegram (noise reduction).
+                    if pseudo != "surfandturf":
+                        continue
                     try:
                         side_emoji = "🟩" if d["side"] == "BUY" else "🟥"
                         notifier.notify(

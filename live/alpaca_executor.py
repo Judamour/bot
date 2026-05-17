@@ -33,9 +33,28 @@ import urllib.parse
 import urllib.error
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import time
 import config
 from live.order_executor import OrderResult
 from live.notifier import notify
+
+# ── Wash-trade cooldown ──────────────────────────────────────────────────────
+# Alpaca rejects BUY on a symbol recently SOLD with "potential wash trade
+# detected. use complex orders". We avoid this by tracking SELLs and skipping
+# BUY attempts on that symbol for WASH_COOLDOWN_SEC. Also kicks in when the
+# 403 fires (race condition), to suppress repeated noisy retries.
+WASH_COOLDOWN_SEC = int(os.environ.get("ALPACA_WASH_COOLDOWN_SEC", "3600"))  # 1 hour
+_wash_cooldown: dict[str, float] = {}
+
+
+def _is_in_wash_cooldown(symbol: str) -> bool:
+    return _wash_cooldown.get(symbol, 0.0) > time.time()
+
+
+def _set_wash_cooldown(symbol: str, reason: str) -> None:
+    _wash_cooldown[symbol] = time.time() + WASH_COOLDOWN_SEC
+    logger = logging.getLogger(__name__)
+    logger.info(f"[ALPACA] {symbol} wash cooldown set for {WASH_COOLDOWN_SEC}s ({reason})")
 
 logger = logging.getLogger(__name__)
 
@@ -310,6 +329,12 @@ def execute_buy(symbol: str, size: float, price_estimate: float,
         logger.warning(f"[ALPACA] BUY {symbol} skip — symbole non validé")
         return OrderResult(success=False, error="symbol_not_supported")
 
+    # Anti-wash-trade : skip silently if recently sold (avoid 403 + telegram spam)
+    if _is_in_wash_cooldown(symbol):
+        remaining = int(_wash_cooldown[symbol] - time.time())
+        logger.info(f"[ALPACA] BUY {symbol} skip — wash cooldown ({remaining}s restant)")
+        return OrderResult(success=False, error="wash_cooldown_active")
+
     # Crypto Alpaca → time_in_force=gtc + min cost basis 10$
     # Stocks Alpaca → time_in_force=day
     is_crypto = "/" in symbol
@@ -372,6 +397,11 @@ def execute_buy(symbol: str, size: float, price_estimate: float,
 
     except Exception as e:
         err_msg = str(e)
+        # Wash trade : Alpaca refuse car SELL récent → cooldown silencieux (pas de telegram spam)
+        if "wash trade" in err_msg.lower() or "complex order" in err_msg.lower():
+            _set_wash_cooldown(symbol, reason="wash_trade_403")
+            logger.warning(f"[ALPACA] BUY {symbol} → wash trade flag, cooldown {WASH_COOLDOWN_SEC}s, pas de retry")
+            return OrderResult(success=False, error="wash_trade_blocked")
         logger.error(f"[ALPACA] BUY {symbol} ÉCHOUÉ: {err_msg}")
         # Erreur critique — notif immédiate
         from live.notifier import ICON_EXIT_LOSS
@@ -426,6 +456,8 @@ def execute_sell(symbol: str, size: float, price_estimate: float,
 
         filled_qty = float(filled.get("filled_qty", size))
         filled_avg = float(filled.get("filled_avg_price") or price_estimate)
+        # Cooldown anti-wash : tout BUY sur ce symbol bloqué pour 1h après le SELL
+        _set_wash_cooldown(symbol, reason=f"post_sell:{reason}")
         # Notif SELL fill: déléguée au caller (bot.py via buffer_sell) — évite double notif
         return OrderResult(success=True, order_id=order_id,
                            filled_size=filled_qty, filled_price=filled_avg)

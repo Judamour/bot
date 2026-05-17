@@ -21,6 +21,21 @@ import urllib.parse
 
 _INSUFFICIENT_RE = re.compile(r"available:\s*([\d.]+)", re.IGNORECASE)
 
+# ── Wash-trade cooldown (same idea as live/alpaca_executor.py) ──────────────
+# Alpaca rejects BUY on a symbol recently SOLD with "potential wash trade
+# detected". Track recent SELLs and skip BUY attempts during cooldown window.
+_WASH_COOLDOWN_SEC = int(os.environ.get("SHADOW_WASH_COOLDOWN_SEC", "3600"))  # 1h
+_wash_cooldown: dict[str, float] = {}
+
+
+def _is_in_wash_cooldown(symbol: str) -> bool:
+    return _wash_cooldown.get(symbol, 0.0) > time.time()
+
+
+def _set_wash_cooldown(symbol: str, reason: str) -> None:
+    _wash_cooldown[symbol] = time.time() + _WASH_COOLDOWN_SEC
+    print(f"[SHADOW] {symbol} wash cooldown {_WASH_COOLDOWN_SEC}s ({reason})", flush=True)
+
 
 def validate_isolation() -> None:
     """Fail-fast au démarrage : refuse de tourner si l'isolation est cassée.
@@ -147,6 +162,11 @@ def market_buy(symbol: str, qty: float) -> dict:
     (l'ordre sera fillé à l'open). filled_qty=0 et filled_avg=0 dans ce cas —
     le caller doit lire les positions au cycle suivant pour avoir le fill réel.
     """
+    # Anti-wash : skip silencieusement si SELL récent sur ce symbol
+    if _is_in_wash_cooldown(symbol):
+        remaining = int(_wash_cooldown[symbol] - time.time())
+        return {"ok": False, "error": f"wash_cooldown_active ({remaining}s left)"}
+
     is_crypto = "/" in symbol
     payload = {
         "symbol": symbol,
@@ -211,7 +231,12 @@ def market_buy(symbol: str, qty: float) -> dict:
             "status": status or "queued",
         }
     except Exception as e:
-        return {"ok": False, "error": str(e)[:200]}
+        err_msg = str(e)
+        # Wash trade : cooldown silencieux (pas de retry, pas de bruit)
+        if "wash trade" in err_msg.lower() or "complex order" in err_msg.lower():
+            _set_wash_cooldown(symbol, reason="wash_trade_403")
+            return {"ok": False, "error": "wash_trade_blocked"}
+        return {"ok": False, "error": err_msg[:200]}
 
 
 def market_sell(symbol: str, qty: float) -> dict:
@@ -242,6 +267,8 @@ def market_sell(symbol: str, qty: float) -> dict:
         filled = _wait_fill(oid, max_wait_s=20)
         if not filled or filled.get("status") != "filled":
             return {"ok": False, "error": f"not filled (status={filled.get('status') if filled else 'timeout'})"}
+        # SELL réussi → cooldown anti-wash : bloque le re-BUY pendant 1h
+        _set_wash_cooldown(symbol, reason="post_sell")
         return {
             "ok": True,
             "id": oid,
