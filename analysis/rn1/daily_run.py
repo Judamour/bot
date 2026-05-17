@@ -18,7 +18,9 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import fetch_trades, enrich_markets, analyze, analyze_deep, paper_bot
+from . import fetch_trades, enrich_markets, analyze, analyze_deep
+# paper_bot retiré du daily run : remplacé par rn1-live-paper.service (60s polling).
+# Le service continu touche paper_state.json en permanence, daily ne doit pas le racer.
 
 DATA_DIR = Path(__file__).resolve().parent / "data"
 
@@ -110,11 +112,9 @@ def main() -> None:
     print("\n[step 3/4] analyze + report")
     analyze.main()
 
-    print("\n[step 4/5] deep analysis (8 dimensions)")
+    print("\n[step 4/4] deep analysis (8 dimensions)")
     analyze_deep.main()
-
-    print("\n[step 5/5] paper bot — simulate edge on new RN1 signals")
-    paper_bot.main()
+    # Paper bot now runs as rn1-live-paper.service (60s polling, isolated).
 
     # Weekly digest on Monday
     if datetime.now(timezone.utc).weekday() == 0:

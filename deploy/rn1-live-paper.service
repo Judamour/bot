@@ -1,0 +1,19 @@
+[Unit]
+Description=RN1 Live Paper Bot — applies edge filters to RN1 signals in real time
+After=network.target bot-cp.service
+# Note: NOT a Requires=bot-cp.service — we can run without bot-cp temporarily,
+# we just won't see new signals. Crash here NEVER affects bot-cp.
+
+[Service]
+Type=simple
+User=botuser
+WorkingDirectory=/home/botuser/bot-trading
+EnvironmentFile=-/home/botuser/bot-trading/.env
+ExecStart=/home/botuser/bot-trading/venv/bin/python -m analysis.rn1.live_paper
+Restart=on-failure
+RestartSec=30
+StandardOutput=append:/home/botuser/bot-trading/logs/rn1/live_paper.log
+StandardError=append:/home/botuser/bot-trading/logs/rn1/live_paper.log
+
+[Install]
+WantedBy=multi-user.target
