@@ -998,6 +998,17 @@ def api_rn1():
     paper_trades = _tail_jsonl(paper_trades_path, 30)
     latest_equity = paper_equity[-1] if paper_equity else {}
 
+    # Autobot — autonomous Polymarket scanner (independent of RN1 signals)
+    autobot_state_path = base / "analysis/rn1/data/autobot_state.json"
+    autobot_positions_path = base / "analysis/rn1/data/autobot_positions.json"
+    autobot_equity_path = base / "analysis/rn1/data/autobot_equity.jsonl"
+    autobot_trades_path = base / "analysis/rn1/data/autobot_trades.jsonl"
+    autobot_state = _read_json(autobot_state_path)
+    autobot_positions = _read_json(autobot_positions_path)
+    autobot_equity = _tail_jsonl(autobot_equity_path, 60)
+    autobot_trades = _tail_jsonl(autobot_trades_path, 30)
+    autobot_latest = autobot_equity[-1] if autobot_equity else {}
+
     return jsonify({
         "summary": summary,
         "deep": deep,
@@ -1007,6 +1018,13 @@ def api_rn1():
             "equity_curve": paper_equity,
             "open_positions": list(paper_positions.values()) if isinstance(paper_positions, dict) else [],
             "recent_trades": paper_trades,
+        },
+        "autobot": {
+            "state": autobot_state,
+            "latest_equity": autobot_latest,
+            "equity_curve": autobot_equity,
+            "open_positions": list(autobot_positions.values()) if isinstance(autobot_positions, dict) else [],
+            "recent_trades": autobot_trades,
         },
     })
 

@@ -1554,6 +1554,36 @@
     </table>
   </details>
 
+  <!-- ═══ Autobot section ═══ -->
+  <h3 style="margin:24px 0 8px 0;font-size:14px;display:flex;align-items:center;gap:8px">
+    🤖 Autobot — autonomous Polymarket scanner (RN1-style criteria, no signal copy)
+    <span style="font-size:11px;padding:2px 6px;border-radius:6px;background:#6a1b9a;color:#fff;font-weight:600">PAPER $100K</span>
+  </h3>
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:18px">
+    <div class="rn1-stat"><div class="rn1-lbl">Equity</div><div class="rn1-val" id="rn1a-equity">—</div></div>
+    <div class="rn1-stat"><div class="rn1-lbl">Perf</div><div class="rn1-val" id="rn1a-perf">—</div></div>
+    <div class="rn1-stat"><div class="rn1-lbl">Cash</div><div class="rn1-val" id="rn1a-cash">—</div></div>
+    <div class="rn1-stat"><div class="rn1-lbl">Open positions</div><div class="rn1-val" id="rn1a-open">—</div></div>
+    <div class="rn1-stat"><div class="rn1-lbl">Resolved</div><div class="rn1-val" id="rn1a-resolved">—</div></div>
+    <div class="rn1-stat"><div class="rn1-lbl">Win rate</div><div class="rn1-val" id="rn1a-wr">—</div></div>
+  </div>
+
+  <details style="margin-bottom:18px;border:1px solid var(--border);border-radius:4px;padding:6px 10px">
+    <summary style="cursor:pointer;font-size:13px;color:var(--muted)">Open autobot positions (<span id="rn1a-open-n">0</span>)</summary>
+    <table class="rn1-tbl" style="margin-top:8px">
+      <thead><tr><th>Title</th><th>Outcome</th><th class="num">Shares</th><th class="num">Avg px</th><th class="num">Cost</th></tr></thead>
+      <tbody id="rn1a-open-tbl"><tr><td colspan="5" style="color:var(--muted);padding:8px">No open positions.</td></tr></tbody>
+    </table>
+  </details>
+
+  <details style="margin-bottom:24px;border:1px solid var(--border);border-radius:4px;padding:6px 10px">
+    <summary style="cursor:pointer;font-size:13px;color:var(--muted)">Recent autobot actions (last 30)</summary>
+    <table class="rn1-tbl" style="margin-top:8px">
+      <thead><tr><th>Action</th><th>Title</th><th>Outcome</th><th class="num">Cost</th><th class="num">PnL</th></tr></thead>
+      <tbody id="rn1a-trades-tbl"><tr><td colspan="5" style="color:var(--muted);padding:8px">No actions yet (5min scan cycle).</td></tr></tbody>
+    </table>
+  </details>
+
   <h2 style="margin:24px 0 12px 0;font-size:16px;color:var(--muted)">Analysis — what the paper bot is based on</h2>
 
   <div id="rn1-cards" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin-bottom:18px">
@@ -2877,6 +2907,81 @@ async function loadRn1() {
         ' &nbsp; · &nbsp; Mixed : ' + (o.mixed || 0) + ' &nbsp; · &nbsp; Open : ' + (o.open_or_partial || 0) + '</div>' +
       '<div>Pack ROI brut : <span class="' + _rn1RoiClass(mlp.pack_roi || 0) + '">' +
         _rn1RoiPct(mlp.pack_roi || 0) + '</span> sur $' + (mlp.total_cost || 0).toLocaleString() + ' déployés</div>';
+  }
+
+  // ── Autobot stats ──
+  const autobot = data.autobot || {};
+  const aLast = autobot.latest_equity || {};
+  setText('rn1a-equity', aLast.equity_usd != null ? '$' + Math.round(aLast.equity_usd).toLocaleString() : '—');
+  const aPerfEl = document.getElementById('rn1a-perf');
+  if (aPerfEl && aLast.perf_pct != null) {
+    aPerfEl.textContent = (aLast.perf_pct > 0 ? '+' : '') + aLast.perf_pct.toFixed(2) + '%';
+    aPerfEl.className = 'rn1-val ' + _rn1RoiClass(aLast.perf_pct / 100);
+  }
+  setText('rn1a-cash', aLast.cash_usd != null ? '$' + Math.round(aLast.cash_usd).toLocaleString() : '—');
+  setText('rn1a-open', (aLast.n_open || 0));
+  setText('rn1a-resolved', (aLast.n_resolved || 0) + ' (' + (aLast.n_won || 0) + ' W / ' +
+    Math.max((aLast.n_resolved || 0) - (aLast.n_won || 0), 0) + ' L)');
+  const aWrEl = document.getElementById('rn1a-wr');
+  if (aWrEl) {
+    const wr = (aLast.win_rate || 0) * 100;
+    aWrEl.textContent = (aLast.n_resolved > 0 ? wr.toFixed(1) + '%' : '—');
+    aWrEl.className = 'rn1-val ' + (wr >= 60 ? 'rn1-roi-pos' : (wr >= 50 ? 'rn1-roi-flat' : 'rn1-roi-neg'));
+  }
+  const aOpen = autobot.open_positions || [];
+  const setN = document.getElementById('rn1a-open-n');
+  if (setN) setN.textContent = aOpen.length;
+  const aOpenTb = document.getElementById('rn1a-open-tbl');
+  if (aOpenTb) {
+    aOpenTb.innerHTML = '';
+    if (!aOpen.length) {
+      aOpenTb.innerHTML = '<tr><td colspan="5" style="color:var(--muted);padding:8px">No open positions yet (5min scan cycle).</td></tr>';
+    } else {
+      aOpen.slice(0, 50).forEach(p => {
+        aOpenTb.insertAdjacentHTML('beforeend',
+          '<tr>' +
+          '<td>' + (p.title || '').slice(0, 50) + '</td>' +
+          '<td>' + (p.outcome || '') + '</td>' +
+          '<td class="num">' + (p.shares || 0).toFixed(2) + '</td>' +
+          '<td class="num">' + (p.avg_price || 0).toFixed(3) + '</td>' +
+          '<td class="num">$' + (p.cost_basis || 0).toFixed(2) + '</td>' +
+          '</tr>');
+      });
+    }
+  }
+  const aTrades = (autobot.recent_trades || []).slice().reverse();
+  const aTrTb = document.getElementById('rn1a-trades-tbl');
+  if (aTrTb) {
+    aTrTb.innerHTML = '';
+    if (!aTrades.length) {
+      aTrTb.innerHTML = '<tr><td colspan="5" style="color:var(--muted);padding:8px">No actions yet (5min scan cycle).</td></tr>';
+    } else {
+      aTrades.forEach(t => {
+        const action = t.action || '';
+        let actionEl, pnlEl;
+        if (action === 'buy') {
+          actionEl = '<span style="color:#3fb950">BUY</span>';
+          pnlEl = '—';
+        } else if (action === 'resolve') {
+          actionEl = t.outcome === 'won'
+            ? '<span style="color:#3fb950">RESOLVE ✓</span>'
+            : '<span style="color:#f85149">RESOLVE ✗</span>';
+          const pnl = t.pnl || 0;
+          pnlEl = '<span class="' + _rn1RoiClass(pnl / 500) + '">' + (pnl > 0 ? '+' : '') + '$' + pnl.toFixed(2) + '</span>';
+        } else {
+          actionEl = action;
+          pnlEl = '—';
+        }
+        aTrTb.insertAdjacentHTML('beforeend',
+          '<tr>' +
+          '<td>' + actionEl + '</td>' +
+          '<td>' + (t.title || '').slice(0, 45) + '</td>' +
+          '<td>' + (t.outcome || '') + '</td>' +
+          '<td class="num">$' + (t.cost_basis || 0).toFixed(2) + '</td>' +
+          '<td class="num">' + pnlEl + '</td>' +
+          '</tr>');
+      });
+    }
   }
 }
 loadRn1();
