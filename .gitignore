@@ -38,3 +38,6 @@ local/copytrade_live/positions.json
 *.swp
 *.swo
 docs/SESSIONS_HISTORY.md
+
+# RN1 analysis data (regeneratable, can be large)
+analysis/rn1/data/
