@@ -1,0 +1,17 @@
+[Unit]
+Description=Tennis Elo Bot — paper trades Polymarket WTA markets via own Elo model
+After=network.target
+
+[Service]
+Type=simple
+User=botuser
+WorkingDirectory=/home/botuser/bot-trading
+EnvironmentFile=-/home/botuser/bot-trading/.env
+ExecStart=/home/botuser/bot-trading/venv/bin/python -m analysis.tennis_model.tennis_bot
+Restart=on-failure
+RestartSec=30
+StandardOutput=append:/home/botuser/bot-trading/logs/tennis/tennis_bot.log
+StandardError=append:/home/botuser/bot-trading/logs/tennis/tennis_bot.log
+
+[Install]
+WantedBy=multi-user.target
