@@ -45,6 +45,7 @@ TRADES_PATH = DATA_DIR / "trades.jsonl"
 MARKETS_PATH = DATA_DIR / "markets.jsonl"
 OUT_ENRICHED = DATA_DIR / "trades_enriched.csv"
 OUT_SUMMARY = DATA_DIR / "pattern_summary.csv"
+OUT_JSON = DATA_DIR / "summary.json"  # consumed by dashboard /api/rn1
 OUT_REPORT = Path(__file__).resolve().parent.parent.parent / "docs" / "rn1_strategy_reverse_engineered.md"
 
 TAKER_FEE = 0.02  # 2% — what WE would pay
@@ -236,6 +237,75 @@ def main() -> None:
     summaries = compute_summaries(enriched)
     write_summary_csv(summaries)
     write_report(trades, enriched, summaries, correlated_hashes)
+    write_summary_json(trades, enriched, summaries, correlated_hashes)
+
+
+def write_summary_json(trades: list[dict], enriched: list[dict],
+                       summaries: list[dict], correlated_hashes: set[str]) -> None:
+    """Structured snapshot for dashboard /api/rn1 consumption."""
+    import time
+    n_trades = len(trades)
+    n_resolved = sum(1 for e in enriched if e["status"] in ("won", "lost"))
+    n_open = sum(1 for e in enriched if e["status"] == "open")
+
+    oldest_ts = min((t["timestamp"] for t in trades if t.get("timestamp")), default=0)
+    newest_ts = max((t["timestamp"] for t in trades if t.get("timestamp")), default=0)
+
+    bucket_rows = [s for s in summaries if s["category"] == "bucket"]
+    bucket_rows.sort(key=lambda s: ["penny", "mid_low", "mid_high", "favorite", "lock"].index(s["key"])
+                     if s["key"] in ["penny", "mid_low", "mid_high", "favorite", "lock"] else 99)
+    sport_rows = sorted([s for s in summaries if s["category"] == "sport"],
+                        key=lambda s: -s["n_closed_buy"])
+    corr_rows = [s for s in summaries if s["category"] == "correlated_buys"]
+
+    # Verdict: pick best bucket by NET ROI (raw_roi - our 2% fee).
+    # ROI reflects $ we'd actually make, unlike per-share edge which is unweighted.
+    def _net_roi(s):
+        return (s.get("raw_roi") or 0) - 0.02
+
+    most_profitable_bucket = max(
+        (s for s in bucket_rows if s["n_closed_buy"] >= 20),
+        key=_net_roi,
+        default=None,
+    )
+    best_net_roi = _net_roi(most_profitable_bucket) if most_profitable_bucket else -1
+    if best_net_roi > 0.05:
+        verdict_status = "go"
+    elif best_net_roi > 0:
+        verdict_status = "marginal"
+    else:
+        verdict_status = "stop"
+
+    snapshot = {
+        "ts": int(time.time()),
+        "dataset": {
+            "n_trades": n_trades,
+            "n_resolved": n_resolved,
+            "n_open": n_open,
+            "n_buy": sum(1 for e in enriched if e["side"] == "BUY"),
+            "n_sell": sum(1 for e in enriched if e["side"] == "SELL"),
+            "n_correlated": len(correlated_hashes),
+            "oldest_ts": oldest_ts,
+            "newest_ts": newest_ts,
+            "days_span": round((newest_ts - oldest_ts) / 86400, 2) if oldest_ts else 0,
+        },
+        "verdict": {
+            "status": verdict_status,
+            "best_bucket": most_profitable_bucket["key"] if most_profitable_bucket else None,
+            "best_bucket_roi_net_pct": round(
+                ((most_profitable_bucket.get("raw_roi") or 0) - 0.02) * 100, 2
+            ) if most_profitable_bucket else None,
+            "best_bucket_win_rate_pct": round(
+                most_profitable_bucket["win_rate"] * 100, 2
+            ) if most_profitable_bucket else None,
+        },
+        "buckets": bucket_rows,
+        "sports": sport_rows,
+        "correlation": corr_rows,
+    }
+
+    OUT_JSON.write_text(json.dumps(snapshot, indent=2))
+    print(f"[write] {OUT_JSON}")
 
 
 def compute_summaries(enriched: list[dict]) -> list[dict]:

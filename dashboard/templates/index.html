@@ -715,6 +715,7 @@
   <button class="nav-btn" onclick="switchTab('docs')">Documentation</button>
   <button class="nav-btn" onclick="switchTab('copytrade')">CopyTrade <span class="nav-badge" id="nb-cp">—</span></button>
   <button class="nav-btn" onclick="switchTab('targets')">Targets <span class="nav-badge" id="nb-tg">—</span></button>
+  <button class="nav-btn" onclick="switchTab('rn1')">RN1 Research <span class="nav-badge" id="nb-rn1">—</span></button>
 </nav>
 
 <!-- ── Bottom Nav (mobile only) ──────────────────────────────── -->
@@ -1508,6 +1509,79 @@
     <div id="tg-feed" class="tg-feed-rows"></div>
   </div>
 </div>
+
+<!-- ═══ RN1 Research tab — daily auto-updated analysis ═══ -->
+<div id="tab-rn1" class="tab-content">
+  <div style="display:flex;align-items:center;gap:10px;margin:0 0 12px 0;flex-wrap:wrap">
+    <h2 style="margin:0">RN1 Research</h2>
+    <span id="rn1-verdict-badge" style="font-size:11px;padding:3px 8px;border-radius:10px;background:#666;color:#fff;font-weight:700">—</span>
+    <span id="rn1-freshness" style="font-size:11px;color:var(--muted)">—</span>
+  </div>
+
+  <p style="color:var(--muted);font-size:13px;margin:0 0 14px 0">
+    Reverse-engineering of wallet <code>0x2005d16a…875ea</code> — a ~760 trades/day bot.
+    Goal: identify replicable edge subset. Daily fetch+analyze via <code>rn1-daily.timer</code>.
+    No money engaged.
+  </p>
+
+  <div id="rn1-cards" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin-bottom:18px">
+    <div class="rn1-stat"><div class="rn1-lbl">Dataset</div><div class="rn1-val" id="rn1-n-trades">—</div></div>
+    <div class="rn1-stat"><div class="rn1-lbl">Period</div><div class="rn1-val" id="rn1-period" style="font-size:14px">—</div></div>
+    <div class="rn1-stat"><div class="rn1-lbl">Resolved</div><div class="rn1-val" id="rn1-resolved">—</div></div>
+    <div class="rn1-stat"><div class="rn1-lbl">Correlated trades</div><div class="rn1-val" id="rn1-corr">—</div></div>
+    <div class="rn1-stat"><div class="rn1-lbl">Best bucket</div><div class="rn1-val" id="rn1-best-bucket" style="font-size:14px">—</div></div>
+    <div class="rn1-stat"><div class="rn1-lbl">Best net ROI</div><div class="rn1-val" id="rn1-best-roi">—</div></div>
+  </div>
+
+  <h3 style="margin:10px 0 8px 0;font-size:14px">Edge per price bucket (RN1's entry tier)</h3>
+  <table class="rn1-tbl">
+    <thead><tr><th>Bucket</th><th>N</th><th>Win rate</th><th>Raw ROI</th><th>Net ROI (after our 2% fee)</th><th>Cost basis</th></tr></thead>
+    <tbody id="rn1-buckets"><tr><td colspan="6" style="color:var(--muted)">Loading…</td></tr></tbody>
+  </table>
+
+  <h3 style="margin:18px 0 8px 0;font-size:14px">Edge per sport</h3>
+  <table class="rn1-tbl">
+    <thead><tr><th>Sport</th><th>N</th><th>Win rate</th><th>Net ROI</th></tr></thead>
+    <tbody id="rn1-sports"><tr><td colspan="4" style="color:var(--muted)">Loading…</td></tr></tbody>
+  </table>
+
+  <h3 style="margin:18px 0 8px 0;font-size:14px">Deep dive — market type</h3>
+  <table class="rn1-tbl">
+    <thead><tr><th>Market type</th><th>N</th><th>Win rate</th><th>Net ROI</th><th>Cost basis</th></tr></thead>
+    <tbody id="rn1-mtype"><tr><td colspan="5" style="color:var(--muted)">Loading…</td></tr></tbody>
+  </table>
+
+  <h3 style="margin:18px 0 8px 0;font-size:14px">Deep dive — league</h3>
+  <table class="rn1-tbl">
+    <thead><tr><th>League</th><th>N</th><th>Win rate</th><th>Net ROI</th></tr></thead>
+    <tbody id="rn1-league"><tr><td colspan="4" style="color:var(--muted)">Loading…</td></tr></tbody>
+  </table>
+
+  <h3 style="margin:18px 0 8px 0;font-size:14px">Deep dive — hour of day (UTC)</h3>
+  <table class="rn1-tbl">
+    <thead><tr><th>Hour band</th><th>N</th><th>Win rate</th><th>Net ROI</th></tr></thead>
+    <tbody id="rn1-hour"><tr><td colspan="4" style="color:var(--muted)">Loading…</td></tr></tbody>
+  </table>
+
+  <h3 style="margin:18px 0 8px 0;font-size:14px">Streak effect</h3>
+  <div id="rn1-streaks" style="font-size:13px;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:4px;padding:10px;margin-bottom:18px">—</div>
+
+  <h3 style="margin:18px 0 8px 0;font-size:14px">Multi-leg pack analysis (≥3 markets in same event)</h3>
+  <div id="rn1-packs" style="font-size:13px;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:4px;padding:10px;margin-bottom:24px">—</div>
+</div>
+
+<style>
+  .rn1-stat { padding:10px 12px; border:1px solid var(--border); border-radius:4px; background:rgba(255,255,255,0.02); }
+  .rn1-lbl { font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.5px; }
+  .rn1-val { font-size:18px; font-weight:700; margin-top:4px; font-variant-numeric:tabular-nums; }
+  .rn1-tbl { width:100%; border-collapse:collapse; font-size:13px; font-variant-numeric:tabular-nums; }
+  .rn1-tbl th { text-align:left; padding:6px; border-bottom:1px solid var(--border); color:var(--muted); font-weight:600 }
+  .rn1-tbl td { padding:4px 6px; border-bottom:1px solid var(--border); }
+  .rn1-tbl .num { text-align:right; }
+  .rn1-roi-pos { color:#3fb950; font-weight:600 }
+  .rn1-roi-neg { color:#f85149; font-weight:600 }
+  .rn1-roi-flat { color:var(--muted); }
+</style>
 
 </div><!-- /main -->
 
@@ -2534,6 +2608,162 @@ async function loadCopytradeLive() {
 }
 loadCopytradeLive();
 setInterval(loadCopytradeLive, 30000);
+
+// ════════ RN1 Research tab ════════
+function _rn1FmtAgo(ts) {
+  if (!ts) return '—';
+  const sec = Math.floor(Date.now() / 1000) - ts;
+  if (sec < 3600) return Math.floor(sec / 60) + 'm ago';
+  if (sec < 86400) return Math.floor(sec / 3600) + 'h ago';
+  return Math.floor(sec / 86400) + 'd ago';
+}
+function _rn1RoiClass(roi) {
+  if (Math.abs(roi) < 0.005) return 'rn1-roi-flat';
+  return roi > 0 ? 'rn1-roi-pos' : 'rn1-roi-neg';
+}
+function _rn1RoiPct(roi) {
+  return ((roi > 0 ? '+' : '') + (roi * 100).toFixed(1) + '%');
+}
+
+async function loadRn1() {
+  let data;
+  try {
+    const r = await fetch('/api/rn1');
+    if (!r.ok) return;
+    data = await r.json();
+  } catch (e) {
+    console.warn('loadRn1 failed', e);
+    return;
+  }
+  const s = data.summary || {};
+  const d = data.deep || {};
+  const ds = s.dataset || {};
+  const v = s.verdict || {};
+
+  // Verdict badge
+  const vb = document.getElementById('rn1-verdict-badge');
+  if (vb) {
+    const colors = { go: '#3fb950', marginal: '#d29922', stop: '#f85149' };
+    const labels = { go: '✅ GO — edge réplicable', marginal: '🟡 MARGINAL — observer', stop: '❌ STOP — pas d\'edge net' };
+    vb.textContent = labels[v.status] || '—';
+    vb.style.background = colors[v.status] || '#666';
+  }
+  document.getElementById('rn1-freshness').textContent =
+    s.ts ? 'updated ' + _rn1FmtAgo(s.ts) : 'no data yet';
+
+  // Top cards
+  const setText = (id, val) => { const e = document.getElementById(id); if (e) e.textContent = val; };
+  setText('rn1-n-trades', (ds.n_trades || 0).toLocaleString());
+  setText('rn1-period', (ds.days_span || 0).toFixed(1) + ' days');
+  setText('rn1-resolved', (ds.n_resolved || 0).toLocaleString() + ' / ' + (ds.n_trades || 0).toLocaleString());
+  setText('rn1-corr', (ds.n_correlated || 0).toLocaleString() + ' (' +
+    Math.round(100 * (ds.n_correlated || 0) / Math.max(ds.n_trades || 1, 1)) + '%)');
+  setText('rn1-best-bucket', v.best_bucket || '—');
+  setText('rn1-best-roi', v.best_bucket_roi_net_pct != null
+    ? (v.best_bucket_roi_net_pct > 0 ? '+' : '') + v.best_bucket_roi_net_pct.toFixed(1) + '%'
+    : '—');
+
+  // Top nav badge
+  const navBadge = document.getElementById('nb-rn1');
+  if (navBadge) navBadge.textContent = v.status || '—';
+
+  // Buckets table
+  const bTb = document.getElementById('rn1-buckets');
+  if (bTb) {
+    bTb.innerHTML = '';
+    const buckets = s.buckets || [];
+    if (!buckets.length) {
+      bTb.innerHTML = '<tr><td colspan="6" style="color:var(--muted);padding:8px">No data yet. Daily cron at 06:30 UTC.</td></tr>';
+    } else {
+      buckets.forEach(b => {
+        const netRoi = (b.raw_roi || 0) - 0.02;
+        bTb.insertAdjacentHTML('beforeend',
+          '<tr>' +
+          '<td><code>' + b.key + '</code></td>' +
+          '<td class="num">' + (b.n_closed_buy || 0) + '</td>' +
+          '<td class="num">' + ((b.win_rate || 0) * 100).toFixed(1) + '%</td>' +
+          '<td class="num">' + _rn1RoiPct(b.raw_roi || 0) + '</td>' +
+          '<td class="num ' + _rn1RoiClass(netRoi) + '">' + _rn1RoiPct(netRoi) + '</td>' +
+          '<td class="num">$' + (b.usd_cost_total || 0).toLocaleString() + '</td>' +
+          '</tr>');
+      });
+    }
+  }
+
+  // Sports
+  const spTb = document.getElementById('rn1-sports');
+  if (spTb) {
+    spTb.innerHTML = '';
+    const sports = (s.sports || []).filter(r => r.n_closed_buy >= 20);
+    if (!sports.length) {
+      spTb.innerHTML = '<tr><td colspan="4" style="color:var(--muted);padding:8px">—</td></tr>';
+    } else {
+      sports.forEach(r => {
+        const netRoi = (r.raw_roi || 0) - 0.02;
+        spTb.insertAdjacentHTML('beforeend',
+          '<tr>' +
+          '<td>' + r.key + '</td>' +
+          '<td class="num">' + r.n_closed_buy + '</td>' +
+          '<td class="num">' + ((r.win_rate || 0) * 100).toFixed(1) + '%</td>' +
+          '<td class="num ' + _rn1RoiClass(netRoi) + '">' + _rn1RoiPct(netRoi) + '</td>' +
+          '</tr>');
+      });
+    }
+  }
+
+  // Deep dimensions
+  const renderDimTable = (tbId, rows, withCostBasis) => {
+    const tb = document.getElementById(tbId);
+    if (!tb) return;
+    tb.innerHTML = '';
+    if (!rows || !rows.length) {
+      tb.innerHTML = '<tr><td colspan="5" style="color:var(--muted);padding:8px">No data yet.</td></tr>';
+      return;
+    }
+    rows.forEach(r => {
+      tb.insertAdjacentHTML('beforeend',
+        '<tr>' +
+        '<td><code>' + r.key + '</code></td>' +
+        '<td class="num">' + r.n_closed + '</td>' +
+        '<td class="num">' + ((r.win_rate || 0) * 100).toFixed(1) + '%</td>' +
+        '<td class="num ' + _rn1RoiClass(r.net_roi || 0) + '">' + _rn1RoiPct(r.net_roi || 0) + '</td>' +
+        (withCostBasis ? '<td class="num">$' + (r.usd_cost_total || 0).toLocaleString() + '</td>' : '') +
+        '</tr>');
+    });
+  };
+
+  const dims = d.dimensions || {};
+  renderDimTable('rn1-mtype', dims.market_type, true);
+  renderDimTable('rn1-league', dims.league, false);
+  renderDimTable('rn1-hour', dims.hour_of_day, false);
+
+  // Streak
+  const sk = d.streaks || {};
+  const skEl = document.getElementById('rn1-streaks');
+  if (skEl && sk.baseline_win_rate != null) {
+    skEl.innerHTML =
+      '<div>Baseline win rate : <b>' + ((sk.baseline_win_rate || 0) * 100).toFixed(1) + '%</b></div>' +
+      '<div>Après un <b>WIN</b> : <span class="' + _rn1RoiClass(sk.post_win_win_rate - sk.baseline_win_rate) + '">' +
+        ((sk.post_win_win_rate || 0) * 100).toFixed(1) + '%</span> sur ' + (sk.post_win_n || 0) + ' trades</div>' +
+      '<div>Après une <b>LOSS</b> : <span class="' + _rn1RoiClass(sk.post_loss_win_rate - sk.baseline_win_rate) + '">' +
+        ((sk.post_loss_win_rate || 0) * 100).toFixed(1) + '%</span> sur ' + (sk.post_loss_n || 0) + ' trades</div>';
+  }
+
+  // Packs
+  const mlp = d.multi_leg_packs || {};
+  const packsEl = document.getElementById('rn1-packs');
+  if (packsEl && mlp.n_packs_detected != null) {
+    const o = mlp.outcomes || {};
+    packsEl.innerHTML =
+      '<div><b>' + mlp.n_packs_detected + '</b> packs détectés</div>' +
+      '<div>All-win : ' + (o.all_win || 0) + ' &nbsp; · &nbsp; All-lose : ' + (o.all_lose || 0) +
+        ' &nbsp; · &nbsp; Mixed : ' + (o.mixed || 0) + ' &nbsp; · &nbsp; Open : ' + (o.open_or_partial || 0) + '</div>' +
+      '<div>Pack ROI brut : <span class="' + _rn1RoiClass(mlp.pack_roi || 0) + '">' +
+        _rn1RoiPct(mlp.pack_roi || 0) + '</span> sur $' + (mlp.total_cost || 0).toLocaleString() + ' déployés</div>';
+  }
+}
+loadRn1();
+setInterval(loadRn1, 300000);  // refresh every 5 min (data updates daily)
 
 // ════════ OVERVIEW v3 — financial mission control ════════
 const BOT_EMOJI = {bot:'⚡', shadow:'🌒', 'bot-cp':'🎯', freqtrade:'🦊'};

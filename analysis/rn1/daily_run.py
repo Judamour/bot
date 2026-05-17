@@ -18,7 +18,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import fetch_trades, enrich_markets, analyze
+from . import fetch_trades, enrich_markets, analyze, analyze_deep
 
 DATA_DIR = Path(__file__).resolve().parent / "data"
 
@@ -107,8 +107,11 @@ def main() -> None:
     enrich_markets.main()
 
     # Re-analyze every day so latest report is fresh
-    print("\n[step 3/3] analyze + report")
+    print("\n[step 3/4] analyze + report")
     analyze.main()
+
+    print("\n[step 4/4] deep analysis (8 dimensions)")
+    analyze_deep.main()
 
     # Weekly digest on Monday
     if datetime.now(timezone.utc).weekday() == 0:

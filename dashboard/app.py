@@ -953,6 +953,36 @@ def api_copytrade_live():
     })
 
 
+@app.route("/api/rn1")
+def api_rn1():
+    """Read-only snapshot of the RN1 reverse-engineering analysis."""
+    import json
+    import os
+    from pathlib import Path
+
+    base = Path(os.getenv("BOT_BASE_DIR", "."))
+    summary_path = base / "analysis/rn1/data/summary.json"
+    deep_path = base / "analysis/rn1/data/deep_analysis.json"
+
+    summary: dict = {}
+    deep: dict = {}
+    if summary_path.exists():
+        try:
+            summary = json.loads(summary_path.read_text())
+        except Exception:
+            pass
+    if deep_path.exists():
+        try:
+            deep = json.loads(deep_path.read_text())
+        except Exception:
+            pass
+
+    return jsonify({
+        "summary": summary,
+        "deep": deep,
+    })
+
+
 @app.route("/api/overview")
 def api_overview():
     """At-a-glance status of all bots (Bot Z, Shadow, CopyTrade, Freqtrade)."""
