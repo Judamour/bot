@@ -1,0 +1,19 @@
+[Unit]
+Description=RN1-Autobot — autonomous Polymarket scanner using RN1-style criteria (paper)
+After=network.target
+# No dependency on bot-cp (this bot scans Polymarket directly via Gamma API).
+# Crash here cannot affect any live trading.
+
+[Service]
+Type=simple
+User=botuser
+WorkingDirectory=/home/botuser/bot-trading
+EnvironmentFile=-/home/botuser/bot-trading/.env
+ExecStart=/home/botuser/bot-trading/venv/bin/python -m analysis.rn1.autobot
+Restart=on-failure
+RestartSec=30
+StandardOutput=append:/home/botuser/bot-trading/logs/rn1/autobot.log
+StandardError=append:/home/botuser/bot-trading/logs/rn1/autobot.log
+
+[Install]
+WantedBy=multi-user.target
