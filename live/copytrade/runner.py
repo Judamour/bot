@@ -420,10 +420,15 @@ def run() -> None:
 
     log.info("bot-cp starting: capital=$%.2f, %d wallets, poll=%ds",
              PAPER_CAPITAL_USD, len(TARGETS), POLL_INTERVAL_S)
+    # Telegram boot message reflects what matters to user : the LIVE bot
+    # config, not the paper scanner's. CP scanner is now a backend feeder
+    # only (RN1 + bossoskil1 still polled for analysis, only surfandturf
+    # signals trigger live trades on $40 docker bot).
     try:
         notifier.notify(
-            f"🟢 bot-cp démarré — capital ${PAPER_CAPITAL_USD:.0f}, "
-            f"{len(TARGETS)} wallets ({', '.join(t['pseudonym'] for t in TARGETS)})"
+            "🟢 CopyTrade LIVE — surfandturf mirror\n"
+            "wallet <code>0x403C…d1c</code> · $40 USDC · Polymarket CLOB via VPN Toronto\n"
+            "<i>(scanner backend RN1+bossoskil1+surfandturf, alerts surfandturf only)</i>"
         )
     except Exception:
         log.exception("telegram start notify failed (non-fatal)")
@@ -490,7 +495,7 @@ def run() -> None:
             slept += 1.0
 
     try:
-        notifier.notify("🛑 bot-cp arrêté")
+        notifier.notify("🛑 CopyTrade scanner arrêté")
     except Exception:
         log.exception("telegram stop notify failed (non-fatal)")
 
