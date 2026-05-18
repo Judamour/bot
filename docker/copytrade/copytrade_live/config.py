@@ -29,19 +29,30 @@ SIGNER = os.getenv("POLYMARKET_SIGNER_ADDRESS")
 TARGET_WALLET = os.getenv("COPYTRADE_TARGET_WALLET", "surfandturf")
 FIXED_SIZE_USD = float(os.getenv("COPYTRADE_FIXED_SIZE_USD", "1.5"))
 MAX_POSITIONS = int(os.getenv("COPYTRADE_MAX_POSITIONS", "20"))
-# Kill switch désactivé (set 0): user prêt à perdre les $40 pour validation hypothèse copytrade
-KILL_EQUITY_USD = float(os.getenv("COPYTRADE_KILL_EQUITY_USD", "0"))
+KILL_EQUITY_USD = float(os.getenv("COPYTRADE_KILL_EQUITY_USD", "20.0"))
 MIN_TARGET_SIZE_USD = float(os.getenv("COPYTRADE_MIN_TARGET_SIZE_USD", "5.0"))
 # Bias underdog confirmé sur surfandturf (Pistons 0.39, Svitolina 0.42, Spurs 0.33, Chennai 0.49)
 # Min: skip "lottery tickets" extrêmes (entries <0.06) qui finissent à $0 ~90% du temps
 MIN_ENTRY_PRICE = float(os.getenv("COPYTRADE_MIN_ENTRY_PRICE", "0.06"))
-# Max 0.85: capture underdog + mid-range. Skip les "lock bets" 0.85+ qui ont R:R 20:1 à $1.5 sizing.
-# Distribution analysée: 57% sous 0.55, 25% en 0.55-0.85, 18% en 0.85-1.0.
-MAX_ENTRY_PRICE = float(os.getenv("COPYTRADE_MAX_ENTRY_PRICE", "0.85"))
-# Drift 1.15: tolérer 15% de slippage après son fill (capture les bursts low-price type Real Madrid @ 0.224)
-MAX_PRICE_DRIFT = float(os.getenv("COPYTRADE_MAX_PRICE_DRIFT", "1.15"))
+MAX_ENTRY_PRICE = float(os.getenv("COPYTRADE_MAX_ENTRY_PRICE", "0.55"))
+# Skip si current ask > his_entry × drift (évite de chasser quand le book a bougé)
+MAX_PRICE_DRIFT = float(os.getenv("COPYTRADE_MAX_PRICE_DRIFT", "1.05"))
 # Cap d'exposition par marché (anti-concentration, surfandturf empile $250K mais nous max $5)
 MAX_USD_PER_MARKET = float(os.getenv("COPYTRADE_MAX_USD_PER_MARKET", "5.0"))
+# --- Sizing mode (fixed | tiered) ---
+SIZING_MODE = os.getenv("COPYTRADE_SIZING_MODE", "fixed").strip().lower()
+# Tiered grid — defaults tuned for surfandturf on $40 wallet
+TIER_PENNY_MAX = float(os.getenv("COPYTRADE_TIER_PENNY_MAX", "0.20"))
+TIER_PENNY_MIN_CONVICTION = float(os.getenv("COPYTRADE_TIER_PENNY_MIN_CONVICTION", "0.03"))
+TIER_PENNY_SIZE = float(os.getenv("COPYTRADE_TIER_PENNY_SIZE", "1.0"))
+TIER_MID_MAX = float(os.getenv("COPYTRADE_TIER_MID_MAX", "0.65"))
+TIER_MID_MIN_CONVICTION = float(os.getenv("COPYTRADE_TIER_MID_MIN_CONVICTION", "0.05"))
+TIER_MID_MAX_CONVICTION = float(os.getenv("COPYTRADE_TIER_MID_MAX_CONVICTION", "0.50"))
+TIER_MID_MIN_SIZE = float(os.getenv("COPYTRADE_TIER_MID_MIN_SIZE", "1.5"))
+TIER_MID_MAX_SIZE = float(os.getenv("COPYTRADE_TIER_MID_MAX_SIZE", "5.0"))
+TIER_FAV_MIN_CONVICTION = float(os.getenv("COPYTRADE_TIER_FAV_MIN_CONVICTION", "0.15"))
+TIER_FAV_SIZE = float(os.getenv("COPYTRADE_TIER_FAV_SIZE", "4.5"))
+TIER_NORMAL_SIZE = float(os.getenv("COPYTRADE_TIER_NORMAL_SIZE", "4.5"))
 DRY_RUN = os.getenv("COPYTRADE_DRY_RUN", "true").lower() == "true"
 
 GAMMA_API = "https://gamma-api.polymarket.com"

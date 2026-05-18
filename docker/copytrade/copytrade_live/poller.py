@@ -10,7 +10,7 @@ import signal
 import sys
 import time
 
-from . import config, state, executor, notifier, status_writer
+from . import config, sizing, state, executor, notifier, status_writer
 
 config.LOGS_DIR.mkdir(parents=True, exist_ok=True)
 logging.basicConfig(
@@ -85,6 +85,14 @@ def handle_buy(decision: dict, positions: dict) -> None:
         write_jsonl("trades.jsonl", {**decision, "local_action": "skip_lottery_ticket"})
         return
 
+    trade_pct = float(decision.get("trade_pct", 0) or 0)
+    tier = sizing.describe_tier(p, trade_pct)
+    size_usd = sizing.compute_size_usd(p, trade_pct)
+    if size_usd is None:
+        log.info(f"SKIP BUY: tier={tier} skipped (px={p:.3f}, trade_pct={trade_pct:.3f})")
+        write_jsonl("trades.jsonl", {**decision, "local_action": "skip_tier_conviction", "tier": tier, "trade_pct": trade_pct})
+        return
+
     resolved = executor.resolve_outcome_to_token_id(decision["market"], decision["outcome"])
     if not resolved:
         log.warning(f"SKIP BUY: outcome non résolu '{decision['market'][:40]}' / '{decision['outcome']}'")
@@ -96,9 +104,9 @@ def handle_buy(decision: dict, positions: dict) -> None:
         p["cost_usd"] for p in positions.values()
         if p.get("condition_id") == cond_id
     )
-    if existing_cost_same_market + config.FIXED_SIZE_USD > config.MAX_USD_PER_MARKET:
-        log.info(f"SKIP BUY: market saturé (${existing_cost_same_market:.2f} + ${config.FIXED_SIZE_USD} > ${config.MAX_USD_PER_MARKET})")
-        write_jsonl("trades.jsonl", {**decision, "local_action": "skip_market_saturated"})
+    if existing_cost_same_market + size_usd > config.MAX_USD_PER_MARKET:
+        log.info(f"SKIP BUY: market saturé (${existing_cost_same_market:.2f} + ${size_usd:.2f} > ${config.MAX_USD_PER_MARKET}) tier={tier}")
+        write_jsonl("trades.jsonl", {**decision, "local_action": "skip_market_saturated", "tier": tier})
         return
 
     his_entry = decision.get("price", 0)
@@ -109,9 +117,10 @@ def handle_buy(decision: dict, positions: dict) -> None:
                                       "his_entry": his_entry, "current_ask": current_ask})
         return
 
+    log.info(f"BUY tier={tier} size_usd=${size_usd:.2f} (px={p:.3f}, trade_pct={trade_pct:.3f})")
     result = executor.place_buy(
         token_id=resolved["token_id"],
-        size_usd=config.FIXED_SIZE_USD,
+        size_usd=size_usd,
         max_price=config.MAX_ENTRY_PRICE,
     )
     if result.get("status") in ("dry_run", "submitted"):
@@ -191,9 +200,17 @@ def main() -> None:
     signal.signal(signal.SIGTERM, _sigterm)
     signal.signal(signal.SIGINT, _sigterm)
     config.validate()
-    log.info(f"Boot — target={config.TARGET_WALLET}, size=${config.FIXED_SIZE_USD}, "
+    log.info(f"Boot — target={config.TARGET_WALLET}, sizing_mode={config.SIZING_MODE}, "
              f"max_pos={config.MAX_POSITIONS}, kill_eq=${config.KILL_EQUITY_USD}, "
              f"dry_run={config.DRY_RUN}")
+    if config.SIZING_MODE == "tiered":
+        log.info(f"Tier grid — penny[<{config.TIER_PENNY_MAX}]: ${config.TIER_PENNY_SIZE} if pct>{config.TIER_PENNY_MIN_CONVICTION} | "
+                 f"mid[<{config.TIER_MID_MAX}]: ${config.TIER_MID_MIN_SIZE}-${config.TIER_MID_MAX_SIZE} if pct>{config.TIER_MID_MIN_CONVICTION} | "
+                 f"fav: ${config.TIER_FAV_SIZE} if pct>{config.TIER_FAV_MIN_CONVICTION}")
+    elif config.SIZING_MODE == "absolute_band":
+        log.info(f"Absolute band — penny[<{config.TIER_PENNY_MAX}]: ${config.TIER_PENNY_SIZE} | normal[>={config.TIER_PENNY_MAX}]: ${config.TIER_NORMAL_SIZE} (no conviction filter, MIN_TARGET=${config.MIN_TARGET_SIZE_USD} filters dust)")
+    else:
+        log.info(f"Fixed size — ${config.FIXED_SIZE_USD}")
     log.info(f"Filters — entry∈[{config.MIN_ENTRY_PRICE}, {config.MAX_ENTRY_PRICE}], "
              f"max_drift={config.MAX_PRICE_DRIFT}x, "
              f"max_per_market=${config.MAX_USD_PER_MARKET}, "
