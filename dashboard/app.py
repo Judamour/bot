@@ -1009,6 +1009,17 @@ def api_rn1():
     autobot_trades = _tail_jsonl(autobot_trades_path, 30)
     autobot_latest = autobot_equity[-1] if autobot_equity else {}
 
+    # Paper Absband — mirrors live $40 surfandturf absolute_band logic on RN1
+    absband_state_path = base / "analysis/rn1/data_absband/state.json"
+    absband_positions_path = base / "analysis/rn1/data_absband/positions.json"
+    absband_equity_path = base / "analysis/rn1/data_absband/equity.jsonl"
+    absband_trades_path = base / "analysis/rn1/data_absband/trades.jsonl"
+    absband_state = _read_json(absband_state_path)
+    absband_positions = _read_json(absband_positions_path)
+    absband_equity = _tail_jsonl(absband_equity_path, 60)
+    absband_trades = _tail_jsonl(absband_trades_path, 30)
+    absband_latest = absband_equity[-1] if absband_equity else {}
+
     return jsonify({
         "summary": summary,
         "deep": deep,
@@ -1025,6 +1036,13 @@ def api_rn1():
             "equity_curve": autobot_equity,
             "open_positions": list(autobot_positions.values()) if isinstance(autobot_positions, dict) else [],
             "recent_trades": autobot_trades,
+        },
+        "paper_absband": {
+            "state": absband_state,
+            "latest_equity": absband_latest,
+            "equity_curve": absband_equity,
+            "open_positions": list(absband_positions.values()) if isinstance(absband_positions, dict) else [],
+            "recent_trades": absband_trades,
         },
     })
 
