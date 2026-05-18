@@ -583,6 +583,24 @@ def place_stop_loss(symbol: str, qty: float, stop_price: float,
     factor = 10 ** decimals
     qty = math.floor(float(qty) * factor) / factor
 
+    # Alpaca refuse stop orders avec qty fractionnaire sur stocks (422 "qty must be
+    # an integer"). Floor à l'entier inférieur — la fraction restante est protégée
+    # par le SL bot interne (vérification toutes les ~15min par stop-monitor).
+    if not is_crypto and qty != int(qty):
+        int_qty = math.floor(qty)
+        if int_qty < 1:
+            logger.warning(
+                f"[ALPACA] place_stop_loss {symbol} qty={qty:.4f} < 1 share entier — "
+                f"broker stop skip, SL bot interne only"
+            )
+            return {}
+        fractional = qty - int_qty
+        logger.info(
+            f"[ALPACA] place_stop_loss {symbol} qty {qty:.4f}→{int_qty} integer "
+            f"(Alpaca stocks; fraction {fractional:.4f} couverte par SL bot interne)"
+        )
+        qty = float(int_qty)
+
     # Stocks fractionnaires Alpaca exigent time_in_force=day (gtc refusé)
     # Crypto Alpaca : gtc OK
     tif = "gtc" if is_crypto else "day"
@@ -723,6 +741,31 @@ def replace_stop_loss(stop_order_id: str, new_stop_price: float,
     API du fallback cancel+recreate dans ce cas connu.
     """
     import math
+
+    # Alpaca refuse stop orders qty fractionnaire sur stocks. Si qty fractionnaire,
+    # check symbol (1 GET) puis floor à l'integer.
+    if qty is not None and qty != int(qty):
+        try:
+            order_info = _request("GET", f"/v2/orders/{stop_order_id}")
+            sym = order_info.get("symbol", "") or ""
+            asset_class = order_info.get("asset_class") or ""
+            is_crypto = "/" in sym or asset_class == "crypto"
+        except Exception:
+            is_crypto = False  # safe default: traite comme stock
+        if not is_crypto:
+            int_qty = math.floor(qty)
+            if int_qty >= 1:
+                logger.info(
+                    f"[ALPACA] replace_stop_loss {stop_order_id[:8]}.. qty floor "
+                    f"{qty:.4f}→{int_qty} (Alpaca stocks integer-only)"
+                )
+                qty = float(int_qty)
+            else:
+                logger.warning(
+                    f"[ALPACA] replace_stop_loss {stop_order_id[:8]}.. qty={qty:.4f} < 1 "
+                    f"— abort, SL bot interne only"
+                )
+                return None
 
     def _try_patch(q):
         body = {"stop_price": str(round(new_stop_price, 2))}
