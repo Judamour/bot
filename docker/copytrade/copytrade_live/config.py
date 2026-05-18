@@ -17,7 +17,11 @@ POLL_INTERVAL_SEC = int(os.getenv("COPYTRADE_POLL_INTERVAL_SEC", "60"))
 
 POLYMARKET_HOST = "https://clob.polymarket.com"
 POLYMARKET_CHAIN_ID = 137
-POLYMARKET_SIG_TYPE = 1
+# v2 default: 3 (POLY_1271, EIP-1271 smart contract signature) — used by
+# Polymarket "deposit wallet flow" since CLOB v2 migration (end of April 2026).
+# Legacy values: 0=EOA, 1=POLY_PROXY, 2=POLY_GNOSIS_SAFE. Override via env if
+# the wallet was provisioned through a non-default Polymarket flow.
+POLYMARKET_SIG_TYPE = int(os.getenv("POLYMARKET_SIG_TYPE", "3"))
 
 PRIVATE_KEY = os.getenv("POLYMARKET_PRIVATE_KEY")
 API_KEY = os.getenv("POLYMARKET_API_KEY")
