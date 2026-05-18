@@ -128,6 +128,33 @@ def _append_market_to_cache(market: dict) -> None:
         pass
 
 
+def _refresh_open_markets(positions: dict, markets: dict) -> int:
+    """Re-fetch markets that have open positions and aren't yet known as closed.
+
+    Without this, the in-memory `markets` cache only updates at boot (from
+    markets.jsonl) or when a brand-new market is fetched on-demand. Resolutions
+    of already-open positions go undetected until the next reboot — this loop
+    closes that gap. Returns the number of markets that flipped to closed during
+    this refresh.
+    """
+    n_newly_closed = 0
+    for pos in list(positions.values()):
+        cid = pos.get("condition_id")
+        if not cid:
+            continue
+        cached = markets.get(cid, {})
+        if cached.get("closed"):
+            continue  # already resolved, no need to re-fetch
+        fresh = _fetch_market_ondemand(cid)
+        if not fresh:
+            continue
+        markets[cid] = fresh
+        if fresh.get("closed"):
+            n_newly_closed += 1
+            _append_market_to_cache(fresh)
+    return n_newly_closed
+
+
 def _compute_size_usd(price: float) -> float | None:
     """Return USD to allocate, or None to skip. RN1-tuned absolute_band."""
     if price < TIER_PENNY_MIN:
@@ -321,6 +348,12 @@ def _equity_snapshot(state: dict, positions: dict, markets: dict) -> dict:
 def _cycle(state: dict, positions: dict, markets: dict) -> tuple[int, int, int]:
     last_seen = int(state.get("last_seen_ts", 0))
     decisions = _tail_decisions(last_seen)
+
+    # Refresh markets with open positions BEFORE resolving — catches closures
+    # that happened between cycles (matches finishing mid-day).
+    n_newly_closed = _refresh_open_markets(positions, markets)
+    if n_newly_closed:
+        log.info(f"refresh: {n_newly_closed} open market(s) flipped closed, resolving")
 
     resolved_before = _resolve_positions(state, positions, markets)
     for r in resolved_before:
