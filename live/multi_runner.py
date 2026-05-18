@@ -446,12 +446,6 @@ def _reconcile_alpaca_positions(states_registry: dict) -> int:
     """
     from live import alpaca_executor
     broker_positions = alpaca_executor.list_positions()
-    if not broker_positions:
-        # Soit pas de positions broker, soit erreur réseau. Si erreur, list_positions
-        # log déjà un warning. On ne bloque pas le boot.
-        # Vérifier quand même si un state a des positions Alpaca-routées qui n'existent
-        # plus → ce sont des candidates au close-reconcile.
-        pass
 
     # Symbols Alpaca-routés présents dans les states
     state_symbols_by_bot = {}
@@ -461,6 +455,24 @@ def _reconcile_alpaca_positions(states_registry: dict) -> int:
             s: p for s, p in positions.items()
             if alpaca_executor.is_alpaca_routed(s)
         }
+    n_state_alpaca_positions = sum(len(p) for p in state_symbols_by_bot.values())
+
+    # FAIL-SAFE : si list_positions a renvoyé None (erreur API/réseau), NE PAS purger
+    # le state — c'est exactement ce qui a causé la cascade fake-close du 2026-05-16.
+    if broker_positions is None:
+        log(f"[RECONCILE] list_positions échec — purge SKIPPED ({n_state_alpaca_positions} positions state préservées)", "WARN")
+        return 0
+    # FAIL-SAFE 2 : si broker retourne {} alors que state contient ≥3 positions Alpaca,
+    # c'est suspect (mass-liquidation broker improbable). Préférer un alerte humain.
+    if broker_positions == {} and n_state_alpaca_positions >= 3:
+        from live.notifier import notify
+        log(f"[RECONCILE] broker=0 positions mais state={n_state_alpaca_positions} — refus de purger, alerte envoyée", "WARN")
+        notify(
+            f"🚨 <b>RECONCILE — refus de purger</b>\n"
+            f"Broker renvoie 0 positions mais state a {n_state_alpaca_positions} positions Alpaca.\n"
+            f"Suspect d'erreur API. Vérifier manuellement compte Alpaca."
+        )
+        return 0
 
     fixes = 0
     from datetime import datetime as _dt

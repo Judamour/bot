@@ -531,21 +531,18 @@ def get_spread_pct(symbol: str) -> float | None:
         return None
 
 
-def list_positions() -> dict:
+def list_positions() -> dict | None:
     """
-    GET /v2/positions → dict {symbol: position_dict} indexé par symbol normalisé.
+    GET /v2/positions → dict {symbol: position_dict} indexé par symbol normalisé,
+    OU None en cas d'erreur réseau/API (caller doit distinguer de {} = vraiment 0 position).
 
     Alpaca retourne les cryptos sans slash (BTCUSD), on normalise vers le format
     avec slash (BTC/USD) pour matcher config.CRYPTO.
-
-    Position dict contient : qty, qty_available, market_value, avg_entry_price,
-    unrealized_pl, current_price, etc.
-    Retourne {} si erreur.
     """
     try:
         positions = _request("GET", "/v2/positions")
         if not isinstance(positions, list):
-            return {}
+            return None
         result = {}
         for p in positions:
             sym = p.get("symbol", "")
@@ -559,7 +556,7 @@ def list_positions() -> dict:
         return result
     except Exception as e:
         logger.warning(f"[ALPACA] list_positions: {e}")
-        return {}
+        return None
 
 
 def place_stop_loss(symbol: str, qty: float, stop_price: float,
