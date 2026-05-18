@@ -47,6 +47,10 @@ MAX_USD_PER_MARKET = float(os.getenv("COPYTRADE_MAX_USD_PER_MARKET", "5.0"))
 SIZING_MODE = os.getenv("COPYTRADE_SIZING_MODE", "fixed").strip().lower()
 # Tiered grid — defaults tuned for surfandturf on $40 wallet
 TIER_PENNY_MAX = float(os.getenv("COPYTRADE_TIER_PENNY_MAX", "0.20"))
+# SKIP zone for absband mode: prices in [TIER_PENNY_MAX, TIER_SKIP_HIGH) are
+# skipped. Default = TIER_PENNY_MAX (no skip zone, surfandturf-tuned). Set to
+# 0.45 for RN1 to skip his losing mid_low bucket.
+TIER_SKIP_HIGH = float(os.getenv("COPYTRADE_TIER_SKIP_HIGH", str(os.getenv("COPYTRADE_TIER_PENNY_MAX", "0.20"))))
 TIER_PENNY_MIN_CONVICTION = float(os.getenv("COPYTRADE_TIER_PENNY_MIN_CONVICTION", "0.03"))
 TIER_PENNY_SIZE = float(os.getenv("COPYTRADE_TIER_PENNY_SIZE", "1.0"))
 TIER_MID_MAX = float(os.getenv("COPYTRADE_TIER_MID_MAX", "0.65"))

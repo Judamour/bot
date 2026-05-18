@@ -193,7 +193,7 @@ def cycle(meta: dict, positions: dict) -> tuple[int, int]:
     if not decisions:
         return 0, 0
     relevant = filter_relevant(decisions)
-    log.info(f"Cycle: {len(decisions)} new, {len(relevant)} surfandturf executed")
+    log.info(f"Cycle: {len(decisions)} new, {len(relevant)} {config.TARGET_WALLET} executed")
     for d in sorted(relevant, key=lambda x: x["ts"]):
         try:
             if d.get("side") == "BUY":
@@ -219,7 +219,10 @@ def main() -> None:
                  f"mid[<{config.TIER_MID_MAX}]: ${config.TIER_MID_MIN_SIZE}-${config.TIER_MID_MAX_SIZE} if pct>{config.TIER_MID_MIN_CONVICTION} | "
                  f"fav: ${config.TIER_FAV_SIZE} if pct>{config.TIER_FAV_MIN_CONVICTION}")
     elif config.SIZING_MODE == "absolute_band":
-        log.info(f"Absolute band — penny[<{config.TIER_PENNY_MAX}]: ${config.TIER_PENNY_SIZE} | normal[>={config.TIER_PENNY_MAX}]: ${config.TIER_NORMAL_SIZE} (no conviction filter, MIN_TARGET=${config.MIN_TARGET_SIZE_USD} filters dust)")
+        skip_info = ""
+        if config.TIER_SKIP_HIGH > config.TIER_PENNY_MAX:
+            skip_info = f" | SKIP[{config.TIER_PENNY_MAX}-{config.TIER_SKIP_HIGH}]"
+        log.info(f"Absolute band — penny[<{config.TIER_PENNY_MAX}]: ${config.TIER_PENNY_SIZE}{skip_info} | normal[>={config.TIER_SKIP_HIGH}]: ${config.TIER_NORMAL_SIZE} (MIN_TARGET=${config.MIN_TARGET_SIZE_USD})")
     else:
         log.info(f"Fixed size — ${config.FIXED_SIZE_USD}")
     log.info(f"Filters — entry∈[{config.MIN_ENTRY_PRICE}, {config.MAX_ENTRY_PRICE}], "

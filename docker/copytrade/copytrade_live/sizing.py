@@ -26,12 +26,17 @@ def compute_size_usd(price: float, trade_pct: float) -> float | None:
         return config.FIXED_SIZE_USD
 
     # ---- ABSOLUTE_BAND MODE ----
-    # Simple: penny band gets fixed penny size (leverage via min-5-shares),
-    # everything else above MIN_ENTRY gets a flat normal size. Conviction ignored;
-    # robustness against DCA/partial-fill noise comes from MAX_USD_PER_MARKET cap.
+    # Penny band: fixed penny size, leverage via min-5-shares constraint.
+    # SKIP zone (optional): for traders like RN1, the [TIER_PENNY_MAX, TIER_SKIP_HIGH]
+    #   band is the loser bucket — skip it. Default TIER_SKIP_HIGH = TIER_PENNY_MAX
+    #   so no skip zone (matches surfandturf-tuned behavior).
+    # Normal band: flat normal size. Conviction ignored; robustness against DCA /
+    #   partial-fill noise comes from MAX_USD_PER_MARKET cap upstream.
     if config.SIZING_MODE == "absolute_band":
         if price < config.TIER_PENNY_MAX:
             return config.TIER_PENNY_SIZE
+        if price < config.TIER_SKIP_HIGH:
+            return None  # losing zone (RN1 mid_low) — skip
         return config.TIER_NORMAL_SIZE
 
     # ---- TIERED MODE ----
@@ -64,7 +69,11 @@ def describe_tier(price: float, trade_pct: float) -> str:
     if config.SIZING_MODE == "fixed":
         return "fixed"
     if config.SIZING_MODE == "absolute_band":
-        return "penny" if price < config.TIER_PENNY_MAX else "normal"
+        if price < config.TIER_PENNY_MAX:
+            return "penny"
+        if price < config.TIER_SKIP_HIGH:
+            return "skip_zone"
+        return "normal"
     if price < config.TIER_PENNY_MAX:
         return "penny"
     if price < config.TIER_MID_MAX:
