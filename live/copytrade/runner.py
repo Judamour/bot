@@ -189,6 +189,105 @@ def process_wallet(
     return last_seen_ts, decisions
 
 
+# Minimum size diff (in USD) we'll synthesize from /positions polling.
+# Below this we ignore — too small to bother and increases false positives.
+POSITIONS_DIFF_MIN_USD = 100.0
+
+
+def detect_position_diffs(
+    target: dict,
+    portfolio: PaperPortfolio,
+    prev_snapshot: dict,
+    processed_keys: set[tuple[str, int]],
+) -> tuple[list[dict], dict]:
+    """Compare current /positions vs prev_snapshot to catch trades that
+    data-api /trades missed (lag, indexer gaps). Returns (decisions, new_snapshot).
+
+    `processed_keys` = set of (conditionId, outcomeIndex) already handled by
+    /trades this cycle — we skip those to avoid double-mirror.
+
+    Synthesized decisions get `target_hash="sync_positions:..."` so the live
+    container can detect they came from this fallback.
+    """
+    import time as _time
+    wallet = target["wallet"]
+    pseudo = target["pseudonym"]
+    decisions: list[dict] = []
+    new_snapshot: dict = {}
+
+    try:
+        positions_list = data_api.positions(wallet)
+    except Exception as e:
+        log.warning("positions fetch failed for %s: %s", pseudo, e)
+        return decisions, prev_snapshot  # keep old snapshot on error
+
+    capital_per_wallet = portfolio.equity_at_cost()
+    target_aum = aum_estimator.aum(wallet)
+    now_ts = int(_time.time())
+
+    for p in positions_list:
+        cid = p.get("conditionId") or ""
+        oi = int(p.get("outcomeIndex", -1))
+        if not cid or oi < 0:
+            continue
+        key = f"{cid}:{oi}"
+        size = float(p.get("size", 0.0))
+        avg_price = float(p.get("avgPrice", 0.0))
+        cur_price = float(p.get("curPrice", avg_price))
+        new_snapshot[key] = size
+
+        if (cid, oi) in processed_keys:
+            continue  # /trades already covered this market this cycle
+
+        prev_size = float(prev_snapshot.get(key, 0.0))
+        diff_shares = size - prev_size
+        if diff_shares <= 0:
+            continue  # only catch BUYs / size increases; SELLs handled by /trades
+
+        # Estimate USD using avg_price (his cost basis) for filter, but use
+        # current price as the entry for mirror (we'd pay current ask in live).
+        diff_usd_at_his_cost = diff_shares * avg_price
+        if diff_usd_at_his_cost < POSITIONS_DIFF_MIN_USD:
+            continue  # too small, likely dust / partial fill noise
+
+        paper_size = compute_paper_size(diff_usd_at_his_cost, target_aum, capital_per_wallet)
+
+        decision = {
+            "ts": now_ts,
+            "wallet": pseudo,
+            "target_hash": f"sync_positions:{cid[:10]}:{oi}:{int(diff_shares)}:{now_ts}",
+            "side": "BUY",
+            "market": p.get("title", ""),
+            "outcome": p.get("outcome", ""),
+            "conditionId": cid,
+            "asset": p.get("asset", ""),
+            "outcomeIndex": oi,
+            "target_size_usd": diff_usd_at_his_cost,
+            "target_aum_estimate": target_aum,
+            "trade_pct": (diff_usd_at_his_cost / target_aum) if target_aum else 0,
+            "paper_size_usd": paper_size,
+            # `price` is the "his entry" — drift filter in live container compares
+            # current ask vs this. Use avg_price (his cost basis); cur_price is
+            # only useful as informational since it changes constantly.
+            "price": avg_price,
+            "action": "executed",
+            "rationale": "positions_diff_fallback",
+            "source": "positions_polling",
+            "his_avg_price": avg_price,
+            "his_cur_price": cur_price,
+            "his_size_total": size,
+            "prev_size": prev_size,
+            "diff_shares": diff_shares,
+        }
+        decisions.append(decision)
+
+    if decisions:
+        log.info("%s: detected %d positions diff(s) — synthesizing fallback decisions",
+                 pseudo, len(decisions))
+
+    return decisions, new_snapshot
+
+
 import os
 import signal
 import sys
@@ -427,8 +526,9 @@ def run() -> None:
     # signals trigger live trades on $40 docker bot).
     try:
         notifier.notify(
-            "🟢 CopyTrade LIVE — surfandturf mirror\n"
-            "wallet <code>0x403C…d1c</code> · $40 USDC · Polymarket CLOB via VPN Toronto\n"
+            "🟢 CopyTrade LIVE — surfandturf mirror (v2 CLOB)\n"
+            "signer <code>0x7d03…2977</code> · funder <code>0x99D4…0e06</code> · $32 USDC\n"
+            "Polymarket CLOB v2 via VPN Toronto + /positions polling fallback\n"
             "<i>(scanner backend RN1+bossoskil1+surfandturf, alerts surfandturf only)</i>"
         )
     except Exception:
@@ -437,6 +537,9 @@ def run() -> None:
 
     state = state_mod.load_state(str(LOG_DIR / "state.json"))
     last_seen = state.get("last_seen_ts", {})
+    # /positions snapshot per wallet, used by detect_position_diffs to fall
+    # back when /trades misses fills (frequent during high-activity sessions).
+    positions_snapshots: dict[str, dict] = state.get("positions_snapshots", {})
     portfolios = _load_portfolios()
 
     decisions_path = str(LOG_DIR / "decisions.jsonl")
@@ -451,6 +554,44 @@ def run() -> None:
                     t, portfolios[pseudo],
                     last_seen_ts=int(last_seen.get(wallet, 0)),
                 )
+                # /positions fallback: detect trades data-api /trades missed.
+                # Skip markets already handled by /trades this cycle to avoid double-mirror.
+                processed_keys = {
+                    (d.get("conditionId", ""), int(d.get("outcomeIndex", -1)))
+                    for d in decisions
+                    if d.get("conditionId")
+                }
+                pos_diffs, new_pos_snapshot = detect_position_diffs(
+                    t, portfolios[pseudo],
+                    prev_snapshot=positions_snapshots.get(wallet, {}),
+                    processed_keys=processed_keys,
+                )
+                positions_snapshots[wallet] = new_pos_snapshot
+                # Process synthesized diffs as if they were trades (BUY only).
+                # They get the same downstream treatment (append, telegram, etc.)
+                for syn in pos_diffs:
+                    # Try to mirror via executor (live) or paper portfolio
+                    paper_size = float(syn["paper_size_usd"])
+                    if paper_size < MIN_PAPER_SIZE_USD:
+                        syn["action"] = "skipped"
+                        syn["rationale"] = "positions_diff_below_min_paper"
+                    elif portfolios[pseudo].cash_usd < paper_size:
+                        syn["action"] = "skipped"
+                        syn["rationale"] = (
+                            f"positions_diff_insufficient_cash "
+                            f"(have ${portfolios[pseudo].cash_usd:.2f}, need ${paper_size:.2f})"
+                        )
+                    else:
+                        # Buy at current ask price (his avg_price is unreachable now)
+                        portfolios[pseudo].buy(
+                            condition_id=syn["conditionId"], asset=syn["asset"],
+                            outcome=syn["outcome"], outcome_index=int(syn["outcomeIndex"]),
+                            price=float(syn["price"]), usd_size=paper_size,
+                            target_hash=syn["target_hash"],
+                            market_title=syn.get("market", ""),
+                            opened_ts=int(syn["ts"]),
+                        )
+                    decisions.append(syn)
                 for d in decisions:
                     state_mod.append_decision(decisions_path, d)
                     if d.get("action") != "executed":
@@ -478,8 +619,11 @@ def run() -> None:
             except Exception:
                 log.exception("error processing %s, continuing", pseudo)
 
-        # Persist after each cycle
-        state_mod.save_state(str(LOG_DIR / "state.json"), {"last_seen_ts": last_seen})
+        # Persist after each cycle (incl. positions snapshots for next-cycle diff)
+        state_mod.save_state(
+            str(LOG_DIR / "state.json"),
+            {"last_seen_ts": last_seen, "positions_snapshots": positions_snapshots},
+        )
         _save_portfolios(portfolios)
 
         # Daily: close resolved positions (realize PnL), then snapshot equity
