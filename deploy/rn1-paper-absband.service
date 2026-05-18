@@ -1,0 +1,19 @@
+[Unit]
+Description=RN1 Paper Absband — paper bot mirroring live $40 surfandturf logic on RN1
+After=network.target bot-cp.service
+# Soft dependency on bot-cp (source of decisions.jsonl). Crash here doesn't
+# affect bot-cp or the live $40 surfandturf Docker stack.
+
+[Service]
+Type=simple
+User=botuser
+WorkingDirectory=/home/botuser/bot-trading
+EnvironmentFile=-/home/botuser/bot-trading/.env
+ExecStart=/home/botuser/bot-trading/venv/bin/python -m analysis.rn1.paper_absband
+Restart=on-failure
+RestartSec=30
+StandardOutput=append:/home/botuser/bot-trading/logs/rn1/paper_absband.log
+StandardError=append:/home/botuser/bot-trading/logs/rn1/paper_absband.log
+
+[Install]
+WantedBy=multi-user.target
