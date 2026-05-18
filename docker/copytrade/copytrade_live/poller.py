@@ -93,11 +93,22 @@ def handle_buy(decision: dict, positions: dict) -> None:
         write_jsonl("trades.jsonl", {**decision, "local_action": "skip_tier_conviction", "tier": tier, "trade_pct": trade_pct})
         return
 
-    resolved = executor.resolve_outcome_to_token_id(decision["market"], decision["outcome"])
-    if not resolved:
-        log.warning(f"SKIP BUY: outcome non résolu '{decision['market'][:40]}' / '{decision['outcome']}'")
-        write_jsonl("trades.jsonl", {**decision, "local_action": "skip_resolve_failed"})
-        return
+    # Prefer pre-resolved IDs from the decision (already known by bot-cp scanner
+    # OR /positions polling fallback) — skips Gamma search and works even when
+    # the market is closed/resolved so search returns nothing.
+    if decision.get("asset") and decision.get("conditionId"):
+        resolved = {
+            "token_id": decision["asset"],
+            "condition_id": decision["conditionId"],
+            "outcome_index": int(decision.get("outcomeIndex", 0)),
+            "market_slug": "",
+        }
+    else:
+        resolved = executor.resolve_outcome_to_token_id(decision["market"], decision["outcome"])
+        if not resolved:
+            log.warning(f"SKIP BUY: outcome non résolu '{decision['market'][:40]}' / '{decision['outcome']}'")
+            write_jsonl("trades.jsonl", {**decision, "local_action": "skip_resolve_failed"})
+            return
 
     cond_id = resolved.get("condition_id", "")
     existing_cost_same_market = sum(

@@ -567,22 +567,17 @@ def run() -> None:
                     processed_keys=processed_keys,
                 )
                 positions_snapshots[wallet] = new_pos_snapshot
-                # Process synthesized diffs as if they were trades (BUY only).
-                # They get the same downstream treatment (append, telegram, etc.)
+                # Process synthesized diffs. KEEP action="executed" so the live
+                # container's filter_relevant (which drops "skipped") still sees
+                # them. Paper portfolio is best-effort; if it can't afford the
+                # mirror that's only a bookkeeping concern, not a signal to drop.
                 for syn in pos_diffs:
-                    # Try to mirror via executor (live) or paper portfolio
                     paper_size = float(syn["paper_size_usd"])
-                    if paper_size < MIN_PAPER_SIZE_USD:
-                        syn["action"] = "skipped"
-                        syn["rationale"] = "positions_diff_below_min_paper"
-                    elif portfolios[pseudo].cash_usd < paper_size:
-                        syn["action"] = "skipped"
-                        syn["rationale"] = (
-                            f"positions_diff_insufficient_cash "
-                            f"(have ${portfolios[pseudo].cash_usd:.2f}, need ${paper_size:.2f})"
-                        )
-                    else:
-                        # Buy at current ask price (his avg_price is unreachable now)
+                    paper_ok = (
+                        paper_size >= MIN_PAPER_SIZE_USD
+                        and portfolios[pseudo].cash_usd >= paper_size
+                    )
+                    if paper_ok:
                         portfolios[pseudo].buy(
                             condition_id=syn["conditionId"], asset=syn["asset"],
                             outcome=syn["outcome"], outcome_index=int(syn["outcomeIndex"]),
@@ -590,6 +585,14 @@ def run() -> None:
                             target_hash=syn["target_hash"],
                             market_title=syn.get("market", ""),
                             opened_ts=int(syn["ts"]),
+                        )
+                        syn["paper_executed"] = True
+                    else:
+                        # Skip paper but keep action=executed so live container processes
+                        syn["paper_executed"] = False
+                        syn["paper_skip_reason"] = (
+                            "below_min_paper" if paper_size < MIN_PAPER_SIZE_USD
+                            else f"insufficient_paper_cash (have ${portfolios[pseudo].cash_usd:.2f}, need ${paper_size:.2f})"
                         )
                     decisions.append(syn)
                 for d in decisions:
