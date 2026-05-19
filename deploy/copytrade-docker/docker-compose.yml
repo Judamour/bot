@@ -1,0 +1,88 @@
+# Polymarket CopyTrade Live — stack VPS Docker
+#
+# Topologie:
+#   vpn (bubuntux/nordlynx) ─ tunnel WireGuard NordVPN Canada
+#   copytrade-live (notre bot) ─ utilise network_mode: service:vpn
+#                                 → tout son trafic passe par le VPN
+#
+# Le reste du VPS (bot.service, bot-cp.service, dashboard, etc.) est inchangé.
+# Si vpn drop, copytrade-live perd accès réseau (mais le reste tourne normalement).
+
+services:
+  vpn:
+    image: qmcgaw/gluetun:latest
+    container_name: copytrade_vpn
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    environment:
+      - VPN_SERVICE_PROVIDER=nordvpn
+      - VPN_TYPE=openvpn
+      - OPENVPN_USER=${NORDVPN_OPENVPN_USER}
+      - OPENVPN_PASSWORD=${NORDVPN_OPENVPN_PASSWORD}
+      - SERVER_COUNTRIES=Canada
+      - TZ=Europe/Paris
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/gluetun-entrypoint", "healthcheck"]
+      interval: 60s
+      timeout: 15s
+      retries: 3
+      start_period: 30s
+
+  copytrade-live:
+    build: .
+    container_name: copytrade_live
+    network_mode: "service:vpn"
+    depends_on:
+      vpn:
+        condition: service_healthy
+    environment:
+      - POLYMARKET_PRIVATE_KEY=${POLYMARKET_PRIVATE_KEY}
+      - POLYMARKET_API_KEY=${POLYMARKET_API_KEY}
+      - POLYMARKET_API_SECRET=${POLYMARKET_API_SECRET}
+      - POLYMARKET_API_PASSPHRASE=${POLYMARKET_API_PASSPHRASE}
+      - POLYMARKET_SIGNER_ADDRESS=${POLYMARKET_SIGNER_ADDRESS}
+      - POLYMARKET_FUNDER_ADDRESS=${POLYMARKET_FUNDER_ADDRESS}
+      - POLYMARKET_SIG_TYPE=${POLYMARKET_SIG_TYPE:-3}
+      - COPYTRADE_TARGET_WALLET=${COPYTRADE_TARGET_WALLET:-surfandturf}
+      - COPYTRADE_FIXED_SIZE_USD=${COPYTRADE_FIXED_SIZE_USD:-1.5}
+      - COPYTRADE_MAX_POSITIONS=${COPYTRADE_MAX_POSITIONS:-20}
+      - COPYTRADE_KILL_EQUITY_USD=${COPYTRADE_KILL_EQUITY_USD:-0}
+      - COPYTRADE_MIN_TARGET_SIZE_USD=${COPYTRADE_MIN_TARGET_SIZE_USD:-5.0}
+      - COPYTRADE_MIN_ENTRY_PRICE=${COPYTRADE_MIN_ENTRY_PRICE:-0.06}
+      - COPYTRADE_MAX_ENTRY_PRICE=${COPYTRADE_MAX_ENTRY_PRICE:-0.85}
+      - COPYTRADE_MAX_PRICE_DRIFT=${COPYTRADE_MAX_PRICE_DRIFT:-1.15}
+      - COPYTRADE_MAX_USD_PER_MARKET=${COPYTRADE_MAX_USD_PER_MARKET:-5.0}
+      - COPYTRADE_SIZING_MODE=${COPYTRADE_SIZING_MODE:-fixed}
+      - COPYTRADE_TIER_PENNY_MAX=${COPYTRADE_TIER_PENNY_MAX:-0.20}
+      - COPYTRADE_TIER_SKIP_HIGH=${COPYTRADE_TIER_SKIP_HIGH:-0.20}
+      - COPYTRADE_TIER_PENNY_MIN_CONVICTION=${COPYTRADE_TIER_PENNY_MIN_CONVICTION:-0.03}
+      - COPYTRADE_TIER_PENNY_SIZE=${COPYTRADE_TIER_PENNY_SIZE:-1.0}
+      - COPYTRADE_TIER_MID_MAX=${COPYTRADE_TIER_MID_MAX:-0.65}
+      - COPYTRADE_TIER_MID_MIN_CONVICTION=${COPYTRADE_TIER_MID_MIN_CONVICTION:-0.05}
+      - COPYTRADE_TIER_MID_MAX_CONVICTION=${COPYTRADE_TIER_MID_MAX_CONVICTION:-0.50}
+      - COPYTRADE_TIER_MID_MIN_SIZE=${COPYTRADE_TIER_MID_MIN_SIZE:-1.5}
+      - COPYTRADE_TIER_MID_MAX_SIZE=${COPYTRADE_TIER_MID_MAX_SIZE:-5.0}
+      - COPYTRADE_TIER_FAV_MIN_CONVICTION=${COPYTRADE_TIER_FAV_MIN_CONVICTION:-0.15}
+      - COPYTRADE_TIER_FAV_SIZE=${COPYTRADE_TIER_FAV_SIZE:-4.5}
+      - COPYTRADE_TIER_NORMAL_SIZE=${COPYTRADE_TIER_NORMAL_SIZE:-4.5}
+      - COPYTRADE_DRY_RUN=${COPYTRADE_DRY_RUN:-true}
+      - COPYTRADE_DECISIONS_PATH=/decisions/decisions.jsonl
+      - COPYTRADE_STATUS_PATH=/decisions/copytrade_live_status.json
+      - COPYTRADE_DATA_DIR=/data
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
+    volumes:
+      # Decisions: lecture du paper scanner + écriture du status snapshot pour le dashboard
+      - /home/botuser/bot-trading/logs/copytrade:/decisions:rw
+      # Persistance state + positions + logs
+      - copytrade_data:/data
+    restart: unless-stopped
+    mem_limit: 200m
+    cpus: 0.5
+
+volumes:
+  copytrade_data:
+    driver: local
