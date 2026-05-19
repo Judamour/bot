@@ -274,21 +274,24 @@ def main() -> None:
                 clob_bal = executor.get_clob_balance_usd()
             except Exception as e:
                 log.warning(f"Balance refresh échec: {type(e).__name__}: {e}")
-            try:
-                _, _, redeemables = state.reconcile_resolved(positions)
-                notified = set(meta.get("notified_redeemables") or [])
-                new_redeem = [p for p in redeemables if p.get("asset") and p["asset"] not in notified]
-                if new_redeem:
-                    log.info(f"{len(new_redeem)} new redeemable position(s) — notifying Telegram")
-                    notifier.notify_redeemable(new_redeem)
-                    notified.update(p["asset"] for p in new_redeem)
-                current_assets = {p.get("asset") for p in redeemables if p.get("asset")}
-                notified &= current_assets
-                if notified != set(meta.get("notified_redeemables") or []):
-                    meta["notified_redeemables"] = sorted(notified)
-                    state.save_meta(meta)
-            except Exception as e:
-                log.warning(f"reconcile_resolved échec: {type(e).__name__}: {e}")
+        # Reconcile + redeemable detection every cycle: data-api lag means
+        # winning positions can flip redeemable=True and be redeemed via UI
+        # within minutes — checking only on 5-cycle cadence misses fast windows.
+        try:
+            _, _, redeemables = state.reconcile_resolved(positions)
+            notified = set(meta.get("notified_redeemables") or [])
+            new_redeem = [p for p in redeemables if p.get("asset") and p["asset"] not in notified]
+            if new_redeem:
+                log.info(f"{len(new_redeem)} new redeemable position(s) — notifying Telegram")
+                notifier.notify_redeemable(new_redeem)
+                notified.update(p["asset"] for p in new_redeem)
+            current_assets = {p.get("asset") for p in redeemables if p.get("asset")}
+            notified &= current_assets
+            if notified != set(meta.get("notified_redeemables") or []):
+                meta["notified_redeemables"] = sorted(notified)
+                state.save_meta(meta)
+        except Exception as e:
+            log.warning(f"reconcile_resolved échec: {type(e).__name__}: {e}")
         try:
             status_writer.write_status(
                 meta, positions,
