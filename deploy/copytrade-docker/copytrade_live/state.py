@@ -115,6 +115,7 @@ def reconcile_resolved(positions: dict, *, size_threshold: float = 0.01,
                        timeout: float = 8.0,
                        drop_grace_seconds: int = 600,
                        redeemable_min_value: float = 0.50,
+                       near_loss_price: float = 0.01,
                        ) -> tuple[list[str], list[str], list[dict]]:
     """Sync local state with Polymarket data-api /positions (source of truth).
 
@@ -128,6 +129,10 @@ def reconcile_resolved(positions: dict, *, size_threshold: float = 0.01,
       window protects freshly-bought positions: data-api /positions lags up to
       ~60s after a fill, so if last_buy_ts is within drop_grace_seconds, the
       entry is kept regardless of remote presence (next reconcile will catch up).
+      Positions with curPrice <= near_loss_price are treated as effectively
+      resolved-lost (even if Polymarket has not flipped redeemable yet) — this
+      frees the slot quickly when the orderbook prices it dead, without waiting
+      hours for the UMA oracle. Grace period still applies.
     - ADOPT remote active positions absent from local state — covers manual orders
       placed outside the poller flow (e.g. ad-hoc execs, limit orders filling
       after a restart) so the dashboard reflects the truth.
@@ -160,7 +165,10 @@ def reconcile_resolved(positions: dict, *, size_threshold: float = 0.01,
 
     active_remote = {
         p["asset"]: p for p in remote
-        if p.get("asset") and not p.get("redeemable") and float(p.get("size") or 0) > size_threshold
+        if p.get("asset")
+        and not p.get("redeemable")
+        and float(p.get("size") or 0) > size_threshold
+        and float(p.get("curPrice") or 0) > near_loss_price
     }
 
     now = int(time.time())
@@ -174,7 +182,15 @@ def reconcile_resolved(positions: dict, *, size_threshold: float = 0.01,
             continue
         pos = positions.pop(tid)
         removed.append(tid)
-        log.info(f"reconcile: dropped resolved position {pos.get('market', '?')[:50]} / {pos.get('outcome')}")
+        # Identify drop reason for log clarity
+        remote_entry = next((p for p in remote if p.get("asset") == tid), None)
+        if remote_entry and float(remote_entry.get("curPrice") or 0) <= near_loss_price and not remote_entry.get("redeemable"):
+            reason = f"near-loss cur={remote_entry.get('curPrice')}"
+        elif remote_entry and remote_entry.get("redeemable"):
+            reason = "redeemable"
+        else:
+            reason = "gone-from-remote"
+        log.info(f"reconcile: dropped {pos.get('market', '?')[:50]} / {pos.get('outcome')} ({reason})")
 
     added = []
     for tid, rp in active_remote.items():
