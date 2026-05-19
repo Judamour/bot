@@ -234,9 +234,19 @@ def main() -> None:
     meta = state.load_meta()
     positions = state.load_positions()
     log.info(f"State: last_seen_ts={meta['last_seen_ts']}, {len(positions)} positions")
-    boot_removed, boot_added = state.reconcile_resolved(positions)
+    boot_removed, boot_added, boot_redeemables = state.reconcile_resolved(positions)
     if boot_removed or boot_added:
         log.info(f"Boot reconcile: -{len(boot_removed)} +{len(boot_added)} -> {len(positions)} positions")
+    notified = set(meta.get("notified_redeemables") or [])
+    new_redeemables = [p for p in boot_redeemables if p.get("asset") and p["asset"] not in notified]
+    if new_redeemables:
+        log.info(f"Boot: {len(new_redeemables)} new redeemable position(s) — notifying")
+        notifier.notify_redeemable(new_redeemables)
+        notified.update(p["asset"] for p in new_redeemables)
+    current_assets = {p.get("asset") for p in boot_redeemables if p.get("asset")}
+    notified &= current_assets  # forget assets that are no longer redeemable (redeemed by user)
+    meta["notified_redeemables"] = sorted(notified)
+    state.save_meta(meta)
 
     clob_bal: float | None = None
     try:
@@ -265,7 +275,18 @@ def main() -> None:
             except Exception as e:
                 log.warning(f"Balance refresh échec: {type(e).__name__}: {e}")
             try:
-                state.reconcile_resolved(positions)
+                _, _, redeemables = state.reconcile_resolved(positions)
+                notified = set(meta.get("notified_redeemables") or [])
+                new_redeem = [p for p in redeemables if p.get("asset") and p["asset"] not in notified]
+                if new_redeem:
+                    log.info(f"{len(new_redeem)} new redeemable position(s) — notifying Telegram")
+                    notifier.notify_redeemable(new_redeem)
+                    notified.update(p["asset"] for p in new_redeem)
+                current_assets = {p.get("asset") for p in redeemables if p.get("asset")}
+                notified &= current_assets
+                if notified != set(meta.get("notified_redeemables") or []):
+                    meta["notified_redeemables"] = sorted(notified)
+                    state.save_meta(meta)
             except Exception as e:
                 log.warning(f"reconcile_resolved échec: {type(e).__name__}: {e}")
         try:

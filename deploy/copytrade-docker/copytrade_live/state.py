@@ -113,7 +113,9 @@ def record_sell(positions: dict, token_id: str, *, size_shares: float,
 
 def reconcile_resolved(positions: dict, *, size_threshold: float = 0.01,
                        timeout: float = 8.0,
-                       drop_grace_seconds: int = 600) -> tuple[list[str], list[str]]:
+                       drop_grace_seconds: int = 600,
+                       redeemable_min_value: float = 0.50,
+                       ) -> tuple[list[str], list[str], list[dict]]:
     """Sync local state with Polymarket data-api /positions (source of truth).
 
     A position is "active" on Polymarket if size > threshold AND not redeemable.
@@ -130,7 +132,10 @@ def reconcile_resolved(positions: dict, *, size_threshold: float = 0.01,
       placed outside the poller flow (e.g. ad-hoc execs, limit orders filling
       after a restart) so the dashboard reflects the truth.
 
-    Returns (removed_token_ids, added_token_ids).
+    Also surfaces winning positions ready to redeem (redeemable=True AND
+    currentValue > redeemable_min_value) so the poller can alert the user.
+
+    Returns (removed_token_ids, added_token_ids, redeemable_positions).
     """
     try:
         r = httpx.get(
@@ -142,11 +147,16 @@ def reconcile_resolved(positions: dict, *, size_threshold: float = 0.01,
         remote = r.json()
     except Exception as e:
         log.warning(f"reconcile_resolved data-api err: {type(e).__name__}: {e}")
-        return [], []
+        return [], [], []
 
     if not isinstance(remote, list):
         log.warning(f"reconcile_resolved unexpected payload type: {type(remote).__name__}")
-        return [], []
+        return [], [], []
+
+    redeemables = [
+        p for p in remote
+        if p.get("redeemable") and float(p.get("currentValue") or 0) > redeemable_min_value
+    ]
 
     active_remote = {
         p["asset"]: p for p in remote
@@ -191,7 +201,7 @@ def reconcile_resolved(positions: dict, *, size_threshold: float = 0.01,
 
     if removed or added:
         save_positions(positions)
-    return removed, added
+    return removed, added, redeemables
 
 
 def equity_snapshot(positions: dict, cash_usd: float, mtm_prices: dict[str, float]) -> dict:

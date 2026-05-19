@@ -67,6 +67,25 @@ def notify_error(context: str, err: str) -> None:
     _send(msg)
 
 
+def notify_redeemable(positions: list[dict]) -> None:
+    """Alert when winning positions are ready to redeem on Polymarket UI."""
+    if not positions:
+        return
+    total = sum(float(p.get("currentValue") or 0) for p in positions)
+    lines = [f"🎯 <b>{len(positions)} position(s) ready to REDEEM</b>",
+             f"Total payout: <b>${total:.2f}</b>", ""]
+    for p in positions:
+        title = (p.get("title") or "?")[:55]
+        outcome = p.get("outcome", "?")
+        cv = float(p.get("currentValue") or 0)
+        pnl = float(p.get("cashPnl") or 0)
+        lines.append(f"• {title} / <b>{outcome}</b>")
+        lines.append(f"  ${cv:.2f} (PnL {pnl:+.2f})")
+    lines.append("")
+    lines.append("→ Open Polymarket UI and click <b>Redeem</b>")
+    _send("\n".join(lines))
+
+
 def notify_boot(equity_usd: float, dry_run: bool) -> None:
     mode = "DRY-RUN" if dry_run else "LIVE"
     msg = (
