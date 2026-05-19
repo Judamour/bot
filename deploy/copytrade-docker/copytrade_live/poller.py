@@ -234,9 +234,9 @@ def main() -> None:
     meta = state.load_meta()
     positions = state.load_positions()
     log.info(f"State: last_seen_ts={meta['last_seen_ts']}, {len(positions)} positions")
-    boot_removed = state.reconcile_resolved(positions)
-    if boot_removed:
-        log.info(f"Boot reconcile: removed {len(boot_removed)} resolved position(s), {len(positions)} remain")
+    boot_removed, boot_added = state.reconcile_resolved(positions)
+    if boot_removed or boot_added:
+        log.info(f"Boot reconcile: -{len(boot_removed)} +{len(boot_added)} -> {len(positions)} positions")
 
     clob_bal: float | None = None
     try:

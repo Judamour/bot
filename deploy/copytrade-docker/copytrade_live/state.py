@@ -112,19 +112,22 @@ def record_sell(positions: dict, token_id: str, *, size_shares: float,
 
 
 def reconcile_resolved(positions: dict, *, size_threshold: float = 0.01,
-                       timeout: float = 8.0) -> list[str]:
-    """Drop resolved positions from local state by checking Polymarket data-api.
+                       timeout: float = 8.0) -> tuple[list[str], list[str]]:
+    """Sync local state with Polymarket data-api /positions (source of truth).
 
-    A position is "active" if size > threshold AND not redeemable.
+    A position is "active" on Polymarket if size > threshold AND not redeemable.
     Resolved-but-not-redeemed entries have redeemable=True and curPrice=0 (memory:
-    polymarket_positions_quirk) — they must be filtered out, otherwise the
-    dashboard/Telegram count keeps stale entries forever (we never SELL via
-    market orders, redemption happens via Polymarket UI).
+    polymarket_positions_quirk) — they're treated as inactive here.
 
-    Returns the list of token_ids that were removed.
+    Two-way sync:
+    - DROP local positions whose token_id is not in the active remote set
+      (resolved + redeemed winners, or resolved losses left in limbo).
+    - ADOPT remote active positions absent from local state — covers manual orders
+      placed outside the poller flow (e.g. ad-hoc execs, limit orders filling
+      after a restart) so the dashboard reflects the truth.
+
+    Returns (removed_token_ids, added_token_ids).
     """
-    if not positions:
-        return []
     try:
         r = httpx.get(
             DATA_API_POSITIONS_URL,
@@ -135,23 +138,49 @@ def reconcile_resolved(positions: dict, *, size_threshold: float = 0.01,
         remote = r.json()
     except Exception as e:
         log.warning(f"reconcile_resolved data-api err: {type(e).__name__}: {e}")
-        return []
+        return [], []
 
     if not isinstance(remote, list):
         log.warning(f"reconcile_resolved unexpected payload type: {type(remote).__name__}")
-        return []
+        return [], []
 
-    active_token_ids = {
-        p.get("asset") for p in remote
+    active_remote = {
+        p["asset"]: p for p in remote
         if p.get("asset") and not p.get("redeemable") and float(p.get("size") or 0) > size_threshold
     }
-    removed = [tid for tid in list(positions.keys()) if tid not in active_token_ids]
+
+    removed = [tid for tid in list(positions.keys()) if tid not in active_remote]
     for tid in removed:
         pos = positions.pop(tid)
         log.info(f"reconcile: dropped resolved position {pos.get('market', '?')[:50]} / {pos.get('outcome')}")
-    if removed:
+
+    added = []
+    now = int(time.time())
+    for tid, rp in active_remote.items():
+        if tid in positions:
+            continue
+        size = float(rp.get("size") or 0)
+        avg = float(rp.get("avgPrice") or 0)
+        cost = float(rp.get("initialValue") or size * avg)
+        positions[tid] = {
+            "token_id": tid,
+            "market": rp.get("title", ""),
+            "outcome": rp.get("outcome", ""),
+            "condition_id": rp.get("conditionId", ""),
+            "size_shares": size,
+            "avg_price": avg,
+            "cost_usd": cost,
+            "opened_ts": now,
+            "last_buy_ts": now,
+            "target_hashes": [f"reconcile_adopted_{now}"],
+            "source": "reconcile_adopted",
+        }
+        added.append(tid)
+        log.info(f"reconcile: adopted remote position {rp.get('title', '?')[:50]} / {rp.get('outcome')} sz={size} @ {avg}")
+
+    if removed or added:
         save_positions(positions)
-    return removed
+    return removed, added
 
 
 def equity_snapshot(positions: dict, cash_usd: float, mtm_prices: dict[str, float]) -> dict:
