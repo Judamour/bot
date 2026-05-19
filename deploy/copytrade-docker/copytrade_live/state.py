@@ -112,7 +112,8 @@ def record_sell(positions: dict, token_id: str, *, size_shares: float,
 
 
 def reconcile_resolved(positions: dict, *, size_threshold: float = 0.01,
-                       timeout: float = 8.0) -> tuple[list[str], list[str]]:
+                       timeout: float = 8.0,
+                       drop_grace_seconds: int = 600) -> tuple[list[str], list[str]]:
     """Sync local state with Polymarket data-api /positions (source of truth).
 
     A position is "active" on Polymarket if size > threshold AND not redeemable.
@@ -121,7 +122,10 @@ def reconcile_resolved(positions: dict, *, size_threshold: float = 0.01,
 
     Two-way sync:
     - DROP local positions whose token_id is not in the active remote set
-      (resolved + redeemed winners, or resolved losses left in limbo).
+      (resolved + redeemed winners, or resolved losses left in limbo). A grace
+      window protects freshly-bought positions: data-api /positions lags up to
+      ~60s after a fill, so if last_buy_ts is within drop_grace_seconds, the
+      entry is kept regardless of remote presence (next reconcile will catch up).
     - ADOPT remote active positions absent from local state — covers manual orders
       placed outside the poller flow (e.g. ad-hoc execs, limit orders filling
       after a restart) so the dashboard reflects the truth.
@@ -149,13 +153,20 @@ def reconcile_resolved(positions: dict, *, size_threshold: float = 0.01,
         if p.get("asset") and not p.get("redeemable") and float(p.get("size") or 0) > size_threshold
     }
 
-    removed = [tid for tid in list(positions.keys()) if tid not in active_remote]
-    for tid in removed:
+    now = int(time.time())
+    removed = []
+    for tid in list(positions.keys()):
+        if tid in active_remote:
+            continue
+        last_buy = positions[tid].get("last_buy_ts") or positions[tid].get("opened_ts") or 0
+        if now - last_buy < drop_grace_seconds:
+            log.debug(f"reconcile: keeping fresh local position {positions[tid].get('market', '?')[:50]} (age {now-last_buy}s < {drop_grace_seconds}s grace)")
+            continue
         pos = positions.pop(tid)
+        removed.append(tid)
         log.info(f"reconcile: dropped resolved position {pos.get('market', '?')[:50]} / {pos.get('outcome')}")
 
     added = []
-    now = int(time.time())
     for tid, rp in active_remote.items():
         if tid in positions:
             continue
