@@ -183,24 +183,79 @@ def _open_paper_position(state: dict, positions: dict, trade: dict, market: dict
     }
 
 
+def _near_resolved_payout(
+    asset: str, market: dict, threshold: float
+) -> tuple[float, str] | None:
+    """If the market is effectively decided (one token's price >= threshold,
+    the other <= 1 - threshold), return (payout_per_share, outcome) for the
+    held asset. None if the market is still genuinely live.
+
+    payout uses current marker price → realistic exit value (matches what
+    we'd get by selling on the book, à la RN1's Fulham 99.9¢ unwind).
+    """
+    tokens = market.get("tokens") or []
+    if len(tokens) < 2:
+        return None
+    prices: dict[str, float] = {}
+    for tok in tokens:
+        tid = str(tok.get("token_id"))
+        try:
+            prices[tid] = float(tok.get("price"))
+        except (TypeError, ValueError):
+            return None
+    if not prices:
+        return None
+    near_win = [(tid, p) for tid, p in prices.items() if p >= threshold]
+    near_lose = [(tid, p) for tid, p in prices.items() if p <= (1 - threshold)]
+    # Need exactly one winner AND one loser to call it decided
+    if len(near_win) != 1 or len(near_lose) != 1:
+        return None
+    held_price = prices.get(asset)
+    if held_price is None:
+        return None
+    if held_price >= threshold:
+        return held_price, "won"
+    if held_price <= (1 - threshold):
+        return held_price, "lost"
+    return None
+
+
+# Threshold for near-resolve. 0.99 means a price of 0.9995/0.0005 fires it
+# (typical Polymarket "game over, settling" state). Override via env.
+_NEAR_RESOLVE_THRESHOLD = float(os.environ.get("PAPER_NEAR_RESOLVE_THRESHOLD", "0.99"))
+
+
 def _resolve_positions(state: dict, positions: dict, markets: dict) -> list[dict]:
-    """For each open position whose market is now closed, realize PnL."""
+    """Realize PnL for closed markets AND for markets effectively decided
+    (winner side priced >= threshold). The near-resolve path frees capital
+    hours earlier than Polymarket's official close — wins/losses at 99.95¢
+    are committed at current market price (slight haircut vs $1 redeem)."""
     realized = []
     for asset, pos in list(positions.items()):
         cid = pos.get("condition_id")
         market = markets.get(cid)
-        if not market or not market.get("closed"):
+        if not market:
             continue
-        win_tok = _winning_token(market)
-        if not win_tok:
-            continue
-        # Compute payout: if our token won, shares × $1.00. Otherwise $0.
-        if asset == win_tok:
-            payout = pos["shares"] * 1.0
-            outcome = "won"
+
+        payout_per_share: float | None = None
+        outcome: str | None = None
+        resolve_path = ""
+
+        if market.get("closed"):
+            win_tok = _winning_token(market)
+            if win_tok is None:
+                continue  # closed but no winner flag yet — wait next cycle
+            payout_per_share = 1.0 if asset == win_tok else 0.0
+            outcome = "won" if asset == win_tok else "lost"
+            resolve_path = "closed"
         else:
-            payout = 0.0
-            outcome = "lost"
+            near = _near_resolved_payout(asset, market, _NEAR_RESOLVE_THRESHOLD)
+            if near is None:
+                continue
+            payout_per_share, outcome = near
+            resolve_path = "near"
+
+        payout = pos["shares"] * payout_per_share
         pnl = payout - pos["cost_basis"]
         state["cash_usd"] += payout
         state["realized_pnl"] += pnl
@@ -218,6 +273,7 @@ def _resolve_positions(state: dict, positions: dict, markets: dict) -> list[dict
             "payout": payout,
             "pnl": pnl,
             "result": outcome,
+            "resolve_path": resolve_path,  # "closed" or "near"
         })
         del positions[asset]
     return realized
