@@ -1,15 +1,19 @@
-"""RN1 paper bot — absolute-band sizing, tuned for RN1's actual edge.
-
-Mirrors the live $40 surfandturf container logic (sizing.py absolute_band mode)
-but applied to RN1 wallet with paper money. Tuned for RN1's profile:
-  - penny [0.06-0.20)          -> $1 (5+ shares, leverage 5-20x via min-order)
-  - LOSING ZONE [0.20-0.45)    -> SKIP (RN1 mid_low: WR 32% / ROI -1.3%)
-  - normal [0.45-0.85]         -> $4.50 (his mid_high / favorite zone)
-  - heavy_fav (0.85-0.95]      -> $4.50 (his confirmed +6% / +11% ROI buckets)
-  - >0.95                      -> SKIP (edge too thin)
+"""RN1 paper bot — absolute-band sizing, raw mirror of RN1 BUY flow.
 
 Reads decisions.jsonl written by bot-cp.service, filters wallet=RN1, applies
 band sizing. Paper portfolio in data_absband/ (separate from rn1-live-paper).
+
+Effective bands with service env (SKIP_HIGH=0.20, NORMAL_MAX=0.95):
+  - <0.06              -> SKIP (lottery)
+  - [0.06-0.20)        -> $1.00 (penny, floored to 5 shares via MIN_SHARES)
+  - [0.20-0.95]        -> $4.50 (normal — mid_low confirmed +5.54% ROI in
+                                 2026-05-20 6010-trade REDEEM analysis;
+                                 original "losing_zone" skip is dead code
+                                 because the env collapses it to 0)
+  - >0.95              -> SKIP (edge too thin)
+
+No filters beyond MIN_TARGET — this is the baseline against which Option B
+and Option C are measured.
 
 Run :
     python -m analysis.rn1.paper_absband
@@ -156,13 +160,18 @@ def _refresh_open_markets(positions: dict, markets: dict) -> int:
 
 
 def _compute_size_usd(price: float) -> float | None:
-    """Return USD to allocate, or None to skip. RN1-tuned absolute_band."""
+    """Return USD to allocate, or None to skip. RN1-tuned absolute_band.
+
+    The TIER_SKIP_HIGH branch is dead code under the current service env
+    (SKIP_HIGH=PENNY_MAX=0.20); kept so a deploy can re-enable the mid_low
+    skip by raising SKIP_HIGH without code changes.
+    """
     if price < TIER_PENNY_MIN:
         return None  # lottery
     if price < TIER_PENNY_MAX:
         return TIER_PENNY_SIZE  # forced to 5+ shares via MIN_SHARES floor
     if price < TIER_SKIP_HIGH:
-        return None  # his losing zone (mid_low ROI -1.3%)
+        return None  # mid_low — disabled when env SKIP_HIGH<=PENNY_MAX
     if price <= TIER_NORMAL_MAX:
         return TIER_NORMAL_SIZE
     return None  # > NORMAL_MAX, edge too thin

@@ -14,7 +14,12 @@ OPEN labeling on 913 resolved markets):
   - mtype="other" skip (catch-all, low signal)
   - whale >$10K skip
 
-Sizing identical to Option B: penny $1, mid-low SKIP, normal $4.5, $4.5/market.
+Effective bands with service env (SKIP_HIGH=0.20, NORMAL_MAX=0.95):
+  - <0.06              -> SKIP (lottery — Option C catches this twice,
+                                 once via tier and once via explicit filter)
+  - [0.06-0.20)        -> $1.00 (penny)
+  - [0.20-0.95]        -> $4.50 (normal — mid_low kept after REDEEM analysis)
+  - >0.95              -> SKIP (edge too thin)
 
 Run :
     python -m analysis.rn1.paper_optionc
@@ -162,13 +167,18 @@ def _refresh_open_markets(positions: dict, markets: dict) -> int:
 
 
 def _compute_size_usd(price: float) -> float | None:
-    """Return USD to allocate, or None to skip. RN1-tuned absolute_band."""
+    """Return USD to allocate, or None to skip. RN1-tuned absolute_band.
+
+    The TIER_SKIP_HIGH branch is dead code under the current service env
+    (SKIP_HIGH=PENNY_MAX=0.20); kept so a deploy can re-enable the mid_low
+    skip by raising SKIP_HIGH without code changes.
+    """
     if price < TIER_PENNY_MIN:
         return None  # lottery
     if price < TIER_PENNY_MAX:
         return TIER_PENNY_SIZE  # forced to 5+ shares via MIN_SHARES floor
     if price < TIER_SKIP_HIGH:
-        return None  # his losing zone (mid_low ROI -1.3%)
+        return None  # mid_low — disabled when env SKIP_HIGH<=PENNY_MAX
     if price <= TIER_NORMAL_MAX:
         return TIER_NORMAL_SIZE
     return None  # > NORMAL_MAX, edge too thin

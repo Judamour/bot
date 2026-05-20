@@ -12,7 +12,7 @@ EnvironmentFile=-/home/botuser/bot-trading/.env
 Environment=RN1_ABSBAND_INITIAL=600
 Environment=RN1_ABSBAND_MAX_POSITIONS=8
 Environment=RN1_ABSBAND_MIN_TARGET=200
-Environment=RN1_ABSBAND_MAX_USD_PER_MARKET=5
+Environment=RN1_ABSBAND_MAX_USD_PER_MARKET=4.5
 Environment=RN1_ABSBAND_SKIP_HIGH=0.20
 Environment=RN1_ABSBAND_NORMAL_SIZE=4.5
 Environment=RN1_ABSBAND_PENNY_SIZE=1.0

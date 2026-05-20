@@ -3,11 +3,14 @@
 Surfandturf trades big NBA/foot tickets ($1K-$200K per chunk). His winning
 config (yesterday $30→$60) used MIN_TARGET=$500, no skip zone, tight drift.
 Activity profile: 41 chunks >$5K, 87 chunks $1K-5K (whale-ish), top 10 BUYs
-all NBA matches (Spurs, Pistons, Cavaliers, Knicks).
+all NBA matches (Spurs, Pistons, Cavaliers, Knicks). NOTE the wallet has
+been near-dormant since 2026-05-15 — expect very few paper trades.
 
-Bands :
-  - penny [0.02-0.20)  -> $1
-  - normal [0.20-0.85] -> $4.50
+Effective bands with service env (SKIP_HIGH=0.20, NORMAL_MAX=0.85,
+MIN_TARGET=$500):
+  - <0.06              -> SKIP (lottery)
+  - [0.06-0.20)        -> $1.00 (penny, floored to 5 shares)
+  - [0.20-0.85]        -> $4.50 (normal — his historical edge zone)
   - >0.85              -> SKIP (heavy fav too thin edge for our scale)
 
 Reads decisions.jsonl written by bot-cp.service, filters wallet=surfandturf.
@@ -158,13 +161,18 @@ def _refresh_open_markets(positions: dict, markets: dict) -> int:
 
 
 def _compute_size_usd(price: float) -> float | None:
-    """Return USD to allocate, or None to skip. RN1-tuned absolute_band."""
+    """Return USD to allocate, or None to skip. Surfandturf absolute_band.
+
+    The TIER_SKIP_HIGH branch is dead code under the current service env
+    (SKIP_HIGH=PENNY_MAX=0.20); kept so a deploy can re-enable a mid_low
+    skip by raising SKIP_HIGH without code changes.
+    """
     if price < TIER_PENNY_MIN:
         return None  # lottery
     if price < TIER_PENNY_MAX:
         return TIER_PENNY_SIZE  # forced to 5+ shares via MIN_SHARES floor
     if price < TIER_SKIP_HIGH:
-        return None  # his losing zone (mid_low ROI -1.3%)
+        return None  # disabled when env SKIP_HIGH<=PENNY_MAX
     if price <= TIER_NORMAL_MAX:
         return TIER_NORMAL_SIZE
     return None  # > NORMAL_MAX, edge too thin
