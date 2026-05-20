@@ -127,17 +127,14 @@ def handle_buy(decision: dict, positions: dict) -> None:
             write_jsonl("trades.jsonl", {**decision, "local_action": "skip_resolve_failed"})
             return
 
-    cond_id = resolved.get("condition_id", "")
-    outcome_idx = int(resolved.get("outcome_index", 0))
-    # Cap per (market, outcome) — NOT per market, so we can mirror RN1's
-    # pattern of buying both sides of a binary as the match unfolds (his
-    # "reverse conviction" — he never SELLs the original side, just adds
-    # to the new winner side). Each binary outcome has its own $cap.
-    existing_cost_same_outcome = sum(
-        p["cost_usd"] for p in positions.values()
-        if p.get("condition_id") == cond_id
-        and int(p.get("outcome_index", -1)) == outcome_idx
-    )
+    # Cap per (market, outcome) via token_id — NOT per market — so we can
+    # mirror RN1's "reverse conviction" pattern (he buys both sides of a
+    # binary, never SELLs the loser). Each binary outcome has a distinct
+    # Polymarket token_id, so matching on token_id is the cleanest signal.
+    # NOTE: positions dict is keyed by token_id, but other entries may also
+    # carry the same token_id field; we use the dict lookup directly.
+    target_tok = resolved["token_id"]
+    existing_cost_same_outcome = float(positions.get(target_tok, {}).get("cost_usd", 0))
     if existing_cost_same_outcome + size_usd > config.MAX_USD_PER_MARKET:
         log.info(f"SKIP BUY: outcome saturé (${existing_cost_same_outcome:.2f} + ${size_usd:.2f} > ${config.MAX_USD_PER_MARKET}) tier={tier}")
         write_jsonl("trades.jsonl", {**decision, "local_action": "skip_outcome_saturated", "tier": tier})
