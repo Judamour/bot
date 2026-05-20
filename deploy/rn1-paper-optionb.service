@@ -1,5 +1,5 @@
 [Unit]
-Description=RN1 Paper Option B — Absband + data-driven filters (hour, market_type, whale)
+Description=RN1 Paper Option B v2 — validated via 3500+ REDEEM events deep analysis
 After=network.target bot-cp.service
 
 [Service]
@@ -7,14 +7,15 @@ Type=simple
 User=botuser
 WorkingDirectory=/home/botuser/bot-trading
 EnvironmentFile=-/home/botuser/bot-trading/.env
-# Match live $628 baseline, plus Option B exclusion filters
-Environment=RN1_OPTIONB_INITIAL=628
-Environment=RN1_OPTIONB_MAX_POSITIONS=25
-Environment=RN1_OPTIONB_MIN_TARGET=10
-Environment=RN1_OPTIONB_MAX_USD_PER_MARKET=25
+# Option B v2 — validated 2026-05-20. Same sizing as yesterday-style but adds
+# Qualification skip + Hour 18-24 skip + mtype={other} skip + whale skip.
+Environment=RN1_OPTIONB_INITIAL=600
+Environment=RN1_OPTIONB_MAX_POSITIONS=8
+Environment=RN1_OPTIONB_MIN_TARGET=200
+Environment=RN1_OPTIONB_MAX_USD_PER_MARKET=4.5
 Environment=RN1_OPTIONB_SKIP_HIGH=0.20
-Environment=RN1_OPTIONB_NORMAL_SIZE=8.0
-Environment=RN1_OPTIONB_PENNY_SIZE=2.0
+Environment=RN1_OPTIONB_NORMAL_SIZE=4.5
+Environment=RN1_OPTIONB_PENNY_SIZE=1.0
 ExecStart=/home/botuser/bot-trading/venv/bin/python -m analysis.rn1.paper_optionb
 Restart=on-failure
 RestartSec=30

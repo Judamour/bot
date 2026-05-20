@@ -1,5 +1,5 @@
 [Unit]
-Description=RN1 Paper Absband — Option A config (mirror live $628)
+Description=RN1 Paper Absband — "yesterday strategy" small sizing, no Option B filters
 After=network.target bot-cp.service
 
 [Service]
@@ -7,14 +7,15 @@ Type=simple
 User=botuser
 WorkingDirectory=/home/botuser/bot-trading
 EnvironmentFile=-/home/botuser/bot-trading/.env
-# Match live $628 Option A config (post 6010-trade analysis)
-Environment=RN1_ABSBAND_INITIAL=628
-Environment=RN1_ABSBAND_MAX_POSITIONS=25
-Environment=RN1_ABSBAND_MIN_TARGET=10
-Environment=RN1_ABSBAND_MAX_USD_PER_MARKET=25
+# "Yesterday's strategy" — small sizing that grew $30 → $60 on surfandturf,
+# now applied to RN1 with $600 paper bankroll. No Option B filters; raw absband.
+Environment=RN1_ABSBAND_INITIAL=600
+Environment=RN1_ABSBAND_MAX_POSITIONS=8
+Environment=RN1_ABSBAND_MIN_TARGET=200
+Environment=RN1_ABSBAND_MAX_USD_PER_MARKET=5
 Environment=RN1_ABSBAND_SKIP_HIGH=0.20
-Environment=RN1_ABSBAND_NORMAL_SIZE=8.0
-Environment=RN1_ABSBAND_PENNY_SIZE=2.0
+Environment=RN1_ABSBAND_NORMAL_SIZE=4.5
+Environment=RN1_ABSBAND_PENNY_SIZE=1.0
 ExecStart=/home/botuser/bot-trading/venv/bin/python -m analysis.rn1.paper_absband
 Restart=on-failure
 RestartSec=30

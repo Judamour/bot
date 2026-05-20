@@ -197,25 +197,34 @@ def _trade_passes(trade: dict, market: dict | None) -> tuple[bool, str]:
     if tier in ("lottery", "losing_zone", "thin_edge"):
         return False, f"tier_{tier}({price:.3f})"
 
-    # --- Option B filters (data-driven, from 6010-trade deep analysis) ---
-    # 1. Skip RN1's worst hour zone (18-24 UTC = -14.16% ROI)
+    # --- Option B v2 filters — 2026-05-20 validated via 3500+ REDEEM events ---
+    # 1. Skip RN1's worst hour zone (18-24 UTC = -14.16% ROI in 5-day analysis)
     ts = int(trade.get("timestamp") or trade.get("ts") or 0)
     if ts > 0:
         hour_utc = datetime.fromtimestamp(ts, tz=timezone.utc).hour
         if 18 <= hour_utc < 24:
             return False, f"optb_bad_hour({hour_utc}h)"
 
-    # 2. Skip his -EV market types
+    # 2. Skip Tennis Qualification markets — deep analysis shows 51% WR vs
+    #    89-95% on every other category. His worst zone by 40pp margin.
     title = trade.get("title") or trade.get("market") or ""
+    title_low = title.lower()
+    if "qualification" in title_low:
+        return False, "optb_qualif_market"
+
+    # 3. Skip 'other' mtype (catch-all, low signal by definition).
+    #    NOTE: draw/spread/winner_yes_no were in the OLD bad list (5-day MTM
+    #    analysis). Deep PnL on REDEEM events (3500+ resolved markets) shows
+    #    they are actually his BEST categories (89-95% WR). Removed.
     outcome = trade.get("outcome") or ""
     mtype = classify_market_type(title, outcome)
-    if mtype in ("draw", "spread", "winner_yes_no", "other"):
+    if mtype == "other":
         return False, f"optb_bad_mtype({mtype})"
 
-    # 3. Skip his whale trades (>$10K = -27% ROI, manipulation/desperate DCA)
+    # 4. Skip his whale trades (>$10K = -27% ROI, manipulation/desperate DCA)
     if target_size and target_size > 10000:
         return False, f"optb_whale({target_size:.0f})"
-    # --- end Option B filters ---
+    # --- end Option B v2 filters ---
 
     return True, "ok"
 
