@@ -1554,19 +1554,20 @@
     </table>
   </details>
 
-  <!-- ═══ A/B/C Comparison — 3 strategies side-by-side ═══ -->
+  <!-- ═══ A/B/C/D Comparison — 4 strategies side-by-side ═══ -->
   <h3 style="margin:24px 0 8px 0;font-size:14px;display:flex;align-items:center;gap:8px">
-    ⚔️ A/B/C Comparison — 3 strategies side-by-side
+    ⚔️ A/B/C/D Comparison — 4 strategies side-by-side
     <span style="font-size:11px;padding:2px 6px;border-radius:6px;background:#0ea5e9;color:#fff;font-weight:600">$600 each</span>
   </h3>
   <p style="color:var(--muted);font-size:12px;margin:0 0 8px 0">
-    All 3 bots start at $600 paper, mirror RN1 BUYs, same sizing (penny $1, normal $4.5).
-    Different filter sets:
+    All 4 bots start at $600 paper, same sizing (penny $1, normal $4.5).
+    3 strategies on <strong>RN1</strong> wallet + 1 on <strong>surfandturf</strong>:
     <strong>absband</strong> = raw (no filter),
-    <strong>optionb</strong> = old filters (Qualif/18-24/mtype/whale, partially wrong),
-    <strong>optionc</strong> = pattern-corrected (only hour 19, lottery <$0.06, Monday, mtype=other, whale).
+    <strong>optionb</strong> = old filters (Qualif/18-24/mtype/whale),
+    <strong>optionc</strong> = pattern-corrected (hour 19, lottery, Monday),
+    <strong>surfandturf</strong> = different wallet (NBA/foot whale, MIN_TARGET=$500).
   </p>
-  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:18px">
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:18px">
     <div style="border:1px solid var(--border);border-radius:6px;padding:12px" id="rn1-ab-cmp-absband-box">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
         <strong style="font-size:13px">🟡 absband (raw)</strong>
@@ -1601,6 +1602,18 @@
         <div><span style="color:var(--muted)">Perf</span><br><strong id="rn1-ab-cmp-optionc-perf" style="font-size:18px">—</strong></div>
         <div><span style="color:var(--muted)">Win rate</span><br><strong id="rn1-ab-cmp-optionc-wr">—</strong></div>
         <div><span style="color:var(--muted)">Trades</span><br><strong id="rn1-ab-cmp-optionc-tr">—</strong></div>
+      </div>
+    </div>
+    <div style="border:1px solid var(--border);border-radius:6px;padding:12px" id="rn1-ab-cmp-surfandturf-box">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <strong style="font-size:13px">🟣 surfandturf (NBA)</strong>
+        <span id="rn1-ab-cmp-surfandturf-trophy" style="font-size:11px;padding:2px 6px;border-radius:4px;background:transparent;color:#fff;font-weight:700"></span>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px">
+        <div><span style="color:var(--muted)">Equity</span><br><strong id="rn1-ab-cmp-surfandturf-eq" style="font-size:18px">—</strong></div>
+        <div><span style="color:var(--muted)">Perf</span><br><strong id="rn1-ab-cmp-surfandturf-perf" style="font-size:18px">—</strong></div>
+        <div><span style="color:var(--muted)">Win rate</span><br><strong id="rn1-ab-cmp-surfandturf-wr">—</strong></div>
+        <div><span style="color:var(--muted)">Trades</span><br><strong id="rn1-ab-cmp-surfandturf-tr">—</strong></div>
       </div>
     </div>
   </div>
@@ -3316,12 +3329,15 @@ async function loadRn1() {
     }
   }
 
-  // ── A/B/C Comparison: absband (raw) vs optionb (v2) vs optionc (corrected) ──
+  // ── A/B/C/D Comparison: 3 RN1 strategies + surfandturf ──
+  const surfandturf = data.paper_surfandturf || {};
+  const stLast = surfandturf.latest_equity || {};
   (function renderABCComparison() {
     const bots = [
-      {key: 'absband', label: 'absband (raw)',      color: '#d97706', last: abLast},
-      {key: 'optionb', label: 'optionb (v2)',       color: '#16a34a', last: obLast},
-      {key: 'optionc', label: 'optionc (corrected)', color: '#3b82f6', last: ocLast},
+      {key: 'absband',     label: 'absband (raw)',         color: '#d97706', last: abLast},
+      {key: 'optionb',     label: 'optionb (v2)',          color: '#16a34a', last: obLast},
+      {key: 'optionc',     label: 'optionc (corrected)',   color: '#3b82f6', last: ocLast},
+      {key: 'surfandturf', label: 'surfandturf (NBA)',     color: '#a855f7', last: stLast},
     ];
 
     const perfStr = (p) => p == null ? '—' : ((p > 0 ? '+' : '') + p.toFixed(2) + '%');
@@ -3380,16 +3396,14 @@ async function loadRn1() {
       } else {
         const sorted = bots.slice().sort((a, b) => b.last.equity_usd - a.last.equity_usd);
         const top = sorted[0];
-        const second = sorted[1];
-        const last = sorted[2];
-        const topVsSecond = top.last.equity_usd - second.last.equity_usd;
+        const last = sorted[sorted.length - 1];
         const topVsLast = top.last.equity_usd - last.last.equity_usd;
         if (topVsLast < 0.5) {
           verdictEl.innerHTML = '<span style="color:#9ca3af">tie</span> — all within $0.50';
         } else {
+          const others = sorted.slice(1).map(b => b.label + ' +$' + (top.last.equity_usd - b.last.equity_usd).toFixed(2)).join(' · ');
           verdictEl.innerHTML = '<span style="color:' + top.color + '">🥇 ' + top.label + '</span> leads · ' +
-            '<span style="color:#9ca3af">vs ' + second.label + ' +$' + topVsSecond.toFixed(2) + ' · ' +
-            'vs ' + last.label + ' +$' + topVsLast.toFixed(2) + '</span>';
+            '<span style="color:#9ca3af">vs ' + others + '</span>';
         }
       }
     }
@@ -3407,6 +3421,7 @@ async function loadRn1() {
       {label: 'absband (raw)',  color: '#d97706', curve: (data.paper_absband || {}).equity_curve || []},
       {label: 'optionb (v2)',   color: '#16a34a', curve: (data.paper_optionb || {}).equity_curve || []},
       {label: 'optionc (fix)',  color: '#3b82f6', curve: (data.paper_optionc || {}).equity_curve || []},
+      {label: 'surfandturf',    color: '#a855f7', curve: (data.paper_surfandturf || {}).equity_curve || []},
     ];
 
     // Collect all unique timestamps (Unix ts in seconds expected)

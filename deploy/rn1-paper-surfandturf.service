@@ -1,0 +1,27 @@
+[Unit]
+Description=Surfandturf Paper — copy of wallet 0x9f2fe025…2ca8 NBA/foot conviction bot
+After=network.target bot-cp.service
+
+[Service]
+Type=simple
+User=botuser
+WorkingDirectory=/home/botuser/bot-trading
+EnvironmentFile=-/home/botuser/bot-trading/.env
+# Surfandturf historical params from the $40→$60 wallet — applied at $600 paper.
+# Same sizing as the 3 RN1 bots for direct comparability.
+Environment=SURF_INITIAL=600
+Environment=SURF_MAX_POSITIONS=8
+Environment=SURF_MIN_TARGET=500
+Environment=SURF_MAX_USD_PER_MARKET=4.5
+Environment=SURF_SKIP_HIGH=0.20
+Environment=SURF_NORMAL_SIZE=4.5
+Environment=SURF_PENNY_SIZE=1.0
+Environment=SURF_NORMAL_MAX=0.85
+ExecStart=/home/botuser/bot-trading/venv/bin/python -m analysis.rn1.paper_surfandturf
+Restart=on-failure
+RestartSec=30
+StandardOutput=append:/home/botuser/bot-trading/logs/rn1/paper_surfandturf.log
+StandardError=append:/home/botuser/bot-trading/logs/rn1/paper_surfandturf.log
+
+[Install]
+WantedBy=multi-user.target

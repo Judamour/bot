@@ -13,7 +13,12 @@ TARGETS = [
     {
         "pseudonym": "RN1",
         "wallet": "0x2005d16a84ceefa912d4e380cd32e7ff827875ea",
-        "allocation_pct": 1.0,
+        "allocation_pct": 0.5,
+    },
+    {
+        "pseudonym": "surfandturf",
+        "wallet": "0x9f2fe025f84839ca81dd8e0338892605702d2ca8",
+        "allocation_pct": 0.5,
     },
 ]
 

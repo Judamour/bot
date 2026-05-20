@@ -1042,6 +1042,17 @@ def api_rn1():
     optionc_trades = _tail_jsonl(optionc_trades_path, 30)
     optionc_latest = optionc_equity[-1] if optionc_equity else {}
 
+    # Paper Surfandturf — separate target wallet (NBA/foot conviction style)
+    surf_state_path = base / "analysis/rn1/data_surfandturf/state.json"
+    surf_positions_path = base / "analysis/rn1/data_surfandturf/positions.json"
+    surf_equity_path = base / "analysis/rn1/data_surfandturf/equity.jsonl"
+    surf_trades_path = base / "analysis/rn1/data_surfandturf/trades.jsonl"
+    surf_state = _read_json(surf_state_path)
+    surf_positions = _read_json(surf_positions_path)
+    surf_equity = _tail_jsonl(surf_equity_path, 60)
+    surf_trades = _tail_jsonl(surf_trades_path, 30)
+    surf_latest = surf_equity[-1] if surf_equity else {}
+
     return jsonify({
         "summary": summary,
         "deep": deep,
@@ -1079,6 +1090,13 @@ def api_rn1():
             "equity_curve": optionc_equity,
             "open_positions": list(optionc_positions.values()) if isinstance(optionc_positions, dict) else [],
             "recent_trades": optionc_trades,
+        },
+        "paper_surfandturf": {
+            "state": surf_state,
+            "latest_equity": surf_latest,
+            "equity_curve": surf_equity,
+            "open_positions": list(surf_positions.values()) if isinstance(surf_positions, dict) else [],
+            "recent_trades": surf_trades,
         },
     })
 
