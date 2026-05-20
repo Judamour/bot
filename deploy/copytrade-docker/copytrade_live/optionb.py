@@ -42,8 +42,15 @@ def classify_market_type(title: str, outcome: str) -> str:
     return "other"
 
 
-# Market types where RN1 loses money — skip these in Option B
-BAD_MTYPES = frozenset({"draw", "spread", "winner_yes_no", "other"})
+# Market types where RN1 loses money — skip these in Option B.
+#
+# 2026-05-20 deep analysis (3500+ resolved markets via REDEEM events) overrode
+# the original Option B 5-day MTM analysis: draw / spread / winner_yes_no are
+# actually his STRONGEST categories (89-95% WR, +2500-6000% ROI). Removing them
+# from the bad list captures 1,493 additional winning markets in his history.
+#
+# Only "other" (catch-all for unclassified) remains — low signal by definition.
+BAD_MTYPES = frozenset({"other"})
 
 # Hours (UTC) where RN1 loses money — skip BUYs that originated in this window
 BAD_HOURS_UTC = frozenset(range(18, 24))
