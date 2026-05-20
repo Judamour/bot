@@ -6,7 +6,7 @@ import logging
 log = logging.getLogger(__name__)
 
 MAX_TRADE_PCT = 0.50
-MIN_PAPER_SIZE_USD = 1.0
+MIN_PAPER_SIZE_USD = 0.10
 # Hard cap on how old a trade can be when the bot first boots a wallet (last_seen_ts == 0).
 # Without this the first cycle replays days of historical trades, which inflates PnL
 # with a retroactive mini-backtest the bot was never present for.
