@@ -1,0 +1,27 @@
+[Unit]
+Description=RN1 Paper Option C — pattern-corrected filters (hour 19 only, lottery, Monday)
+After=network.target bot-cp.service
+
+[Service]
+Type=simple
+User=botuser
+WorkingDirectory=/home/botuser/bot-trading
+EnvironmentFile=-/home/botuser/bot-trading/.env
+# Option C — corrected from deep pattern analysis on 913 resolved markets.
+# Same sizing as Option B (penny $1, normal $4.5, max $4.5/market, MIN_TARGET=$200)
+# but filters tuned by labeled WIN/LOST/OPEN data instead of MTM proxy.
+Environment=RN1_OPTIONC_INITIAL=600
+Environment=RN1_OPTIONC_MAX_POSITIONS=8
+Environment=RN1_OPTIONC_MIN_TARGET=200
+Environment=RN1_OPTIONC_MAX_USD_PER_MARKET=4.5
+Environment=RN1_OPTIONC_SKIP_HIGH=0.20
+Environment=RN1_OPTIONC_NORMAL_SIZE=4.5
+Environment=RN1_OPTIONC_PENNY_SIZE=1.0
+ExecStart=/home/botuser/bot-trading/venv/bin/python -m analysis.rn1.paper_optionc
+Restart=on-failure
+RestartSec=30
+StandardOutput=append:/home/botuser/bot-trading/logs/rn1/paper_optionc.log
+StandardError=append:/home/botuser/bot-trading/logs/rn1/paper_optionc.log
+
+[Install]
+WantedBy=multi-user.target

@@ -1554,20 +1554,22 @@
     </table>
   </details>
 
-  <!-- ═══ A/B Comparison — paper_absband vs paper_optionb ═══ -->
+  <!-- ═══ A/B/C Comparison — 3 strategies side-by-side ═══ -->
   <h3 style="margin:24px 0 8px 0;font-size:14px;display:flex;align-items:center;gap:8px">
-    ⚔️ A/B Comparison — Yesterday strategy vs Validated v2
+    ⚔️ A/B/C Comparison — 3 strategies side-by-side
     <span style="font-size:11px;padding:2px 6px;border-radius:6px;background:#0ea5e9;color:#fff;font-weight:600">$600 each</span>
   </h3>
   <p style="color:var(--muted);font-size:12px;margin:0 0 8px 0">
-    Both bots start at $600 paper, mirror RN1 BUYs. Same sizing (penny $1, normal $4.5).
-    Difference: <strong>optionb</strong> applies 4 filters validated by 3500+ REDEEM events
-    (Qualification, hour 18-24 UTC, mtype={other}, whale >$10K). Direct A/B test.
+    All 3 bots start at $600 paper, mirror RN1 BUYs, same sizing (penny $1, normal $4.5).
+    Different filter sets:
+    <strong>absband</strong> = raw (no filter),
+    <strong>optionb</strong> = old filters (Qualif/18-24/mtype/whale, partially wrong),
+    <strong>optionc</strong> = pattern-corrected (only hour 19, lottery <$0.06, Monday, mtype=other, whale).
   </p>
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:24px">
+  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:18px">
     <div style="border:1px solid var(--border);border-radius:6px;padding:12px" id="rn1-ab-cmp-absband-box">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-        <strong style="font-size:13px">🟡 absband (hier-style)</strong>
+        <strong style="font-size:13px">🟡 absband (raw)</strong>
         <span id="rn1-ab-cmp-absband-trophy" style="font-size:11px;padding:2px 6px;border-radius:4px;background:transparent;color:#fff;font-weight:700"></span>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px">
@@ -1579,7 +1581,7 @@
     </div>
     <div style="border:1px solid var(--border);border-radius:6px;padding:12px" id="rn1-ab-cmp-optionb-box">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-        <strong style="font-size:13px">🟢 optionb (validé v2)</strong>
+        <strong style="font-size:13px">🟢 optionb (v2)</strong>
         <span id="rn1-ab-cmp-optionb-trophy" style="font-size:11px;padding:2px 6px;border-radius:4px;background:transparent;color:#fff;font-weight:700"></span>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px">
@@ -1587,6 +1589,18 @@
         <div><span style="color:var(--muted)">Perf</span><br><strong id="rn1-ab-cmp-optionb-perf" style="font-size:18px">—</strong></div>
         <div><span style="color:var(--muted)">Win rate</span><br><strong id="rn1-ab-cmp-optionb-wr">—</strong></div>
         <div><span style="color:var(--muted)">Trades</span><br><strong id="rn1-ab-cmp-optionb-tr">—</strong></div>
+      </div>
+    </div>
+    <div style="border:1px solid var(--border);border-radius:6px;padding:12px" id="rn1-ab-cmp-optionc-box">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <strong style="font-size:13px">🔵 optionc (corrected)</strong>
+        <span id="rn1-ab-cmp-optionc-trophy" style="font-size:11px;padding:2px 6px;border-radius:4px;background:transparent;color:#fff;font-weight:700"></span>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px">
+        <div><span style="color:var(--muted)">Equity</span><br><strong id="rn1-ab-cmp-optionc-eq" style="font-size:18px">—</strong></div>
+        <div><span style="color:var(--muted)">Perf</span><br><strong id="rn1-ab-cmp-optionc-perf" style="font-size:18px">—</strong></div>
+        <div><span style="color:var(--muted)">Win rate</span><br><strong id="rn1-ab-cmp-optionc-wr">—</strong></div>
+        <div><span style="color:var(--muted)">Trades</span><br><strong id="rn1-ab-cmp-optionc-tr">—</strong></div>
       </div>
     </div>
   </div>
@@ -3176,72 +3190,82 @@ async function loadRn1() {
     }
   }
 
-  // ── A/B Comparison: absband (yesterday) vs optionb (validated v2) ──
-  (function renderABComparison() {
-    const abEq = abLast.equity_usd;
-    const obEq = obLast.equity_usd;
-    const abPerf = abLast.perf_pct;
-    const obPerf = obLast.perf_pct;
-    const abWr = (abLast.win_rate || 0) * 100;
-    const obWr = (obLast.win_rate || 0) * 100;
-    const abN = abLast.n_resolved || 0;
-    const obN = obLast.n_resolved || 0;
-
-    setText('rn1-ab-cmp-absband-eq', abEq != null ? '$' + abEq.toFixed(2) : '—');
-    setText('rn1-ab-cmp-optionb-eq', obEq != null ? '$' + obEq.toFixed(2) : '—');
+  // ── A/B/C Comparison: absband (raw) vs optionb (v2) vs optionc (corrected) ──
+  const optionc = data.paper_optionc || {};
+  const ocLast = optionc.latest_equity || {};
+  (function renderABCComparison() {
+    const bots = [
+      {key: 'absband', label: 'absband (raw)',      color: '#d97706', last: abLast},
+      {key: 'optionb', label: 'optionb (v2)',       color: '#16a34a', last: obLast},
+      {key: 'optionc', label: 'optionc (corrected)', color: '#3b82f6', last: ocLast},
+    ];
 
     const perfStr = (p) => p == null ? '—' : ((p > 0 ? '+' : '') + p.toFixed(2) + '%');
-    const abPerfNode = document.getElementById('rn1-ab-cmp-absband-perf');
-    const obPerfNode = document.getElementById('rn1-ab-cmp-optionb-perf');
-    if (abPerfNode) {
-      abPerfNode.textContent = perfStr(abPerf);
-      abPerfNode.style.color = (abPerf == null) ? '' : (abPerf > 0 ? '#3fb950' : (abPerf < 0 ? '#f85149' : ''));
-    }
-    if (obPerfNode) {
-      obPerfNode.textContent = perfStr(obPerf);
-      obPerfNode.style.color = (obPerf == null) ? '' : (obPerf > 0 ? '#3fb950' : (obPerf < 0 ? '#f85149' : ''));
-    }
 
-    setText('rn1-ab-cmp-absband-wr', abN > 0 ? abWr.toFixed(1) + '% (' + (abLast.n_won || 0) + '/' + abN + ')' : '—');
-    setText('rn1-ab-cmp-optionb-wr', obN > 0 ? obWr.toFixed(1) + '% (' + (obLast.n_won || 0) + '/' + obN + ')' : '—');
-    setText('rn1-ab-cmp-absband-tr', abN);
-    setText('rn1-ab-cmp-optionb-tr', obN);
+    let leaderKey = null;
+    let leaderEq = -Infinity;
+    bots.forEach(b => {
+      const eq = b.last.equity_usd;
+      const perf = b.last.perf_pct;
+      const wr = (b.last.win_rate || 0) * 100;
+      const n = b.last.n_resolved || 0;
+      const won = b.last.n_won || 0;
 
-    // Highlight winner with trophy + box border
-    const abBox = document.getElementById('rn1-ab-cmp-absband-box');
-    const obBox = document.getElementById('rn1-ab-cmp-optionb-box');
-    const abTrophy = document.getElementById('rn1-ab-cmp-absband-trophy');
-    const obTrophy = document.getElementById('rn1-ab-cmp-optionb-trophy');
-    if (abBox && obBox) {
-      abBox.style.borderColor = 'var(--border)';
-      obBox.style.borderColor = 'var(--border)';
-      if (abTrophy) { abTrophy.textContent = ''; abTrophy.style.background = 'transparent'; }
-      if (obTrophy) { obTrophy.textContent = ''; obTrophy.style.background = 'transparent'; }
-      if (abEq != null && obEq != null && abEq !== obEq) {
-        if (obEq > abEq) {
-          obBox.style.borderColor = '#16a34a';
-          if (obTrophy) { obTrophy.textContent = '🏆 LEADING'; obTrophy.style.background = '#16a34a'; }
-        } else {
-          abBox.style.borderColor = '#d97706';
-          if (abTrophy) { abTrophy.textContent = '🏆 LEADING'; abTrophy.style.background = '#d97706'; }
-        }
+      setText('rn1-ab-cmp-' + b.key + '-eq', eq != null ? '$' + eq.toFixed(2) : '—');
+      const perfNode = document.getElementById('rn1-ab-cmp-' + b.key + '-perf');
+      if (perfNode) {
+        perfNode.textContent = perfStr(perf);
+        perfNode.style.color = (perf == null) ? '' : (perf > 0 ? '#3fb950' : (perf < 0 ? '#f85149' : ''));
+      }
+      setText('rn1-ab-cmp-' + b.key + '-wr', n > 0 ? wr.toFixed(1) + '% (' + won + '/' + n + ')' : '—');
+      setText('rn1-ab-cmp-' + b.key + '-tr', n);
+
+      // Reset borders + trophies
+      const box = document.getElementById('rn1-ab-cmp-' + b.key + '-box');
+      const trophy = document.getElementById('rn1-ab-cmp-' + b.key + '-trophy');
+      if (box) box.style.borderColor = 'var(--border)';
+      if (trophy) { trophy.textContent = ''; trophy.style.background = 'transparent'; }
+
+      if (eq != null && eq > leaderEq) {
+        leaderEq = eq;
+        leaderKey = b.key;
+      }
+    });
+
+    // Highlight leader
+    if (leaderKey != null) {
+      const leader = bots.find(b => b.key === leaderKey);
+      const box = document.getElementById('rn1-ab-cmp-' + leaderKey + '-box');
+      const trophy = document.getElementById('rn1-ab-cmp-' + leaderKey + '-trophy');
+      // Only highlight if leader has a meaningful gap with the others
+      const others = bots.filter(b => b.key !== leaderKey).map(b => b.last.equity_usd).filter(e => e != null);
+      const maxOther = others.length > 0 ? Math.max(...others) : null;
+      if (box && trophy && maxOther != null && (leaderEq - maxOther) > 0.5) {
+        box.style.borderColor = leader.color;
+        trophy.textContent = '🏆 LEADING';
+        trophy.style.background = leader.color;
       }
     }
 
     // Verdict block
     const verdictEl = document.getElementById('rn1-ab-cmp-verdict-text');
     if (verdictEl) {
-      if (abEq == null || obEq == null) {
+      const haveAll = bots.every(b => b.last.equity_usd != null);
+      if (!haveAll) {
         verdictEl.textContent = 'awaiting data…';
       } else {
-        const diff = obEq - abEq;
-        const diffPct = (Math.abs(diff) / Math.max(abEq, obEq)) * 100;
-        if (Math.abs(diff) < 0.5) {
-          verdictEl.innerHTML = '<span style="color:#9ca3af">tie</span> — Δ < $0.50';
-        } else if (diff > 0) {
-          verdictEl.innerHTML = '<span style="color:#16a34a">✓ Option B v2 leads</span> by $' + diff.toFixed(2) + ' (' + diffPct.toFixed(2) + '%). Filtres data-driven valident l\'hypothèse.';
+        const sorted = bots.slice().sort((a, b) => b.last.equity_usd - a.last.equity_usd);
+        const top = sorted[0];
+        const second = sorted[1];
+        const last = sorted[2];
+        const topVsSecond = top.last.equity_usd - second.last.equity_usd;
+        const topVsLast = top.last.equity_usd - last.last.equity_usd;
+        if (topVsLast < 0.5) {
+          verdictEl.innerHTML = '<span style="color:#9ca3af">tie</span> — all within $0.50';
         } else {
-          verdictEl.innerHTML = '<span style="color:#d97706">⚠ Yesterday-style leads</span> by $' + Math.abs(diff).toFixed(2) + ' (' + diffPct.toFixed(2) + '%). Les filtres Option B v2 réduisent (encore) la perf.';
+          verdictEl.innerHTML = '<span style="color:' + top.color + '">🥇 ' + top.label + '</span> leads · ' +
+            '<span style="color:#9ca3af">vs ' + second.label + ' +$' + topVsSecond.toFixed(2) + ' · ' +
+            'vs ' + last.label + ' +$' + topVsLast.toFixed(2) + '</span>';
         }
       }
     }
