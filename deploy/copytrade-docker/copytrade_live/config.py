@@ -61,6 +61,9 @@ TIER_MID_MAX_SIZE = float(os.getenv("COPYTRADE_TIER_MID_MAX_SIZE", "5.0"))
 TIER_FAV_MIN_CONVICTION = float(os.getenv("COPYTRADE_TIER_FAV_MIN_CONVICTION", "0.15"))
 TIER_FAV_SIZE = float(os.getenv("COPYTRADE_TIER_FAV_SIZE", "4.5"))
 TIER_NORMAL_SIZE = float(os.getenv("COPYTRADE_TIER_NORMAL_SIZE", "4.5"))
+# Option B filters — RN1-specific exclusions (bad hours, bad mtypes, whales).
+# Disabled by default to preserve Option A semantics for non-RN1 wallets.
+OPTIONB_FILTERS = os.getenv("COPYTRADE_OPTIONB_FILTERS", "false").lower() == "true"
 DRY_RUN = os.getenv("COPYTRADE_DRY_RUN", "true").lower() == "true"
 
 GAMMA_API = "https://gamma-api.polymarket.com"

@@ -10,7 +10,7 @@ import signal
 import sys
 import time
 
-from . import config, sizing, state, executor, notifier, status_writer
+from . import config, sizing, state, executor, notifier, status_writer, optionb
 
 config.LOGS_DIR.mkdir(parents=True, exist_ok=True)
 logging.basicConfig(
@@ -84,6 +84,13 @@ def handle_buy(decision: dict, positions: dict) -> None:
         log.info(f"SKIP BUY: entry {p:.3f} < MIN_ENTRY_PRICE {config.MIN_ENTRY_PRICE} (lottery ticket filter)")
         write_jsonl("trades.jsonl", {**decision, "local_action": "skip_lottery_ticket"})
         return
+
+    if config.OPTIONB_FILTERS:
+        ok, reason = optionb.optionb_passes(decision)
+        if not ok:
+            log.info(f"SKIP BUY: {reason}")
+            write_jsonl("trades.jsonl", {**decision, "local_action": f"skip_{reason}"})
+            return
 
     trade_pct = float(decision.get("trade_pct", 0) or 0)
     tier = sizing.describe_tier(p, trade_pct)
