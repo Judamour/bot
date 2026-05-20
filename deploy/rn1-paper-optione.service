@@ -1,5 +1,5 @@
 [Unit]
-Description=RN1 Paper Option E — absband + cross-side + cross-event defense
+Description=RN1 Paper Option E v2 — absband + 4 defensive filters
 After=network.target bot-cp.service
 
 [Service]
@@ -7,12 +7,15 @@ Type=simple
 User=botuser
 WorkingDirectory=/home/botuser/bot-trading
 EnvironmentFile=-/home/botuser/bot-trading/.env
-# Option E — same sizing as absband ($600 / $4.5 normal / $1 penny /
-# MIN_TARGET=$200 / 8 positions / $4.5 per market) plus two cross-* filters:
-#   - skip BUY if opposite outcome of same condition_id already held
-#   - skip BUY if another open position shares the same "TEAM_A vs TEAM_B"
-# Hypothesis: RN1 anti-copytrade flow (both-side hedges + correlated traps)
-# is the main loss driver, so this should bend the equity curve up vs absband.
+# Option E v2 — absband sizing ($600 / $4.5 normal / $1 penny / MIN_TARGET=$200
+# / 8 positions / $4.5 per market) plus 4 filters informed by 2026-05-20
+# research (Phemex + Columbia wash study + COPYCAT newsletter):
+#   1. cross-side same cid (catches CS Legacy 64¢ + TYLOO 42¢)
+#   2. cross-event same TEAM_A vs TEAM_B (catches Arsenal draw + Arsenal O/U)
+#   3. skip UTC hours 18-23 (RN1 -14.16% ROI documented window)
+#   4. pre-event only via Gamma gameStartTime — skip if match started or
+#      starts within 1800s (30 min). RN1's edge = live-score 45s arbitrage,
+#      uncopyable via REST polling.
 Environment=RN1_OPTIONE_INITIAL=600
 Environment=RN1_OPTIONE_MAX_POSITIONS=8
 Environment=RN1_OPTIONE_MIN_TARGET=200
@@ -20,6 +23,8 @@ Environment=RN1_OPTIONE_MAX_USD_PER_MARKET=4.5
 Environment=RN1_OPTIONE_SKIP_HIGH=0.20
 Environment=RN1_OPTIONE_NORMAL_SIZE=4.5
 Environment=RN1_OPTIONE_PENNY_SIZE=1.0
+Environment=RN1_OPTIONE_PRE_EVENT_MIN_S=1800
+Environment=RN1_OPTIONE_BAD_HOURS_UTC=18,19,20,21,22,23
 ExecStart=/home/botuser/bot-trading/venv/bin/python -m analysis.rn1.paper_optione
 Restart=on-failure
 RestartSec=30

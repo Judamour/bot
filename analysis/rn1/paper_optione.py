@@ -1,17 +1,24 @@
-"""RN1 paper bot — Option E: absband + cross-side / cross-event defense.
+"""RN1 paper bot — Option E v2: absband + 4 defensive filters.
 
-Hypothesis (2026-05-20 PM after live disconnect): RN1 injects deliberately
-losing trades to dilute copytraders — symmetric BOTH-SIDE entries on the
-same condition (Counter-Strike Legacy 64¢ + TYLOO 42¢ sum=1.06) AND
-correlated trap entries on different markets of the same match (Arsenal
-Yes-draw 9¢ + Arsenal O/U 1.5 Over 44¢, both lost when game ended 1-0).
+Built on top of Option E v1 (cross-side + cross-event) with two additional
+filters informed by 2026-05-20 PM copytrade research (Phemex + Columbia
+wash-trade study + Polymarket COPYCAT newsletter):
 
-Option E filters (vs absband baseline):
-  1. cross-side same cid : skip BUY if we already hold an OPEN position on
-     a different outcome of the same conditionId. Catches CS Legacy+TYLOO.
-  2. cross-event same match : skip BUY if we already hold an OPEN position
-     on a different market whose title shares the same "TEAM_A vs TEAM_B"
-     fragment. Catches "Arsenal draw + Arsenal O/U" correlation trap.
+  v1 filters (anti-injection):
+    1. cross-side same cid : skip BUY if we already hold an OPEN position
+       on a different outcome of the same conditionId. Catches CS Legacy
+       64¢ + TYLOO 42¢ (sum 1.06 = guaranteed loss on the pair).
+    2. cross-event same match : skip BUY if we already hold an OPEN position
+       on a different market whose title shares the same "TEAM_A vs TEAM_B".
+       Catches "Arsenal draw + Arsenal O/U" correlation trap.
+
+  v2 filters (anti-live-arb + anti-toxic-window):
+    3. Skip UTC hours 18-23 (RN1 -14.16% ROI per session 2026-05-20 deep
+       analysis — NBA/EPL evening US + sharps + live betting).
+    4. Pre-event only : query Gamma API for gameStartTime, skip if match
+       has already started OR starts within 30 min. Phemex (Apr 2026)
+       identified RN1's edge as ~45s information advantage on live-score
+       markets — uncopyable via REST polling.
 
 Sizing identical to absband: penny $1, normal $4.5, MIN_TARGET=$200,
 $4.5/market, max 8 positions.
@@ -80,6 +87,23 @@ TIER_NORMAL_SIZE = float(os.environ.get("RN1_OPTIONE_NORMAL_SIZE", "4.5"))
 # Polymarket min-order floor (5 shares)
 MIN_SHARES = 5.0
 
+# --- Bot E v2 knobs (added 2026-05-20 PM after copytrade research) ---
+# Phemex (Apr 2026): RN1's edge = ~45s information advantage on live-score
+# markets. Uncopyable via REST polling. Restrict copies to pre-event trades
+# placed at least PRE_EVENT_MIN_S before kickoff. Set to -1 to disable.
+PRE_EVENT_MIN_S = int(os.environ.get("RN1_OPTIONE_PRE_EVENT_MIN_S", "1800"))
+# Skip trades placed in these UTC hours. RN1 = -14.16% ROI in 18-23 UTC
+# per session 2026-05-20 deep analysis (NBA/EPL evening + sharps + live).
+# Set to empty string to disable.
+_BAD_HOURS_ENV = os.environ.get("RN1_OPTIONE_BAD_HOURS_UTC", "18,19,20,21,22,23")
+BAD_HOURS_UTC = {int(h) for h in _BAD_HOURS_ENV.split(",") if h.strip().isdigit()}
+
+# Gamma API — has gameStartTime, unlike CLOB
+GAMMA_API = "https://gamma-api.polymarket.com"
+_GAMMA_UA = {"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
+# Module-level cache: condition_id -> game_start_ts (epoch seconds; 0=unknown)
+_gamma_start_ts_cache: dict[str, int] = {}
+
 # Extract "TEAM_A vs TEAM_B" from common Polymarket titles, e.g.
 #   "Arsenal FC vs. Burnley FC: O/U 1.5"
 #   "Will Arsenal FC vs. Burnley FC end in a draw?"
@@ -92,6 +116,45 @@ _MATCH_RE = re.compile(
     re.IGNORECASE,
 )
 _TEAM_NOISE_SUFFIXES = (" fc", " sc", " cf")
+
+
+def _parse_gamma_ts(s: str) -> int:
+    """Parse Gamma's gameStartTime format (e.g. '2026-05-20 11:30:00+00') to
+    epoch seconds. Returns 0 on parse failure."""
+    if not s:
+        return 0
+    s = s.strip().replace(" ", "T")
+    # '+00' → '+0000' so fromisoformat accepts it
+    if s.endswith("+00"):
+        s = s + "00"
+    try:
+        return int(datetime.fromisoformat(s).timestamp())
+    except Exception:
+        return 0
+
+
+def _fetch_gamma_start_ts(cid: str) -> int:
+    """Return game_start_ts for a condition_id. Cached. 0 if Gamma has no value
+    (skip pre-event filter for that trade — fall through)."""
+    if cid in _gamma_start_ts_cache:
+        return _gamma_start_ts_cache[cid]
+    try:
+        req = httpx.get(
+            f"{GAMMA_API}/markets",
+            params={"condition_ids": cid},
+            headers=_GAMMA_UA,
+            timeout=10,
+        )
+        if req.status_code == 200:
+            data = req.json()
+            if isinstance(data, list) and data:
+                ts = _parse_gamma_ts(data[0].get("gameStartTime") or "")
+                _gamma_start_ts_cache[cid] = ts
+                return ts
+    except Exception as e:
+        log.warning(f"gamma fetch {cid[:10]}... failed: {e}")
+    _gamma_start_ts_cache[cid] = 0
+    return 0
 
 
 def _match_key(title: str) -> str | None:
@@ -251,7 +314,7 @@ def _trade_passes(
     if tier in ("lottery", "losing_zone", "thin_edge"):
         return False, f"tier_{tier}({price:.3f})"
 
-    # --- Option E cross-* filters — 2026-05-20 PM ---
+    # --- Option E v1 cross-* filters — 2026-05-20 PM ---
     # Defense against RN1 anti-copytrade injection.
 
     # 1. cross-side same cid : opposite outcome already held.
@@ -259,7 +322,7 @@ def _trade_passes(
     #    loss on the pair). When RN1 buys both sides we'd otherwise eat both.
     for held_asset, pos in positions.items():
         if pos.get("condition_id") == cid and str(held_asset) != str(asset):
-            return False, f"opte_cross_side_cid"
+            return False, "opte_cross_side_cid"
 
     # 2. cross-event same match : different market, same TEAM_A vs TEAM_B.
     #    Catches "Arsenal vs Burnley draw" + "Arsenal vs Burnley O/U 1.5"
@@ -272,8 +335,30 @@ def _trade_passes(
                 continue  # same market handled by cross-side rule above
             held_match = _match_key(pos.get("title") or "")
             if held_match and held_match == new_match:
-                return False, f"opte_cross_event_match"
-    # --- end Option E filters ---
+                return False, "opte_cross_event_match"
+
+    # --- Option E v2 filters — 2026-05-20 PM after copytrade research ---
+
+    # 3. Skip toxic UTC hours (RN1's documented losing window: NBA/EPL evening
+    #    US + sharps + live-betting flow we can't keep up with).
+    ts = int(trade.get("timestamp") or trade.get("ts") or 0)
+    if ts > 0 and BAD_HOURS_UTC:
+        hour_utc = datetime.fromtimestamp(ts, tz=timezone.utc).hour
+        if hour_utc in BAD_HOURS_UTC:
+            return False, f"opte_bad_hour({hour_utc}h)"
+
+    # 4. Pre-event only: skip if the match has already started, is starting
+    #    within PRE_EVENT_MIN_S, OR Gamma has no gameStartTime (unknown =
+    #    treat as live since we can't be sure). RN1's edge is live-score
+    #    arbitrage (~45s info advantage) — uncopyable via REST polling.
+    if PRE_EVENT_MIN_S >= 0 and ts > 0:
+        start_ts = _fetch_gamma_start_ts(cid)
+        if start_ts <= 0:
+            return False, "opte_no_gametime"
+        seconds_until_start = start_ts - ts
+        if seconds_until_start < PRE_EVENT_MIN_S:
+            return False, f"opte_live_or_close({seconds_until_start}s)"
+    # --- end Option E v2 filters ---
 
     return True, "ok"
 
@@ -553,7 +638,12 @@ def main() -> None:
     positions = _load_json(POSITIONS_PATH, {})
     markets = _load_markets()
 
-    log.info(f"Boot — RN1 paper Option E (cross-side+cross-event), "
+    bad_hr = ",".join(str(h) for h in sorted(BAD_HOURS_UTC)) or "none"
+    pre_evt = (
+        f"pre_event>={PRE_EVENT_MIN_S}s" if PRE_EVENT_MIN_S >= 0 else "pre_event=off"
+    )
+    log.info(f"Boot — RN1 paper Option E v2 (cross-side + cross-event + "
+             f"bad_hours_utc=[{bad_hr}] + {pre_evt}), "
              f"capital=${INITIAL_CAPITAL_USD}, max_pos={MAX_POSITIONS}, "
              f"max_per_market=${MAX_USD_PER_MARKET}, min_target=${MIN_TARGET_SIZE_USD}")
     log.info(f"Tier grid — penny[{TIER_PENNY_MIN}-{TIER_PENNY_MAX}): ${TIER_PENNY_SIZE} | "
