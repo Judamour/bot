@@ -7,15 +7,18 @@ Type=simple
 User=botuser
 WorkingDirectory=/home/botuser/bot-trading
 EnvironmentFile=-/home/botuser/bot-trading/.env
-# Surfandturf historical params from the $40→$60 wallet — applied at $600 paper.
-# Same sizing as the 3 RN1 bots for direct comparability.
+# Surf is a low-volume, high-conviction whale (avg chunk $5K-$150K). Backtest
+# 2026-05-20 on his 9 sold-and-tracked positions (48d window) showed 66.7% WR
+# at +64.9% ROI per trade. At $4.50 sizing the equity barely moves (his ~1 trade
+# /week × $0.60 EV = invisible). Scaled to $20 normal / $4 penny + max 5 pos
+# to make each copy meaningful while keeping max-blast acceptable (-$100 = 17%).
 Environment=SURF_INITIAL=600
-Environment=SURF_MAX_POSITIONS=8
+Environment=SURF_MAX_POSITIONS=5
 Environment=SURF_MIN_TARGET=500
-Environment=SURF_MAX_USD_PER_MARKET=4.5
+Environment=SURF_MAX_USD_PER_MARKET=20
 Environment=SURF_SKIP_HIGH=0.20
-Environment=SURF_NORMAL_SIZE=4.5
-Environment=SURF_PENNY_SIZE=1.0
+Environment=SURF_NORMAL_SIZE=20
+Environment=SURF_PENNY_SIZE=4
 Environment=SURF_NORMAL_MAX=0.85
 ExecStart=/home/botuser/bot-trading/venv/bin/python -m analysis.rn1.paper_surfandturf
 Restart=on-failure
