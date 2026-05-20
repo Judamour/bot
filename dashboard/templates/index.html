@@ -1524,6 +1524,17 @@
     Paper bot applies our edge filters to RN1's signals — no real money.
   </p>
 
+  <!-- ═══ Equity curves overlay — moved to top for at-a-glance comparison ═══ -->
+  <div style="border:1px solid var(--border);border-radius:6px;padding:10px 12px;margin-bottom:18px;background:var(--card)">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+      <strong style="font-size:14px">📈 Equity curves overlay — A · B · C · D</strong>
+      <span style="font-size:11px;color:var(--muted)">absband (🟡) · optionb (🟢) · optionc (🔵) · surfandturf (🟣) — all 4 from $600 baseline</span>
+    </div>
+    <div style="height:280px;position:relative">
+      <canvas id="rn1-abc-equity-chart"></canvas>
+    </div>
+  </div>
+
   <!-- ═══ Paper bot summary ═══ -->
   <h3 style="margin:0 0 8px 0;font-size:14px;display:flex;align-items:center;gap:8px">
     🧪 Paper bot — edge simulation
@@ -1714,17 +1725,6 @@
     <div class="rn1-stat"><div class="rn1-lbl">Open positions</div><div class="rn1-val" id="rn1oc-open">—</div></div>
     <div class="rn1-stat"><div class="rn1-lbl">Resolved</div><div class="rn1-val" id="rn1oc-resolved">—</div></div>
     <div class="rn1-stat"><div class="rn1-lbl">Win rate</div><div class="rn1-val" id="rn1oc-wr">—</div></div>
-  </div>
-
-  <!-- 3-way equity curve overlay -->
-  <div style="border:1px solid var(--border);border-radius:6px;padding:10px 12px;margin-bottom:18px">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-      <strong style="font-size:13px">📈 Equity curves overlay — absband · optionb · optionc</strong>
-      <span style="font-size:11px;color:var(--muted)">all 3 from $600 baseline</span>
-    </div>
-    <div style="height:240px;position:relative">
-      <canvas id="rn1-abc-equity-chart"></canvas>
-    </div>
   </div>
 
   <details style="margin-bottom:18px;border:1px solid var(--border);border-radius:4px;padding:6px 10px">
