@@ -1703,6 +1703,17 @@
     <div class="rn1-stat"><div class="rn1-lbl">Win rate</div><div class="rn1-val" id="rn1oc-wr">—</div></div>
   </div>
 
+  <!-- 3-way equity curve overlay -->
+  <div style="border:1px solid var(--border);border-radius:6px;padding:10px 12px;margin-bottom:18px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+      <strong style="font-size:13px">📈 Equity curves overlay — absband · optionb · optionc</strong>
+      <span style="font-size:11px;color:var(--muted)">all 3 from $600 baseline</span>
+    </div>
+    <div style="height:240px;position:relative">
+      <canvas id="rn1-abc-equity-chart"></canvas>
+    </div>
+  </div>
+
   <details style="margin-bottom:18px;border:1px solid var(--border);border-radius:4px;padding:6px 10px">
     <summary style="cursor:pointer;font-size:13px;color:var(--muted)">Open Option C positions (<span id="rn1oc-open-n">0</span>)</summary>
     <table class="rn1-tbl" style="margin-top:8px">
@@ -3382,6 +3393,112 @@ async function loadRn1() {
         }
       }
     }
+  })();
+
+  // ── 3-way equity curve overlay (Chart.js) ──
+  (function renderABCEquityChart() {
+    const canvas = document.getElementById('rn1-abc-equity-chart');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+
+    // Build aligned time series: union of all timestamps across the 3 bots,
+    // each dataset filled with its observation at that ts (or null if missing).
+    const series = [
+      {label: 'absband (raw)',  color: '#d97706', curve: (data.paper_absband || {}).equity_curve || []},
+      {label: 'optionb (v2)',   color: '#16a34a', curve: (data.paper_optionb || {}).equity_curve || []},
+      {label: 'optionc (fix)',  color: '#3b82f6', curve: (data.paper_optionc || {}).equity_curve || []},
+    ];
+
+    // Collect all unique timestamps (Unix ts in seconds expected)
+    const tsSet = new Set();
+    series.forEach(s => s.curve.forEach(p => {
+      const t = p.ts || p.timestamp;
+      if (t != null) tsSet.add(t);
+    }));
+    const allTs = Array.from(tsSet).sort((a, b) => a - b);
+
+    if (allTs.length === 0) {
+      // No data yet — render a flat $600 baseline message
+      if (window._rn1ABCChart) { window._rn1ABCChart.destroy(); window._rn1ABCChart = null; }
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = '#9ca3af';
+      ctx.font = '13px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('awaiting equity snapshots…', canvas.width / 2, canvas.height / 2);
+      return;
+    }
+
+    const labels = allTs.map(t => {
+      const d = new Date(t * 1000);
+      return d.toLocaleString('fr-FR', {month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit'});
+    });
+
+    // For each series, lookup equity at each ts (carry forward last seen)
+    const datasets = series.map(s => {
+      const byTs = {};
+      s.curve.forEach(p => {
+        const t = p.ts || p.timestamp;
+        if (t != null) byTs[t] = p.equity_usd;
+      });
+      let lastSeen = null;
+      const data = allTs.map(t => {
+        if (byTs[t] != null) {
+          lastSeen = byTs[t];
+        }
+        return lastSeen;
+      });
+      return {
+        label: s.label,
+        data,
+        borderColor: s.color,
+        backgroundColor: s.color + '22',
+        borderWidth: 2,
+        pointRadius: 0,
+        pointHoverRadius: 4,
+        tension: 0.15,
+        fill: false,
+      };
+    });
+
+    if (window._rn1ABCChart) window._rn1ABCChart.destroy();
+    window._rn1ABCChart = new Chart(ctx, {
+      type: 'line',
+      data: {labels, datasets},
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: {mode: 'index', intersect: false},
+        plugins: {
+          legend: {
+            display: true,
+            position: 'top',
+            labels: {color: '#9ca3af', font: {size: 11}, boxWidth: 12, padding: 12},
+          },
+          tooltip: {
+            callbacks: {
+              label: (item) => ` ${item.dataset.label}: $${(item.raw || 0).toFixed(2)}`,
+            },
+          },
+          annotation: {
+            annotations: {
+              baseline: {
+                type: 'line',
+                yMin: 600,
+                yMax: 600,
+                borderColor: '#666',
+                borderWidth: 1,
+                borderDash: [4, 4],
+                label: {display: true, content: '$600 baseline', position: 'start', color: '#888'},
+              },
+            },
+          },
+        },
+        scales: {
+          x: {ticks: {color: '#6a8aaa', maxTicksLimit: 8, font: {size: 10}}, grid: {color: 'rgba(29,46,70,0.5)'}},
+          y: {ticks: {color: '#6a8aaa', font: {size: 10}, callback: v => '$' + v.toFixed(0)}, grid: {color: 'rgba(29,46,70,0.5)'}},
+        },
+      },
+    });
   })();
 
   // ── Autobot stats ──
