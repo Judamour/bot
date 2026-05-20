@@ -1,0 +1,28 @@
+[Unit]
+Description=RN1 Paper Option C v3 — C v2 + expanded toxic-hour skip
+After=network.target bot-cp.service
+
+[Service]
+Type=simple
+User=botuser
+WorkingDirectory=/home/botuser/bot-trading
+EnvironmentFile=-/home/botuser/bot-trading/.env
+# Option C v3 = C v2 (lottery + h19 + whale) + extended hour skip
+# {0, 1, 19, 21} UTC to cover MLB US prime-time live + EU football evening
+# live. Backtest 4-day: +$171 / 268 trades / 64.6% WR / +15.33% ROI
+# vs C v2 +$143 / 293 trades / 61.8% WR / +11.74%.
+Environment=RN1_OPTIONCV3_INITIAL=600
+Environment=RN1_OPTIONCV3_MAX_POSITIONS=8
+Environment=RN1_OPTIONCV3_MIN_TARGET=200
+Environment=RN1_OPTIONCV3_MAX_USD_PER_MARKET=4.5
+Environment=RN1_OPTIONCV3_SKIP_HIGH=0.20
+Environment=RN1_OPTIONCV3_NORMAL_SIZE=4.5
+Environment=RN1_OPTIONCV3_PENNY_SIZE=1.0
+ExecStart=/home/botuser/bot-trading/venv/bin/python -m analysis.rn1.paper_optioncv3
+Restart=on-failure
+RestartSec=30
+StandardOutput=append:/home/botuser/bot-trading/logs/rn1/paper_optioncv3.log
+StandardError=append:/home/botuser/bot-trading/logs/rn1/paper_optioncv3.log
+
+[Install]
+WantedBy=multi-user.target

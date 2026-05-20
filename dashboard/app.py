@@ -1042,6 +1042,17 @@ def api_rn1():
     optionc_trades = _tail_jsonl(optionc_trades_path, 30)
     optionc_latest = optionc_equity[-1] if optionc_equity else {}
 
+    # Option C v3 — C v2 + expanded toxic-hour skip
+    optioncv3_state_path = base / "analysis/rn1/data_optioncv3/state.json"
+    optioncv3_positions_path = base / "analysis/rn1/data_optioncv3/positions.json"
+    optioncv3_equity_path = base / "analysis/rn1/data_optioncv3/equity.jsonl"
+    optioncv3_trades_path = base / "analysis/rn1/data_optioncv3/trades.jsonl"
+    optioncv3_state = _read_json(optioncv3_state_path)
+    optioncv3_positions = _read_json(optioncv3_positions_path)
+    optioncv3_equity = _tail_jsonl(optioncv3_equity_path, 60)
+    optioncv3_trades = _tail_jsonl(optioncv3_trades_path, 30)
+    optioncv3_latest = optioncv3_equity[-1] if optioncv3_equity else {}
+
     # Paper Surfandturf — separate target wallet (NBA/foot conviction style)
     surf_state_path = base / "analysis/rn1/data_surfandturf/state.json"
     surf_positions_path = base / "analysis/rn1/data_surfandturf/positions.json"
@@ -1112,6 +1123,13 @@ def api_rn1():
             "equity_curve": optionc_equity,
             "open_positions": list(optionc_positions.values()) if isinstance(optionc_positions, dict) else [],
             "recent_trades": optionc_trades,
+        },
+        "paper_optioncv3": {
+            "state": optioncv3_state,
+            "latest_equity": optioncv3_latest,
+            "equity_curve": optioncv3_equity,
+            "open_positions": list(optioncv3_positions.values()) if isinstance(optioncv3_positions, dict) else [],
+            "recent_trades": optioncv3_trades,
         },
         "paper_surfandturf": {
             "state": surf_state,
