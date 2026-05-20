@@ -51,6 +51,14 @@ BAD_HOURS_UTC = frozenset(range(18, 24))
 # Whale threshold — his trades above this size lose money on average
 WHALE_USD = 10000.0
 
+# Title substrings (lowercased) that indicate RN1's lottery/exploration zone.
+# Observed 2026-05-20: tennis qualification markets (Roland Garros Qualif,
+# Hamburg European Open Qualif, etc.) → his open positions in these markets
+# are -95% to -99.8% across the board (~-$1500 unrealized). Meanwhile his
+# foot/baseball convictions ("Will X win on", "X vs Y" market_winner) were
+# the source of his +$20K redemptions in the same 4h window. Skip the noise.
+BAD_TITLE_KEYWORDS = ("qualification",)
+
 
 def optionb_passes(decision: dict) -> tuple[bool, str]:
     """Return (passes: bool, skip_reason: str).
@@ -75,6 +83,12 @@ def optionb_passes(decision: dict) -> tuple[bool, str]:
     target_size = float(decision.get("target_size_usd") or 0)
     if target_size > WHALE_USD:
         return False, f"optb_whale(${target_size:.0f})"
+
+    # 4. Title-keyword filter — skip RN1's lottery zones (tennis qualifications)
+    title_low = title.lower()
+    for kw in BAD_TITLE_KEYWORDS:
+        if kw in title_low:
+            return False, f"optb_bad_category({kw})"
 
     return True, "ok"
 
