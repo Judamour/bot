@@ -433,7 +433,7 @@ def _cycle(state: dict, positions: dict, markets: dict) -> tuple[int, int, int]:
 
     if n_examined or n_opened or n_resolved_total or skip_counts:
         skip_str = " ".join(f"{k}={v}" for k, v in skip_counts.items())
-        log.info(f"cycle: RN1 examined={n_examined} opened={n_opened} "
+        log.info(f"cycle: SURF examined={n_examined} opened={n_opened} "
                  f"resolved={n_resolved_total} skips:[{skip_str}] "
                  f"open_total={len(positions)} cash=${state['cash_usd']:.2f}")
 
@@ -484,9 +484,9 @@ def main() -> None:
     positions = _load_json(POSITIONS_PATH, {})
     markets = _load_markets()
 
-    log.info(f"Boot — RN1 paper absband, capital=${INITIAL_CAPITAL_USD}, "
-             f"max_pos={MAX_POSITIONS}, max_per_market=${MAX_USD_PER_MARKET}, "
-             f"min_target=${MIN_TARGET_SIZE_USD}")
+    log.info(f"Boot — Surfandturf paper (NBA/foot whale wallet 0x9f2f…2ca8), "
+             f"capital=${INITIAL_CAPITAL_USD}, max_pos={MAX_POSITIONS}, "
+             f"max_per_market=${MAX_USD_PER_MARKET}, min_target=${MIN_TARGET_SIZE_USD}")
     log.info(f"Tier grid — penny[{TIER_PENNY_MIN}-{TIER_PENNY_MAX}): ${TIER_PENNY_SIZE} | "
              f"SKIP[{TIER_PENNY_MAX}-{TIER_SKIP_HIGH}) | "
              f"normal[{TIER_SKIP_HIGH}-{TIER_NORMAL_MAX}]: ${TIER_NORMAL_SIZE} | "
