@@ -89,52 +89,50 @@ def process_wallet(
             "paper_size_usd": paper_size, "price": price,
         }
 
-        if paper_size < MIN_PAPER_SIZE_USD:
-            decision["action"] = "skipped"
-            decision["rationale"] = (
-                "paper_size_below_threshold" if paper_size > 0 else "zero_aum_or_zero_trade"
-            )
-            decisions.append(decision)
-            last_seen_ts = max(last_seen_ts, ts)
-            continue
-
         if side == "BUY":
-            # Cash check: refuse to overdraw. In live this is what Polymarket would do.
-            if portfolio.cash_usd < paper_size:
-                decision["action"] = "skipped"
-                decision["rationale"] = (
-                    f"insufficient_cash (have ${portfolio.cash_usd:.2f}, need ${paper_size:.2f})"
+            # Mirror the positions_polling pattern: ALWAYS mark action=executed
+            # when /trades surfaces a real BUY signal, even if the paper bot
+            # cannot afford the mirror. Paper accounting is decoupled from the
+            # live container's decision feed via paper_executed/paper_skip_reason.
+            paper_executed = False
+            paper_skip_reason = ""
+
+            if paper_size < MIN_PAPER_SIZE_USD:
+                paper_skip_reason = (
+                    "below_min_paper" if paper_size > 0 else "zero_aum_or_zero_trade"
                 )
-                decisions.append(decision)
-                last_seen_ts = max(last_seen_ts, ts)
-                continue
-            # Route through executor : paper = no-op success, live = real CLOB order
-            result = polymarket_executor.execute_buy(
-                token_id=asset, usd_size=paper_size, target_price=price,
-            )
-            if not result.success:
-                decision["action"] = "skipped"
-                decision["rationale"] = f"executor_failed: {result.error}"
-                decisions.append(decision)
-                last_seen_ts = max(last_seen_ts, ts)
-                continue
-            # Record in ledger : real amounts if live filled, planned amounts if paper
-            if polymarket_executor.is_live() and result.filled_shares > 0:
-                fill_price = result.filled_price
-                fill_cost = result.cost_usd
-                decision["order_id"] = result.order_id
-                decision["paper_size_usd"] = fill_cost
-                decision["price"] = fill_price
+            elif portfolio.cash_usd < paper_size:
+                paper_skip_reason = (
+                    f"insufficient_paper_cash (have ${portfolio.cash_usd:.2f}, need ${paper_size:.2f})"
+                )
             else:
-                fill_price = price
-                fill_cost = paper_size
-            portfolio.buy(
-                condition_id=condition_id, asset=asset, outcome=outcome,
-                outcome_index=outcome_index, price=fill_price, usd_size=fill_cost,
-                target_hash=target_hash, market_title=market_title, opened_ts=ts,
-            )
+                result = polymarket_executor.execute_buy(
+                    token_id=asset, usd_size=paper_size, target_price=price,
+                )
+                if not result.success:
+                    paper_skip_reason = f"executor_failed: {result.error}"
+                else:
+                    if polymarket_executor.is_live() and result.filled_shares > 0:
+                        fill_price = result.filled_price
+                        fill_cost = result.cost_usd
+                        decision["order_id"] = result.order_id
+                        decision["paper_size_usd"] = fill_cost
+                        decision["price"] = fill_price
+                    else:
+                        fill_price = price
+                        fill_cost = paper_size
+                    portfolio.buy(
+                        condition_id=condition_id, asset=asset, outcome=outcome,
+                        outcome_index=outcome_index, price=fill_price, usd_size=fill_cost,
+                        target_hash=target_hash, market_title=market_title, opened_ts=ts,
+                    )
+                    paper_executed = True
+
             decision["action"] = "executed"
             decision["rationale"] = "buy_mirrored"
+            decision["paper_executed"] = paper_executed
+            if paper_skip_reason:
+                decision["paper_skip_reason"] = paper_skip_reason
         elif side == "SELL":
             target_size_before = data_api.target_position_size_at(
                 wallet, condition_id, outcome_index, ts=ts,
@@ -191,7 +189,9 @@ def process_wallet(
 
 # Minimum size diff (in USD) we'll synthesize from /positions polling.
 # Below this we ignore — too small to bother and increases false positives.
-POSITIONS_DIFF_MIN_USD = 100.0
+# Set to $20 to catch RN1's DCA chunks (live container still gates at $10 via
+# MIN_TARGET_SIZE_USD; $20 buffer absorbs CLOB round-trip cost noise).
+POSITIONS_DIFF_MIN_USD = 20.0
 
 
 def detect_position_diffs(
