@@ -459,13 +459,16 @@ def main() -> None:
     signal.signal(signal.SIGINT, _sigterm)
     DATA_DIR.mkdir(parents=True, exist_ok=True)
 
+    # Fresh boot (no state.json) → start tracking from NOW, no replay of history.
+    # Existing state.json is preserved by _load_json.
+    _now = int(time.time())
     state = _load_json(STATE_PATH, {
         "cash_usd": INITIAL_CAPITAL_USD,
         "realized_pnl": 0.0,
         "n_resolved": 0,
         "n_won": 0,
-        "last_seen_ts": 0,
-        "boot_ts": int(time.time()),
+        "last_seen_ts": _now,
+        "boot_ts": _now,
         "recent_buys": {},
     })
     positions = _load_json(POSITIONS_PATH, {})
