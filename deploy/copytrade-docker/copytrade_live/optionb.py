@@ -85,12 +85,12 @@ def optionb_passes(decision: dict) -> tuple[bool, str]:
 # restart via positions_polling. Format: {(cid, oi): [(ts, target_size), ...]}.
 _recent_buys: dict[tuple[str, int], list[tuple[int, float]]] = {}
 
-# Tuned to capture his real convictions (Pellegrino $919, Faurel $234, Noma
-# $132, Travaglia $104, Norrie $60) while skipping exploratory hedge dust
-# (Sinja Kraus $1.78, Begu $14 total, Tsitsipas $26 total). 10min window covers
-# his typical DCA tempo on tennis qualifications.
-CONVICTION_THRESHOLD_USD = 50.0
-CONVICTION_WINDOW_S = 600
+# Tuned to capture his real convictions while skipping exploratory hedge dust.
+# Env-driven so we can re-tune without redeploying code. $200 default matches
+# yesterday's MIN_TARGET when the $40 wallet ran the strictest filter.
+import os
+CONVICTION_THRESHOLD_USD = float(os.getenv("COPYTRADE_CONVICTION_THRESHOLD_USD", "200"))
+CONVICTION_WINDOW_S = int(os.getenv("COPYTRADE_CONVICTION_WINDOW_S", "600"))
 
 
 def record_observation(decision: dict) -> None:
