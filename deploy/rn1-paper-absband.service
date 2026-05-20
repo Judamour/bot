@@ -1,14 +1,20 @@
 [Unit]
-Description=RN1 Paper Absband — paper bot mirroring live $40 surfandturf logic on RN1
+Description=RN1 Paper Absband — Option A config (mirror live $628)
 After=network.target bot-cp.service
-# Soft dependency on bot-cp (source of decisions.jsonl). Crash here doesn't
-# affect bot-cp or the live $40 surfandturf Docker stack.
 
 [Service]
 Type=simple
 User=botuser
 WorkingDirectory=/home/botuser/bot-trading
 EnvironmentFile=-/home/botuser/bot-trading/.env
+# Match live $628 Option A config (post 6010-trade analysis)
+Environment=RN1_ABSBAND_INITIAL=628
+Environment=RN1_ABSBAND_MAX_POSITIONS=25
+Environment=RN1_ABSBAND_MIN_TARGET=10
+Environment=RN1_ABSBAND_MAX_USD_PER_MARKET=25
+Environment=RN1_ABSBAND_SKIP_HIGH=0.20
+Environment=RN1_ABSBAND_NORMAL_SIZE=8.0
+Environment=RN1_ABSBAND_PENNY_SIZE=2.0
 ExecStart=/home/botuser/bot-trading/venv/bin/python -m analysis.rn1.paper_absband
 Restart=on-failure
 RestartSec=30

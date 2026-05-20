@@ -1009,7 +1009,7 @@ def api_rn1():
     autobot_trades = _tail_jsonl(autobot_trades_path, 30)
     autobot_latest = autobot_equity[-1] if autobot_equity else {}
 
-    # Paper Absband — mirrors live $40 surfandturf absolute_band logic on RN1
+    # Paper Absband — Option A config (= mirror live $628 RN1 bot)
     absband_state_path = base / "analysis/rn1/data_absband/state.json"
     absband_positions_path = base / "analysis/rn1/data_absband/positions.json"
     absband_equity_path = base / "analysis/rn1/data_absband/equity.jsonl"
@@ -1019,6 +1019,17 @@ def api_rn1():
     absband_equity = _tail_jsonl(absband_equity_path, 60)
     absband_trades = _tail_jsonl(absband_trades_path, 30)
     absband_latest = absband_equity[-1] if absband_equity else {}
+
+    # Paper Option B — Absband + 3 data-driven exclusion filters
+    optionb_state_path = base / "analysis/rn1/data_optionb/state.json"
+    optionb_positions_path = base / "analysis/rn1/data_optionb/positions.json"
+    optionb_equity_path = base / "analysis/rn1/data_optionb/equity.jsonl"
+    optionb_trades_path = base / "analysis/rn1/data_optionb/trades.jsonl"
+    optionb_state = _read_json(optionb_state_path)
+    optionb_positions = _read_json(optionb_positions_path)
+    optionb_equity = _tail_jsonl(optionb_equity_path, 60)
+    optionb_trades = _tail_jsonl(optionb_trades_path, 30)
+    optionb_latest = optionb_equity[-1] if optionb_equity else {}
 
     return jsonify({
         "summary": summary,
@@ -1043,6 +1054,13 @@ def api_rn1():
             "equity_curve": absband_equity,
             "open_positions": list(absband_positions.values()) if isinstance(absband_positions, dict) else [],
             "recent_trades": absband_trades,
+        },
+        "paper_optionb": {
+            "state": optionb_state,
+            "latest_equity": optionb_latest,
+            "equity_curve": optionb_equity,
+            "open_positions": list(optionb_positions.values()) if isinstance(optionb_positions, dict) else [],
+            "recent_trades": optionb_trades,
         },
     })
 

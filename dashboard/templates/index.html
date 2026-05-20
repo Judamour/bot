@@ -1554,14 +1554,14 @@
     </table>
   </details>
 
-  <!-- ═══ Paper Absband — mirror $40 live surfandturf logic on RN1 ═══ -->
+  <!-- ═══ Paper Absband — Option A config (mirror live $628 RN1) ═══ -->
   <h3 style="margin:24px 0 8px 0;font-size:14px;display:flex;align-items:center;gap:8px">
-    🎯 Paper Absband — mirror du live $40 surfandturf, RN1-tuned bands
-    <span style="font-size:11px;padding:2px 6px;border-radius:6px;background:#d97706;color:#fff;font-weight:600">PAPER $40</span>
+    🎯 Paper Absband — Option A (mirror live $628 RN1)
+    <span style="font-size:11px;padding:2px 6px;border-radius:6px;background:#d97706;color:#fff;font-weight:600">PAPER $628</span>
   </h3>
   <p style="color:var(--muted);font-size:12px;margin:0 0 8px 0">
-    penny [0.06-0.20): $1 · SKIP losing_zone [0.20-0.45) · normal [0.45-0.95]: $4.50 · MIN_TARGET=$200, MAX_POS=8.
-    Same code path as our $40 live, applied to RN1 with paper money.
+    penny [0.06-0.20): $2 · normal [0.20-0.95]: $8 · MIN_TARGET=$10, MAX_POS=25, MAX_USD_MARKET=$25.
+    Mirror exact du bot live $628, sans filtre additionnel — référence baseline.
   </p>
   <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:18px">
     <div class="rn1-stat"><div class="rn1-lbl">Equity</div><div class="rn1-val" id="rn1ab-equity">—</div></div>
@@ -1585,6 +1585,41 @@
     <table class="rn1-tbl" style="margin-top:8px">
       <thead><tr><th>Action</th><th>Title</th><th>Outcome</th><th>Tier</th><th class="num">Cost</th><th class="num">PnL</th></tr></thead>
       <tbody id="rn1ab-trades-tbl"><tr><td colspan="6" style="color:var(--muted);padding:8px">No actions yet.</td></tr></tbody>
+    </table>
+  </details>
+
+  <!-- ═══ Paper Option B — Absband + data-driven exclusion filters ═══ -->
+  <h3 style="margin:24px 0 8px 0;font-size:14px;display:flex;align-items:center;gap:8px">
+    🎯 Paper Option B — Absband + filtres data-driven
+    <span style="font-size:11px;padding:2px 6px;border-radius:6px;background:#7c3aed;color:#fff;font-weight:600">PAPER $628</span>
+  </h3>
+  <p style="color:var(--muted);font-size:12px;margin:0 0 8px 0">
+    Même config que Option A, PLUS 3 filtres dérivés de l'analyse 6010 trades :
+    🚫 skip heure 18-24 UTC (-14% ROI) · 🚫 skip market_type draw/spread/winner_yes_no/other ·
+    🚫 skip RN1's whale bets >$10K (-27% ROI). Test paper avant migration live.
+  </p>
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:18px">
+    <div class="rn1-stat"><div class="rn1-lbl">Equity</div><div class="rn1-val" id="rn1ob-equity">—</div></div>
+    <div class="rn1-stat"><div class="rn1-lbl">Perf</div><div class="rn1-val" id="rn1ob-perf">—</div></div>
+    <div class="rn1-stat"><div class="rn1-lbl">Cash</div><div class="rn1-val" id="rn1ob-cash">—</div></div>
+    <div class="rn1-stat"><div class="rn1-lbl">Open positions</div><div class="rn1-val" id="rn1ob-open">—</div></div>
+    <div class="rn1-stat"><div class="rn1-lbl">Resolved</div><div class="rn1-val" id="rn1ob-resolved">—</div></div>
+    <div class="rn1-stat"><div class="rn1-lbl">Win rate</div><div class="rn1-val" id="rn1ob-wr">—</div></div>
+  </div>
+
+  <details style="margin-bottom:18px;border:1px solid var(--border);border-radius:4px;padding:6px 10px">
+    <summary style="cursor:pointer;font-size:13px;color:var(--muted)">Open Option B positions (<span id="rn1ob-open-n">0</span>)</summary>
+    <table class="rn1-tbl" style="margin-top:8px">
+      <thead><tr><th>Title</th><th>Outcome</th><th>Tier</th><th class="num">Shares</th><th class="num">Avg px</th><th class="num">Cost</th></tr></thead>
+      <tbody id="rn1ob-open-tbl"><tr><td colspan="6" style="color:var(--muted);padding:8px">No open positions.</td></tr></tbody>
+    </table>
+  </details>
+
+  <details style="margin-bottom:24px;border:1px solid var(--border);border-radius:4px;padding:6px 10px">
+    <summary style="cursor:pointer;font-size:13px;color:var(--muted)">Recent Option B actions (last 30)</summary>
+    <table class="rn1-tbl" style="margin-top:8px">
+      <thead><tr><th>Action</th><th>Title</th><th>Outcome</th><th>Tier</th><th class="num">Cost</th><th class="num">PnL</th></tr></thead>
+      <tbody id="rn1ob-trades-tbl"><tr><td colspan="6" style="color:var(--muted);padding:8px">No actions yet.</td></tr></tbody>
     </table>
   </details>
 
@@ -3008,6 +3043,83 @@ async function loadRn1() {
           pnlEl = '—';
         }
         abTrTb.insertAdjacentHTML('beforeend',
+          '<tr>' +
+          '<td>' + actionEl + '</td>' +
+          '<td>' + (t.title || '').slice(0, 40) + '</td>' +
+          '<td>' + (t.outcome || t.outcome_bought || '') + '</td>' +
+          '<td><code style="font-size:11px">' + (t.tier || '—') + '</code></td>' +
+          '<td class="num">$' + (t.cost || t.cost_basis || 0).toFixed(2) + '</td>' +
+          '<td class="num">' + pnlEl + '</td>' +
+          '</tr>');
+      });
+    }
+  }
+
+  // ── Paper Option B stats (Absband + data-driven filters) ──
+  const optionb = data.paper_optionb || {};
+  const obLast = optionb.latest_equity || {};
+  setText('rn1ob-equity', obLast.equity_usd != null ? '$' + obLast.equity_usd.toFixed(2) : '—');
+  const obPerfEl = document.getElementById('rn1ob-perf');
+  if (obPerfEl && obLast.perf_pct != null) {
+    obPerfEl.textContent = (obLast.perf_pct > 0 ? '+' : '') + obLast.perf_pct.toFixed(2) + '%';
+    obPerfEl.className = 'rn1-val ' + _rn1RoiClass(obLast.perf_pct / 100);
+  }
+  setText('rn1ob-cash', obLast.cash_usd != null ? '$' + obLast.cash_usd.toFixed(2) : '—');
+  setText('rn1ob-open', (obLast.n_open || 0));
+  setText('rn1ob-resolved', (obLast.n_resolved || 0) + ' (' + (obLast.n_won || 0) + ' W / ' +
+    Math.max((obLast.n_resolved || 0) - (obLast.n_won || 0), 0) + ' L)');
+  const obWrEl = document.getElementById('rn1ob-wr');
+  if (obWrEl) {
+    const wr = (obLast.win_rate || 0) * 100;
+    obWrEl.textContent = (obLast.n_resolved > 0 ? wr.toFixed(1) + '%' : '—');
+    obWrEl.className = 'rn1-val ' + (wr >= 60 ? 'rn1-roi-pos' : (wr >= 50 ? 'rn1-roi-flat' : 'rn1-roi-neg'));
+  }
+  const obOpen = optionb.open_positions || [];
+  const obSetN = document.getElementById('rn1ob-open-n');
+  if (obSetN) obSetN.textContent = obOpen.length;
+  const obOpenTb = document.getElementById('rn1ob-open-tbl');
+  if (obOpenTb) {
+    obOpenTb.innerHTML = '';
+    if (!obOpen.length) {
+      obOpenTb.innerHTML = '<tr><td colspan="6" style="color:var(--muted);padding:8px">No open positions.</td></tr>';
+    } else {
+      obOpen.slice(0, 30).forEach(p => {
+        obOpenTb.insertAdjacentHTML('beforeend',
+          '<tr>' +
+          '<td>' + (p.title || '').slice(0, 45) + '</td>' +
+          '<td>' + (p.outcome || '') + '</td>' +
+          '<td><code style="font-size:11px">' + (p.tier || '—') + '</code></td>' +
+          '<td class="num">' + (p.shares || 0).toFixed(2) + '</td>' +
+          '<td class="num">' + (p.avg_price || 0).toFixed(3) + '</td>' +
+          '<td class="num">$' + (p.cost_basis || 0).toFixed(2) + '</td>' +
+          '</tr>');
+      });
+    }
+  }
+  const obTrades = (optionb.recent_trades || []).slice().reverse();
+  const obTrTb = document.getElementById('rn1ob-trades-tbl');
+  if (obTrTb) {
+    obTrTb.innerHTML = '';
+    if (!obTrades.length) {
+      obTrTb.innerHTML = '<tr><td colspan="6" style="color:var(--muted);padding:8px">No actions yet.</td></tr>';
+    } else {
+      obTrades.forEach(t => {
+        const action = t.action || '';
+        let actionEl, pnlEl;
+        if (action === 'buy') {
+          actionEl = '<span style="color:#3fb950">BUY</span>';
+          pnlEl = '—';
+        } else if (action === 'resolve') {
+          actionEl = t.result === 'won'
+            ? '<span style="color:#3fb950">RESOLVE ✓</span>'
+            : '<span style="color:#f85149">RESOLVE ✗</span>';
+          const pnl = t.pnl || 0;
+          pnlEl = '<span class="' + _rn1RoiClass(pnl / 5) + '">' + (pnl > 0 ? '+' : '') + '$' + pnl.toFixed(2) + '</span>';
+        } else {
+          actionEl = action;
+          pnlEl = '—';
+        }
+        obTrTb.insertAdjacentHTML('beforeend',
           '<tr>' +
           '<td>' + actionEl + '</td>' +
           '<td>' + (t.title || '').slice(0, 40) + '</td>' +

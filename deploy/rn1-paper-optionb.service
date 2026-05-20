@@ -1,0 +1,25 @@
+[Unit]
+Description=RN1 Paper Option B — Absband + data-driven filters (hour, market_type, whale)
+After=network.target bot-cp.service
+
+[Service]
+Type=simple
+User=botuser
+WorkingDirectory=/home/botuser/bot-trading
+EnvironmentFile=-/home/botuser/bot-trading/.env
+# Match live $628 baseline, plus Option B exclusion filters
+Environment=RN1_OPTIONB_INITIAL=628
+Environment=RN1_OPTIONB_MAX_POSITIONS=25
+Environment=RN1_OPTIONB_MIN_TARGET=10
+Environment=RN1_OPTIONB_MAX_USD_PER_MARKET=25
+Environment=RN1_OPTIONB_SKIP_HIGH=0.20
+Environment=RN1_OPTIONB_NORMAL_SIZE=8.0
+Environment=RN1_OPTIONB_PENNY_SIZE=2.0
+ExecStart=/home/botuser/bot-trading/venv/bin/python -m analysis.rn1.paper_optionb
+Restart=on-failure
+RestartSec=30
+StandardOutput=append:/home/botuser/bot-trading/logs/rn1/paper_optionb.log
+StandardError=append:/home/botuser/bot-trading/logs/rn1/paper_optionb.log
+
+[Install]
+WantedBy=multi-user.target
