@@ -1,0 +1,31 @@
+[Unit]
+Description=RN1 Paper Option F — Option C filters + pre-event + Qualif skip
+After=network.target bot-cp.service
+
+[Service]
+Type=simple
+User=botuser
+WorkingDirectory=/home/botuser/bot-trading
+EnvironmentFile=-/home/botuser/bot-trading/.env
+# Option F = Option C (hour 19 + Monday + lottery + mtype + whale) PLUS the
+# two filters from Bot E v2.1 that would have saved us from the 2026-05-20
+# morning -$66 Qualif storm: pre-event only + Qualif skip. No cross-side or
+# cross-event yet — see how F performs alone first.
+Environment=RN1_OPTIONF_INITIAL=600
+Environment=RN1_OPTIONF_MAX_POSITIONS=8
+Environment=RN1_OPTIONF_MIN_TARGET=200
+Environment=RN1_OPTIONF_MAX_USD_PER_MARKET=4.5
+Environment=RN1_OPTIONF_SKIP_HIGH=0.20
+Environment=RN1_OPTIONF_NORMAL_SIZE=4.5
+Environment=RN1_OPTIONF_PENNY_SIZE=1.0
+Environment=RN1_OPTIONF_PRE_EVENT_MIN_S=1800
+# Qualif policy: "all" (default) | "heavy_fav_ok" (only p>=0.80) | "off"
+Environment=RN1_OPTIONF_SKIP_QUALIF=all
+ExecStart=/home/botuser/bot-trading/venv/bin/python -m analysis.rn1.paper_optionf
+Restart=on-failure
+RestartSec=30
+StandardOutput=append:/home/botuser/bot-trading/logs/rn1/paper_optionf.log
+StandardError=append:/home/botuser/bot-trading/logs/rn1/paper_optionf.log
+
+[Install]
+WantedBy=multi-user.target

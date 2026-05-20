@@ -1064,6 +1064,17 @@ def api_rn1():
     optione_trades = _tail_jsonl(optione_trades_path, 30)
     optione_latest = optione_equity[-1] if optione_equity else {}
 
+    # Paper Option F — Option C base + pre-event + Qualif skip
+    optionf_state_path = base / "analysis/rn1/data_optionf/state.json"
+    optionf_positions_path = base / "analysis/rn1/data_optionf/positions.json"
+    optionf_equity_path = base / "analysis/rn1/data_optionf/equity.jsonl"
+    optionf_trades_path = base / "analysis/rn1/data_optionf/trades.jsonl"
+    optionf_state = _read_json(optionf_state_path)
+    optionf_positions = _read_json(optionf_positions_path)
+    optionf_equity = _tail_jsonl(optionf_equity_path, 60)
+    optionf_trades = _tail_jsonl(optionf_trades_path, 30)
+    optionf_latest = optionf_equity[-1] if optionf_equity else {}
+
     return jsonify({
         "summary": summary,
         "deep": deep,
@@ -1115,6 +1126,13 @@ def api_rn1():
             "equity_curve": optione_equity,
             "open_positions": list(optione_positions.values()) if isinstance(optione_positions, dict) else [],
             "recent_trades": optione_trades,
+        },
+        "paper_optionf": {
+            "state": optionf_state,
+            "latest_equity": optionf_latest,
+            "equity_curve": optionf_equity,
+            "open_positions": list(optionf_positions.values()) if isinstance(optionf_positions, dict) else [],
+            "recent_trades": optionf_trades,
         },
     })
 
