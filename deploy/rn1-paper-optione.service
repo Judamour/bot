@@ -1,0 +1,30 @@
+[Unit]
+Description=RN1 Paper Option E — absband + cross-side + cross-event defense
+After=network.target bot-cp.service
+
+[Service]
+Type=simple
+User=botuser
+WorkingDirectory=/home/botuser/bot-trading
+EnvironmentFile=-/home/botuser/bot-trading/.env
+# Option E — same sizing as absband ($600 / $4.5 normal / $1 penny /
+# MIN_TARGET=$200 / 8 positions / $4.5 per market) plus two cross-* filters:
+#   - skip BUY if opposite outcome of same condition_id already held
+#   - skip BUY if another open position shares the same "TEAM_A vs TEAM_B"
+# Hypothesis: RN1 anti-copytrade flow (both-side hedges + correlated traps)
+# is the main loss driver, so this should bend the equity curve up vs absband.
+Environment=RN1_OPTIONE_INITIAL=600
+Environment=RN1_OPTIONE_MAX_POSITIONS=8
+Environment=RN1_OPTIONE_MIN_TARGET=200
+Environment=RN1_OPTIONE_MAX_USD_PER_MARKET=4.5
+Environment=RN1_OPTIONE_SKIP_HIGH=0.20
+Environment=RN1_OPTIONE_NORMAL_SIZE=4.5
+Environment=RN1_OPTIONE_PENNY_SIZE=1.0
+ExecStart=/home/botuser/bot-trading/venv/bin/python -m analysis.rn1.paper_optione
+Restart=on-failure
+RestartSec=30
+StandardOutput=append:/home/botuser/bot-trading/logs/rn1/paper_optione.log
+StandardError=append:/home/botuser/bot-trading/logs/rn1/paper_optione.log
+
+[Install]
+WantedBy=multi-user.target

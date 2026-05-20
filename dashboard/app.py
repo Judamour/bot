@@ -1053,6 +1053,17 @@ def api_rn1():
     surf_trades = _tail_jsonl(surf_trades_path, 30)
     surf_latest = surf_equity[-1] if surf_equity else {}
 
+    # Paper Option E — absband + cross-side / cross-event defense
+    optione_state_path = base / "analysis/rn1/data_optione/state.json"
+    optione_positions_path = base / "analysis/rn1/data_optione/positions.json"
+    optione_equity_path = base / "analysis/rn1/data_optione/equity.jsonl"
+    optione_trades_path = base / "analysis/rn1/data_optione/trades.jsonl"
+    optione_state = _read_json(optione_state_path)
+    optione_positions = _read_json(optione_positions_path)
+    optione_equity = _tail_jsonl(optione_equity_path, 60)
+    optione_trades = _tail_jsonl(optione_trades_path, 30)
+    optione_latest = optione_equity[-1] if optione_equity else {}
+
     return jsonify({
         "summary": summary,
         "deep": deep,
@@ -1097,6 +1108,13 @@ def api_rn1():
             "equity_curve": surf_equity,
             "open_positions": list(surf_positions.values()) if isinstance(surf_positions, dict) else [],
             "recent_trades": surf_trades,
+        },
+        "paper_optione": {
+            "state": optione_state,
+            "latest_equity": optione_latest,
+            "equity_curve": optione_equity,
+            "open_positions": list(optione_positions.values()) if isinstance(optione_positions, dict) else [],
+            "recent_trades": optione_trades,
         },
     })
 
