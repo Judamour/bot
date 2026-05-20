@@ -1527,8 +1527,8 @@
   <!-- ═══ Equity curves overlay — moved to top for at-a-glance comparison ═══ -->
   <div style="border:1px solid var(--border);border-radius:6px;padding:10px 12px;margin-bottom:18px;background:var(--card)">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-      <strong style="font-size:14px">📈 Equity curves overlay — A · B · C · C v3 · D · E · F</strong>
-      <span style="font-size:11px;color:var(--muted)">absband (🟡) · optionb (🟢) · optionc (🔵) · optionc v3 (🩵) · surfandturf (🟣) · optione (🔴) · optionf (🩷) — 7 strategies from $600 baseline</span>
+      <strong style="font-size:14px">📈 Equity curves overlay — A · B · C v1 · C v2 · C v3 · D · E · F</strong>
+      <span style="font-size:11px;color:var(--muted)">absband (🟡) · optionb (🟢) · optionc v1 (🟦) · optionc v2 (🔵) · optionc v3 (🩵) · surfandturf (🟣) · optione (🔴) · optionf (🩷) — 8 strategies from $600 baseline</span>
     </div>
     <div style="height:280px;position:relative">
       <canvas id="rn1-abc-equity-chart"></canvas>
@@ -1565,23 +1565,24 @@
     </table>
   </details>
 
-  <!-- ═══ A/B/C/C v3/D/E/F Comparison — 7 strategies side-by-side ═══ -->
+  <!-- ═══ Comparison — 8 strategies side-by-side ═══ -->
   <h3 style="margin:24px 0 8px 0;font-size:14px;display:flex;align-items:center;gap:8px">
-    ⚔️ A/B/C/C v3/D/E/F Comparison — 7 strategies side-by-side
+    ⚔️ A/B/C v1/C v2/C v3/D/E/F Comparison — 8 strategies side-by-side
     <span style="font-size:11px;padding:2px 6px;border-radius:6px;background:#0ea5e9;color:#fff;font-weight:600">$600 each</span>
   </h3>
   <p style="color:var(--muted);font-size:12px;margin:0 0 8px 0">
-    All 7 bots start at $600 paper, same sizing (penny $1, normal $4.5).
-    6 strategies on <strong>RN1</strong> + 1 on <strong>surfandturf</strong>:
+    All 8 bots start at $600 paper, same sizing (penny $1, normal $4.5).
+    7 strategies on <strong>RN1</strong> + 1 on <strong>surfandturf</strong>:
     <strong>absband</strong> = raw,
     <strong>optionb</strong> = old MTM filters,
-    <strong>optionc</strong> = h19 + lottery + whale,
-    <strong>optionc v3</strong> = optionc + expanded toxic hours {0, 1, 19, 21} UTC (backtest +$27/4d vs C v2),
-    <strong>optione</strong> = full defense (cross-side + pre-event + Qualif),
+    <strong>optionc v1</strong> = original 5-day MTM (h19 + Monday + lottery + mtype + whale — control arm),
+    <strong>optionc v2</strong> = ablation-trimmed (drops Monday + mtype),
+    <strong>optionc v3</strong> = v2 + extended toxic hours {0,1,19,21} UTC,
+    <strong>optione</strong> = full defense (cross + pre-event + Qualif),
     <strong>optionf</strong> = optionc base + pre-event + Qualif,
     <strong>surfandturf</strong> = different wallet.
   </p>
-  <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:8px;margin-bottom:18px;font-size:11px">
+  <div style="display:grid;grid-template-columns:repeat(8,1fr);gap:6px;margin-bottom:18px;font-size:10.5px">
     <div style="border:1px solid var(--border);border-radius:6px;padding:12px" id="rn1-ab-cmp-absband-box">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
         <strong style="font-size:13px">🟡 absband (raw)</strong>
@@ -1606,9 +1607,21 @@
         <div><span style="color:var(--muted)">Trades</span><br><strong id="rn1-ab-cmp-optionb-tr">—</strong></div>
       </div>
     </div>
+    <div style="border:1px solid var(--border);border-radius:6px;padding:12px" id="rn1-ab-cmp-optioncv1-box">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <strong style="font-size:13px">🟦 optionc v1 (orig)</strong>
+        <span id="rn1-ab-cmp-optioncv1-trophy" style="font-size:11px;padding:2px 6px;border-radius:4px;background:transparent;color:#fff;font-weight:700"></span>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px">
+        <div><span style="color:var(--muted)">Equity</span><br><strong id="rn1-ab-cmp-optioncv1-eq" style="font-size:18px">—</strong></div>
+        <div><span style="color:var(--muted)">Perf</span><br><strong id="rn1-ab-cmp-optioncv1-perf" style="font-size:18px">—</strong></div>
+        <div><span style="color:var(--muted)">Win rate</span><br><strong id="rn1-ab-cmp-optioncv1-wr">—</strong></div>
+        <div><span style="color:var(--muted)">Trades</span><br><strong id="rn1-ab-cmp-optioncv1-tr">—</strong></div>
+      </div>
+    </div>
     <div style="border:1px solid var(--border);border-radius:6px;padding:12px" id="rn1-ab-cmp-optionc-box">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-        <strong style="font-size:13px">🔵 optionc (corrected)</strong>
+        <strong style="font-size:13px">🔵 optionc v2</strong>
         <span id="rn1-ab-cmp-optionc-trophy" style="font-size:11px;padding:2px 6px;border-radius:4px;background:transparent;color:#fff;font-weight:700"></span>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px">
@@ -1744,18 +1757,56 @@
     </table>
   </details>
 
-  <!-- ═══ Paper Option C — pattern-corrected filters (hour 19 only, lottery, Monday) ═══ -->
+  <!-- ═══ Paper Option C v1 ORIGINAL — 5-day MTM control arm ═══ -->
   <h3 style="margin:24px 0 8px 0;font-size:14px;display:flex;align-items:center;gap:8px">
-    🔵 Paper Option C — pattern-corrected (deep WIN/LOST analysis)
+    🟦 Paper Option C v1 — original 5-filter set (control arm)
+    <span style="font-size:11px;padding:2px 6px;border-radius:6px;background:#1d4ed8;color:#fff;font-weight:600">PAPER $600</span>
+  </h3>
+  <p style="color:var(--muted);font-size:12px;margin:0 0 8px 0">
+    Same sizing as v2/v3 (penny $1, normal $4.5, MIN_TARGET=$200, MAX_USD_MARKET=$4.5).
+    This is the <strong>original Option C</strong> filter set from the 2026-05-20 5-day MTM analysis,
+    before ablation removed Monday and mtype=other: 🚫 skip <strong>hour 19 UTC</strong> ·
+    🚫 skip <strong>Monday</strong> · 🚫 skip <strong>lottery <$0.06</strong> ·
+    🚫 skip <strong>mtype=other</strong> · 🚫 skip <strong>whale >$10K</strong>.
+    Kept as the "control arm" to verify in-vivo that Monday + mtype skips were indeed harmful
+    (backtest predicted -$13 vs v2 on 4 days).
+  </p>
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:18px">
+    <div class="rn1-stat"><div class="rn1-lbl">Equity</div><div class="rn1-val" id="rn1cv1-equity">—</div></div>
+    <div class="rn1-stat"><div class="rn1-lbl">Perf</div><div class="rn1-val" id="rn1cv1-perf">—</div></div>
+    <div class="rn1-stat"><div class="rn1-lbl">Cash</div><div class="rn1-val" id="rn1cv1-cash">—</div></div>
+    <div class="rn1-stat"><div class="rn1-lbl">Open positions</div><div class="rn1-val" id="rn1cv1-open">—</div></div>
+    <div class="rn1-stat"><div class="rn1-lbl">Resolved</div><div class="rn1-val" id="rn1cv1-resolved">—</div></div>
+    <div class="rn1-stat"><div class="rn1-lbl">Win rate</div><div class="rn1-val" id="rn1cv1-wr">—</div></div>
+  </div>
+
+  <details style="margin-bottom:18px;border:1px solid var(--border);border-radius:4px;padding:6px 10px">
+    <summary style="cursor:pointer;font-size:13px;color:var(--muted)">Open Option C v1 positions (<span id="rn1cv1-open-n">0</span>)</summary>
+    <table class="rn1-tbl" style="margin-top:8px">
+      <thead><tr><th>Title</th><th>Outcome</th><th>Tier</th><th class="num">Shares</th><th class="num">Avg px</th><th class="num">Cost</th></tr></thead>
+      <tbody id="rn1cv1-open-tbl"><tr><td colspan="6" style="color:var(--muted);padding:8px">No open positions.</td></tr></tbody>
+    </table>
+  </details>
+
+  <details style="margin-bottom:24px;border:1px solid var(--border);border-radius:4px;padding:6px 10px">
+    <summary style="cursor:pointer;font-size:13px;color:var(--muted)">Recent Option C v1 actions (last 30)</summary>
+    <table class="rn1-tbl" style="margin-top:8px">
+      <thead><tr><th>Action</th><th>Title</th><th>Outcome</th><th>Tier</th><th class="num">Cost</th><th class="num">PnL</th></tr></thead>
+      <tbody id="rn1cv1-trades-tbl"><tr><td colspan="6" style="color:var(--muted);padding:8px">No actions yet.</td></tr></tbody>
+    </table>
+  </details>
+
+  <!-- ═══ Paper Option C v2 — ablation-trimmed (pattern-corrected filters) ═══ -->
+  <h3 style="margin:24px 0 8px 0;font-size:14px;display:flex;align-items:center;gap:8px">
+    🔵 Paper Option C v2 — ablation-trimmed (Monday + mtype dropped)
     <span style="font-size:11px;padding:2px 6px;border-radius:6px;background:#3b82f6;color:#fff;font-weight:600">PAPER $600</span>
   </h3>
   <p style="color:var(--muted);font-size:12px;margin:0 0 8px 0">
-    Same sizing as optionb. Filters corrected from cross-ref BUYs + REDEEMs + /positions on 913 resolved markets:
-    🚫 skip <strong>hour 19 UTC only</strong> (53.3% WR — hours 20-23 are 100% WR, kept) ·
-    🚫 skip <strong>price &lt; $0.06</strong> (lottery, 36.4% WR) ·
-    🚫 skip <strong>Mondays</strong> (64.7% WR vs 98-100% Sun/Tue/Wed) ·
-    🚫 skip mtype=other · 🚫 skip whale &gt;$10K.
-    Removed vs optionb: Qualification skip (95.2% WR ✓), hours 18+20-23 (95-100% WR ✓).
+    Same sizing as v1/v3. Filters retained after 2026-05-20 ablation backtest on 4 days /
+    1748 markets: 🚫 skip <strong>hour 19 UTC</strong> (52.9% WR rejected bucket, -$10.14 PnL avoided) ·
+    🚫 skip <strong>lottery &lt; $0.06</strong> · 🚫 skip <strong>whale &gt; $10K target</strong>.
+    Removed vs v1: <strong>Monday</strong> (rejected bucket was 59.5% WR / +$7.25 — winners!) and
+    <strong>mtype=other</strong> (never triggered). Backtest delta: v2 +$143 vs v1 +$130 / 4d.
   </p>
   <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:18px">
     <div class="rn1-stat"><div class="rn1-lbl">Equity</div><div class="rn1-val" id="rn1oc-equity">—</div></div>
@@ -3439,6 +3490,83 @@ async function loadRn1() {
     }
   }
 
+  // ── Paper Option C v1 (original 5-filter) stats ──
+  const optioncv1 = data.paper_optioncv1 || {};
+  const cv1Last = optioncv1.latest_equity || {};
+  setText('rn1cv1-equity', cv1Last.equity_usd != null ? '$' + cv1Last.equity_usd.toFixed(2) : '—');
+  const cv1PerfEl = document.getElementById('rn1cv1-perf');
+  if (cv1PerfEl && cv1Last.perf_pct != null) {
+    cv1PerfEl.textContent = (cv1Last.perf_pct > 0 ? '+' : '') + cv1Last.perf_pct.toFixed(2) + '%';
+    cv1PerfEl.className = 'rn1-val ' + _rn1RoiClass(cv1Last.perf_pct / 100);
+  }
+  setText('rn1cv1-cash', cv1Last.cash_usd != null ? '$' + cv1Last.cash_usd.toFixed(2) : '—');
+  setText('rn1cv1-open', (cv1Last.n_open || 0));
+  setText('rn1cv1-resolved', (cv1Last.n_resolved || 0) + ' (' + (cv1Last.n_won || 0) + ' W / ' +
+    Math.max((cv1Last.n_resolved || 0) - (cv1Last.n_won || 0), 0) + ' L)');
+  const cv1WrEl = document.getElementById('rn1cv1-wr');
+  if (cv1WrEl) {
+    const wr = (cv1Last.win_rate || 0) * 100;
+    cv1WrEl.textContent = (cv1Last.n_resolved > 0 ? wr.toFixed(1) + '%' : '—');
+    cv1WrEl.className = 'rn1-val ' + (wr >= 60 ? 'rn1-roi-pos' : (wr >= 50 ? 'rn1-roi-flat' : 'rn1-roi-neg'));
+  }
+  const cv1Open = optioncv1.open_positions || [];
+  const cv1SetN = document.getElementById('rn1cv1-open-n');
+  if (cv1SetN) cv1SetN.textContent = cv1Open.length;
+  const cv1OpenTb = document.getElementById('rn1cv1-open-tbl');
+  if (cv1OpenTb) {
+    cv1OpenTb.innerHTML = '';
+    if (!cv1Open.length) {
+      cv1OpenTb.innerHTML = '<tr><td colspan="6" style="color:var(--muted);padding:8px">No open positions.</td></tr>';
+    } else {
+      cv1Open.slice(0, 30).forEach(p => {
+        cv1OpenTb.insertAdjacentHTML('beforeend',
+          '<tr>' +
+          '<td>' + (p.title || '').slice(0, 45) + '</td>' +
+          '<td>' + (p.outcome || '') + '</td>' +
+          '<td><code style="font-size:11px">' + (p.tier || '—') + '</code></td>' +
+          '<td class="num">' + (p.shares || 0).toFixed(2) + '</td>' +
+          '<td class="num">' + (p.avg_price || 0).toFixed(3) + '</td>' +
+          '<td class="num">$' + (p.cost_basis || 0).toFixed(2) + '</td>' +
+          '</tr>');
+      });
+    }
+  }
+  const cv1Trades = (optioncv1.recent_trades || []).slice().reverse();
+  const cv1TrTb = document.getElementById('rn1cv1-trades-tbl');
+  if (cv1TrTb) {
+    cv1TrTb.innerHTML = '';
+    if (!cv1Trades.length) {
+      cv1TrTb.innerHTML = '<tr><td colspan="6" style="color:var(--muted);padding:8px">No actions yet.</td></tr>';
+    } else {
+      cv1Trades.forEach(t => {
+        const action = t.action || '';
+        let actionEl, pnlEl;
+        if (action === 'buy') {
+          actionEl = '<span style="color:#3fb950">BUY</span>';
+          pnlEl = '—';
+        } else if (action === 'resolve') {
+          actionEl = t.result === 'won'
+            ? '<span style="color:#3fb950">RESOLVE ✓</span>'
+            : '<span style="color:#f85149">RESOLVE ✗</span>';
+          const pnl = t.pnl || 0;
+          pnlEl = '<span class="' + _rn1RoiClass(pnl / 5) + '">' + (pnl > 0 ? '+' : '') + '$' + pnl.toFixed(2) + '</span>';
+        } else {
+          actionEl = action;
+          pnlEl = '—';
+        }
+        cv1TrTb.insertAdjacentHTML('beforeend',
+          '<tr>' +
+          '<td>' + actionEl + '</td>' +
+          '<td>' + (t.title || '').slice(0, 40) + '</td>' +
+          '<td>' + (t.outcome || t.outcome_bought || '') + '</td>' +
+          '<td><code style="font-size:11px">' + (t.tier || '—') + '</code></td>' +
+          '<td class="num">$' + (t.cost || t.cost_basis || 0).toFixed(2) + '</td>' +
+          '<td class="num">' + pnlEl + '</td>' +
+          '</tr>');
+      });
+    }
+  }
+
   // ── Paper Option C stats (pattern-corrected filters) ──
   const optionc = data.paper_optionc || {};
   const ocLast = optionc.latest_equity || {};
@@ -3829,7 +3957,8 @@ async function loadRn1() {
     const bots = [
       {key: 'absband',     label: 'absband (raw)',         color: '#d97706', last: abLast},
       {key: 'optionb',     label: 'optionb (v2)',          color: '#16a34a', last: obLast},
-      {key: 'optionc',     label: 'optionc (corrected)',   color: '#3b82f6', last: ocLast},
+      {key: 'optioncv1',   label: 'optionc v1 (orig)',     color: '#1d4ed8', last: cv1Last},
+      {key: 'optionc',     label: 'optionc v2 (trim)',     color: '#3b82f6', last: ocLast},
       {key: 'optioncv3',   label: 'optionc v3 (h-skip)',   color: '#06b6d4', last: cv3Last},
       {key: 'surfandturf', label: 'surfandturf (NBA)',     color: '#a855f7', last: stLast},
       {key: 'optione',     label: 'optione (full defense)',color: '#ef4444', last: oeLast},
@@ -3916,7 +4045,8 @@ async function loadRn1() {
     const series = [
       {label: 'absband (raw)',  color: '#d97706', curve: (data.paper_absband || {}).equity_curve || []},
       {label: 'optionb (v2)',   color: '#16a34a', curve: (data.paper_optionb || {}).equity_curve || []},
-      {label: 'optionc (fix)',  color: '#3b82f6', curve: (data.paper_optionc || {}).equity_curve || []},
+      {label: 'optionc v1',     color: '#1d4ed8', curve: (data.paper_optioncv1 || {}).equity_curve || []},
+      {label: 'optionc v2',     color: '#3b82f6', curve: (data.paper_optionc || {}).equity_curve || []},
       {label: 'optionc v3',     color: '#06b6d4', curve: (data.paper_optioncv3 || {}).equity_curve || []},
       {label: 'surfandturf',    color: '#a855f7', curve: (data.paper_surfandturf || {}).equity_curve || []},
       {label: 'optione (anti)', color: '#ef4444', curve: (data.paper_optione || {}).equity_curve || []},

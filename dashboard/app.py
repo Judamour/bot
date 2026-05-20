@@ -1032,6 +1032,17 @@ def api_rn1():
     optionb_latest = optionb_equity[-1] if optionb_equity else {}
 
     # Paper Option C — pattern-corrected filters (hour 19 only, lottery, Monday)
+    # Option C v1 — original 5-filter set (control arm)
+    optioncv1_state_path = base / "analysis/rn1/data_optioncv1/state.json"
+    optioncv1_positions_path = base / "analysis/rn1/data_optioncv1/positions.json"
+    optioncv1_equity_path = base / "analysis/rn1/data_optioncv1/equity.jsonl"
+    optioncv1_trades_path = base / "analysis/rn1/data_optioncv1/trades.jsonl"
+    optioncv1_state = _read_json(optioncv1_state_path)
+    optioncv1_positions = _read_json(optioncv1_positions_path)
+    optioncv1_equity = _tail_jsonl(optioncv1_equity_path, 60)
+    optioncv1_trades = _tail_jsonl(optioncv1_trades_path, 30)
+    optioncv1_latest = optioncv1_equity[-1] if optioncv1_equity else {}
+
     optionc_state_path = base / "analysis/rn1/data_optionc/state.json"
     optionc_positions_path = base / "analysis/rn1/data_optionc/positions.json"
     optionc_equity_path = base / "analysis/rn1/data_optionc/equity.jsonl"
@@ -1116,6 +1127,13 @@ def api_rn1():
             "equity_curve": optionb_equity,
             "open_positions": list(optionb_positions.values()) if isinstance(optionb_positions, dict) else [],
             "recent_trades": optionb_trades,
+        },
+        "paper_optioncv1": {
+            "state": optioncv1_state,
+            "latest_equity": optioncv1_latest,
+            "equity_curve": optioncv1_equity,
+            "open_positions": list(optioncv1_positions.values()) if isinstance(optioncv1_positions, dict) else [],
+            "recent_trades": optioncv1_trades,
         },
         "paper_optionc": {
             "state": optionc_state,

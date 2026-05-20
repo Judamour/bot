@@ -1,0 +1,28 @@
+[Unit]
+Description=RN1 Paper Option C v1 ORIGINAL — control arm (5 filters before ablation)
+After=network.target bot-cp.service
+
+[Service]
+Type=simple
+User=botuser
+WorkingDirectory=/home/botuser/bot-trading
+EnvironmentFile=-/home/botuser/bot-trading/.env
+# Option C v1 = original 5-day MTM analysis filter set (h19 + Monday +
+# lottery + mtype=other + whale). Run in parallel with C v2 and C v3 to
+# verify in-vivo that the 2026-05-20 ablation findings hold (Monday and
+# mtype filters were faulty per REDEEM truth).
+Environment=RN1_OPTIONCV1_INITIAL=600
+Environment=RN1_OPTIONCV1_MAX_POSITIONS=8
+Environment=RN1_OPTIONCV1_MIN_TARGET=200
+Environment=RN1_OPTIONCV1_MAX_USD_PER_MARKET=4.5
+Environment=RN1_OPTIONCV1_SKIP_HIGH=0.20
+Environment=RN1_OPTIONCV1_NORMAL_SIZE=4.5
+Environment=RN1_OPTIONCV1_PENNY_SIZE=1.0
+ExecStart=/home/botuser/bot-trading/venv/bin/python -m analysis.rn1.paper_optioncv1
+Restart=on-failure
+RestartSec=30
+StandardOutput=append:/home/botuser/bot-trading/logs/rn1/paper_optioncv1.log
+StandardError=append:/home/botuser/bot-trading/logs/rn1/paper_optioncv1.log
+
+[Install]
+WantedBy=multi-user.target
