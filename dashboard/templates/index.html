@@ -1681,6 +1681,44 @@
     </table>
   </details>
 
+  <!-- ═══ Paper Option C — pattern-corrected filters (hour 19 only, lottery, Monday) ═══ -->
+  <h3 style="margin:24px 0 8px 0;font-size:14px;display:flex;align-items:center;gap:8px">
+    🔵 Paper Option C — pattern-corrected (deep WIN/LOST analysis)
+    <span style="font-size:11px;padding:2px 6px;border-radius:6px;background:#3b82f6;color:#fff;font-weight:600">PAPER $600</span>
+  </h3>
+  <p style="color:var(--muted);font-size:12px;margin:0 0 8px 0">
+    Same sizing as optionb. Filters corrected from cross-ref BUYs + REDEEMs + /positions on 913 resolved markets:
+    🚫 skip <strong>hour 19 UTC only</strong> (53.3% WR — hours 20-23 are 100% WR, kept) ·
+    🚫 skip <strong>price &lt; $0.06</strong> (lottery, 36.4% WR) ·
+    🚫 skip <strong>Mondays</strong> (64.7% WR vs 98-100% Sun/Tue/Wed) ·
+    🚫 skip mtype=other · 🚫 skip whale &gt;$10K.
+    Removed vs optionb: Qualification skip (95.2% WR ✓), hours 18+20-23 (95-100% WR ✓).
+  </p>
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:18px">
+    <div class="rn1-stat"><div class="rn1-lbl">Equity</div><div class="rn1-val" id="rn1oc-equity">—</div></div>
+    <div class="rn1-stat"><div class="rn1-lbl">Perf</div><div class="rn1-val" id="rn1oc-perf">—</div></div>
+    <div class="rn1-stat"><div class="rn1-lbl">Cash</div><div class="rn1-val" id="rn1oc-cash">—</div></div>
+    <div class="rn1-stat"><div class="rn1-lbl">Open positions</div><div class="rn1-val" id="rn1oc-open">—</div></div>
+    <div class="rn1-stat"><div class="rn1-lbl">Resolved</div><div class="rn1-val" id="rn1oc-resolved">—</div></div>
+    <div class="rn1-stat"><div class="rn1-lbl">Win rate</div><div class="rn1-val" id="rn1oc-wr">—</div></div>
+  </div>
+
+  <details style="margin-bottom:18px;border:1px solid var(--border);border-radius:4px;padding:6px 10px">
+    <summary style="cursor:pointer;font-size:13px;color:var(--muted)">Open Option C positions (<span id="rn1oc-open-n">0</span>)</summary>
+    <table class="rn1-tbl" style="margin-top:8px">
+      <thead><tr><th>Title</th><th>Outcome</th><th>Tier</th><th class="num">Shares</th><th class="num">Avg px</th><th class="num">Cost</th></tr></thead>
+      <tbody id="rn1oc-open-tbl"><tr><td colspan="6" style="color:var(--muted);padding:8px">No open positions.</td></tr></tbody>
+    </table>
+  </details>
+
+  <details style="margin-bottom:24px;border:1px solid var(--border);border-radius:4px;padding:6px 10px">
+    <summary style="cursor:pointer;font-size:13px;color:var(--muted)">Recent Option C actions (last 30)</summary>
+    <table class="rn1-tbl" style="margin-top:8px">
+      <thead><tr><th>Action</th><th>Title</th><th>Outcome</th><th>Tier</th><th class="num">Cost</th><th class="num">PnL</th></tr></thead>
+      <tbody id="rn1oc-trades-tbl"><tr><td colspan="6" style="color:var(--muted);padding:8px">No actions yet.</td></tr></tbody>
+    </table>
+  </details>
+
   <!-- ═══ Autobot section ═══ -->
   <h3 style="margin:24px 0 8px 0;font-size:14px;display:flex;align-items:center;gap:8px">
     🤖 Autobot — autonomous Polymarket scanner (RN1-style criteria, no signal copy)
@@ -3190,9 +3228,84 @@ async function loadRn1() {
     }
   }
 
-  // ── A/B/C Comparison: absband (raw) vs optionb (v2) vs optionc (corrected) ──
+  // ── Paper Option C stats (pattern-corrected filters) ──
   const optionc = data.paper_optionc || {};
   const ocLast = optionc.latest_equity || {};
+  setText('rn1oc-equity', ocLast.equity_usd != null ? '$' + ocLast.equity_usd.toFixed(2) : '—');
+  const ocPerfEl = document.getElementById('rn1oc-perf');
+  if (ocPerfEl && ocLast.perf_pct != null) {
+    ocPerfEl.textContent = (ocLast.perf_pct > 0 ? '+' : '') + ocLast.perf_pct.toFixed(2) + '%';
+    ocPerfEl.className = 'rn1-val ' + _rn1RoiClass(ocLast.perf_pct / 100);
+  }
+  setText('rn1oc-cash', ocLast.cash_usd != null ? '$' + ocLast.cash_usd.toFixed(2) : '—');
+  setText('rn1oc-open', (ocLast.n_open || 0));
+  setText('rn1oc-resolved', (ocLast.n_resolved || 0) + ' (' + (ocLast.n_won || 0) + ' W / ' +
+    Math.max((ocLast.n_resolved || 0) - (ocLast.n_won || 0), 0) + ' L)');
+  const ocWrEl = document.getElementById('rn1oc-wr');
+  if (ocWrEl) {
+    const wr = (ocLast.win_rate || 0) * 100;
+    ocWrEl.textContent = (ocLast.n_resolved > 0 ? wr.toFixed(1) + '%' : '—');
+    ocWrEl.className = 'rn1-val ' + (wr >= 60 ? 'rn1-roi-pos' : (wr >= 50 ? 'rn1-roi-flat' : 'rn1-roi-neg'));
+  }
+  const ocOpen = optionc.open_positions || [];
+  const ocSetN = document.getElementById('rn1oc-open-n');
+  if (ocSetN) ocSetN.textContent = ocOpen.length;
+  const ocOpenTb = document.getElementById('rn1oc-open-tbl');
+  if (ocOpenTb) {
+    ocOpenTb.innerHTML = '';
+    if (!ocOpen.length) {
+      ocOpenTb.innerHTML = '<tr><td colspan="6" style="color:var(--muted);padding:8px">No open positions.</td></tr>';
+    } else {
+      ocOpen.slice(0, 30).forEach(p => {
+        ocOpenTb.insertAdjacentHTML('beforeend',
+          '<tr>' +
+          '<td>' + (p.title || '').slice(0, 45) + '</td>' +
+          '<td>' + (p.outcome || '') + '</td>' +
+          '<td><code style="font-size:11px">' + (p.tier || '—') + '</code></td>' +
+          '<td class="num">' + (p.shares || 0).toFixed(2) + '</td>' +
+          '<td class="num">' + (p.avg_price || 0).toFixed(3) + '</td>' +
+          '<td class="num">$' + (p.cost_basis || 0).toFixed(2) + '</td>' +
+          '</tr>');
+      });
+    }
+  }
+  const ocTrades = (optionc.recent_trades || []).slice().reverse();
+  const ocTrTb = document.getElementById('rn1oc-trades-tbl');
+  if (ocTrTb) {
+    ocTrTb.innerHTML = '';
+    if (!ocTrades.length) {
+      ocTrTb.innerHTML = '<tr><td colspan="6" style="color:var(--muted);padding:8px">No actions yet.</td></tr>';
+    } else {
+      ocTrades.forEach(t => {
+        const action = t.action || '';
+        let actionEl, pnlEl;
+        if (action === 'buy') {
+          actionEl = '<span style="color:#3fb950">BUY</span>';
+          pnlEl = '—';
+        } else if (action === 'resolve') {
+          actionEl = t.result === 'won'
+            ? '<span style="color:#3fb950">RESOLVE ✓</span>'
+            : '<span style="color:#f85149">RESOLVE ✗</span>';
+          const pnl = t.pnl || 0;
+          pnlEl = '<span class="' + _rn1RoiClass(pnl / 5) + '">' + (pnl > 0 ? '+' : '') + '$' + pnl.toFixed(2) + '</span>';
+        } else {
+          actionEl = action;
+          pnlEl = '—';
+        }
+        ocTrTb.insertAdjacentHTML('beforeend',
+          '<tr>' +
+          '<td>' + actionEl + '</td>' +
+          '<td>' + (t.title || '').slice(0, 40) + '</td>' +
+          '<td>' + (t.outcome || t.outcome_bought || '') + '</td>' +
+          '<td><code style="font-size:11px">' + (t.tier || '—') + '</code></td>' +
+          '<td class="num">$' + (t.cost || t.cost_basis || 0).toFixed(2) + '</td>' +
+          '<td class="num">' + pnlEl + '</td>' +
+          '</tr>');
+      });
+    }
+  }
+
+  // ── A/B/C Comparison: absband (raw) vs optionb (v2) vs optionc (corrected) ──
   (function renderABCComparison() {
     const bots = [
       {key: 'absband', label: 'absband (raw)',      color: '#d97706', last: abLast},
