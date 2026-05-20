@@ -92,6 +92,42 @@ def handle_buy(decision: dict, positions: dict) -> None:
             write_jsonl("trades.jsonl", {**decision, "local_action": f"skip_{reason}"})
             return
 
+        # Record this BUY in the conviction rolling window BEFORE checking, so
+        # the current chunk contributes to cumulative.
+        optionb.record_observation(decision)
+
+        conv_ok, conv_reason = optionb.conviction_passes(decision)
+        if not conv_ok:
+            log.info(f"SKIP BUY: {conv_reason}")
+            write_jsonl("trades.jsonl", {**decision, "local_action": f"skip_{conv_reason}"})
+            return
+
+        # Reversal detection: if we hold the OPPOSITE outcome on this binary,
+        # RN1 is signaling he's switched sides. Close our losing position first.
+        rev_tok, rev_pos = optionb.detect_reversal(decision, positions)
+        if rev_tok and rev_pos:
+            rev_size = float(rev_pos.get("size_shares", 0))
+            # Round down to avoid balance/allowance precision mismatches
+            rev_size = int(rev_size * 100) / 100
+            log.warning(
+                f"REVERSAL: closing our {rev_pos.get('outcome', '?')} "
+                f"({rev_size:.2f} sh) before mirroring RN1's {decision.get('outcome', '?')} BUY"
+            )
+            if rev_size > 0:
+                sell_result = executor.place_sell(rev_tok, rev_size, min_price=0.001)
+                write_jsonl("trades.jsonl", {
+                    **decision,
+                    "local_action": "reversal_sell",
+                    "reversal_token": rev_tok,
+                    "reversal_outcome": rev_pos.get("outcome"),
+                    "reversal_size_shares": rev_size,
+                    "sell_result": sell_result,
+                })
+                # Drop from local state immediately; reconcile_resolved will
+                # re-sync next cycle if needed.
+                positions.pop(rev_tok, None)
+                state.save_positions(positions)
+
     trade_pct = float(decision.get("trade_pct", 0) or 0)
     tier = sizing.describe_tier(p, trade_pct)
     size_usd = sizing.compute_size_usd(p, trade_pct)

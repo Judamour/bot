@@ -7,6 +7,14 @@ Edge zones to AVOID when copying RN1:
 - Hour 18-24 UTC: -14.16% ROI (NBA/EPL live-betting where US sharps dominate)
 - Market types draw/spread/winner_yes_no/other: -6.07% ROI on winner_yes_no alone
 - Whale trades >$10K: -27.13% ROI (his desperate DCA / manipulation buckets)
+
+Adds two further behaviors (2026-05-20):
+- Conviction filter (whale + net-buy aggregation): only fire when RN1 has
+  committed >=$50 to a (market, outcome) — either in one chunk or cumulated
+  over a 10min window. Filters out his exploratory hedge dust ($1-5).
+- Reversal detection: if RN1 BUYs the OPPOSITE outcome of a market we hold,
+  treat it as a reversal signal — SELL our (now-losing) position before
+  mirroring his new direction.
 """
 from datetime import datetime, timezone
 
@@ -67,3 +75,79 @@ def optionb_passes(decision: dict) -> tuple[bool, str]:
         return False, f"optb_whale(${target_size:.0f})"
 
     return True, "ok"
+
+
+# --- Conviction filter (whale + net-buy aggregation over rolling window) ---
+# In-memory store, per-process. Lost on container restart — that's fine because
+# the window is short (10min) and bot-cp re-replays only recent decisions on
+# restart via positions_polling. Format: {(cid, oi): [(ts, target_size), ...]}.
+_recent_buys: dict[tuple[str, int], list[tuple[int, float]]] = {}
+
+# Tuned to capture his real convictions (Pellegrino $919, Faurel $234, Noma
+# $132, Travaglia $104, Norrie $60) while skipping exploratory hedge dust
+# (Sinja Kraus $1.78, Begu $14 total, Tsitsipas $26 total). 10min window covers
+# his typical DCA tempo on tennis qualifications.
+CONVICTION_THRESHOLD_USD = 50.0
+CONVICTION_WINDOW_S = 600
+
+
+def record_observation(decision: dict) -> None:
+    """Log this BUY in the rolling window so future chunks can build cumulative."""
+    cid = decision.get("conditionId") or ""
+    if not cid:
+        return
+    oi = int(decision.get("outcomeIndex") or 0)
+    ts = int(decision.get("ts") or 0)
+    size = float(decision.get("target_size_usd") or 0)
+    if ts <= 0 or size <= 0:
+        return
+    key = (cid, oi)
+    arr = _recent_buys.setdefault(key, [])
+    arr.append((ts, size))
+    # Prune entries older than window so memory stays bounded
+    cutoff = ts - CONVICTION_WINDOW_S
+    if arr[0][0] < cutoff:
+        _recent_buys[key] = [(t, s) for (t, s) in arr if t >= cutoff]
+
+
+def conviction_passes(
+    decision: dict,
+    *,
+    threshold_usd: float = CONVICTION_THRESHOLD_USD,
+    window_s: int = CONVICTION_WINDOW_S,
+) -> tuple[bool, str]:
+    """Whale-or-cumulative filter. Pass if THIS chunk OR window-cumulative >= threshold.
+
+    Note: caller should record_observation(decision) BEFORE this check so the
+    current chunk is counted in the cumulative.
+    """
+    size = float(decision.get("target_size_usd") or 0)
+    cid = decision.get("conditionId") or ""
+    oi = int(decision.get("outcomeIndex") or 0)
+    ts = int(decision.get("ts") or 0)
+    if size >= threshold_usd:
+        return True, f"single_chunk_${size:.0f}"
+    if not cid or ts <= 0:
+        return False, f"below_conviction_${size:.0f}"
+    cutoff = ts - window_s
+    cum = sum(s for (t, s) in _recent_buys.get((cid, oi), []) if t >= cutoff)
+    if cum >= threshold_usd:
+        return True, f"cumulative_${cum:.0f}_in_{window_s}s"
+    return False, f"below_conviction_${cum:.0f}<{threshold_usd:.0f}"
+
+
+def detect_reversal(decision: dict, positions: dict) -> tuple[str | None, dict | None]:
+    """Return (token_id, position_dict) of our holding on the OPPOSITE outcome
+    of the market RN1 just BUY-ed, or (None, None) if not a reversal.
+
+    Binary market assumption: outcomeIndex 0 ↔ 1.
+    """
+    cid = decision.get("conditionId") or ""
+    if not cid:
+        return None, None
+    oi = int(decision.get("outcomeIndex") or 0)
+    opposite_oi = 1 - oi
+    for tok, pos in positions.items():
+        if pos.get("condition_id") == cid and int(pos.get("outcome_index", -1)) == opposite_oi:
+            return tok, pos
+    return None, None
