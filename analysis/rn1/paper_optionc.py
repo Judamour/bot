@@ -1,18 +1,19 @@
-"""RN1 paper bot — Option C: corrected filter set from deep pattern analysis.
+"""RN1 paper bot — Option C v2: ablation-trimmed filter set.
 
-Built on top of paper_optionb but with the filter set corrected after the
-2026-05-20 cross-reference (BUYs + REDEEMs + current /positions, WIN/LOST/
-OPEN labeling on 913 resolved markets):
+Originally built from session 2026-05-20 5-day MTM analysis. Ablation
+backtest on 4 days of RN1 REDEEMs (2026-05-20 PM, 1748 markets) revealed
+that 2 of the 4 optional filters were wrong:
 
-  CORRECTIONS vs Option B v2:
-  - REMOVED Qualification skip (deep data: 95.2% WR, was wrongly 51%)
-  - REMOVED hours 18 + 20-23 skip (all 95-100% WR, only 19 is bad)
-  - ADDED price <0.06 skip (lottery tickets: 36.4% WR confirmed loser)
-  - ADDED Monday skip (64.7% WR vs 98-100% Sun/Tue/Wed)
+  KEPT (filters that prevent real losses):
+  - lottery: price < $0.06 skip (36.4% WR confirmed loser)
+  - hour 19 UTC skip (52.9% WR rejected bucket, -$10.14 PnL avoided)
+  - whale > $10K target_size skip (marginal -$0.66 benefit)
 
-  KEPT:
-  - mtype="other" skip (catch-all, low signal)
-  - whale >$10K skip
+  REMOVED 2026-05-20 PM after ablation:
+  - Monday skip — rejected bucket was 59.5% WR / +$7.25 PnL (winners!)
+  - mtype="other" skip — never triggered on RN1's flow (all titles classify)
+
+Backtest delta: Option C v2 = +$151 / 4d (vs Option C v1 = +$130 / 4d).
 
 Effective bands with service env (SKIP_HIGH=0.20, NORMAL_MAX=0.95):
   - <0.06              -> SKIP (lottery — Option C catches this twice,
@@ -212,41 +213,33 @@ def _trade_passes(trade: dict, market: dict | None) -> tuple[bool, str]:
     if tier in ("lottery", "losing_zone", "thin_edge"):
         return False, f"tier_{tier}({price:.3f})"
 
-    # --- Option C filters — 2026-05-20 corrected pattern analysis ---
-    # Data: cross-ref of BUYs (decisions.jsonl) + REDEEMs + current /positions
-    # with WIN/LOST/OPEN labeling. UNKNOWN inferred as WIN (winner already
-    # redeemed). Patterns identified across 913 resolved markets.
-    #
-    # Option B v2 had 2 wrong filters (Qualification 95%WR not 51%, and
-    # hour 18-24 had hours 20-23 at 100%WR). Option C corrects these.
+    # --- Option C v2 filters — 2026-05-20 PM ablation backtest ---
+    # 1748 markets, 4-day window. Per-filter rejected-bucket analysis:
+    #   hour19  : -$10.14 on 45 rejects (52.9% WR) — KEEP
+    #   whale   : -$0.66 on 8 rejects (60% WR)    — KEEP (small benefit)
+    #   monday  : +$7.25 on 80 rejects (59.5% WR) — DROP (rejected winners!)
+    #   mtype=other : never triggers              — DROP (no-op)
+    # Cleaned set yields +$21 / 4 days vs original 4-filter C.
 
-    # 1. Skip ONLY hour 19 UTC (53.3% WR; hours 20-23 are 100% WR)
+    # 1. Skip ONLY hour 19 UTC (52.9% WR rejected bucket, -$10.14 PnL avoided)
     ts = int(trade.get("timestamp") or trade.get("ts") or 0)
     if ts > 0:
         dt_utc = datetime.fromtimestamp(ts, tz=timezone.utc)
         if dt_utc.hour == 19:
             return False, "optc_hour_19"
-        # 2. Skip Mondays (64.7% WR vs 98-100% on Sun/Tue/Wed)
-        if dt_utc.weekday() == 0:
-            return False, "optc_monday"
 
-    # 3. Skip lottery tickets (entry price < $0.06) — 36.4% WR confirmed loser
-    #    across all market types. RN1's penny stretch lower bound was the
-    #    actual losing zone, not the 0.20-0.45 mid-low band.
+    # 2. Skip lottery tickets (entry price < $0.06) — 36.4% WR confirmed loser
     if price < 0.06:
         return False, f"optc_lottery({price:.3f})"
 
-    # 4. Skip 'other' mtype (catch-all, low signal by definition).
-    title = trade.get("title") or trade.get("market") or ""
-    outcome = trade.get("outcome") or ""
-    mtype = classify_market_type(title, outcome)
-    if mtype == "other":
-        return False, f"optc_bad_mtype({mtype})"
-
-    # 5. Skip whale trades (>$10K = -27% ROI manipulation/desperate DCA)
+    # 3. Skip whale trades (>$10K target_size = manipulation/desperate DCA)
     if target_size and target_size > 10000:
         return False, f"optc_whale({target_size:.0f})"
-    # --- end Option C filters ---
+    # --- end Option C v2 filters ---
+    #
+    # REMOVED on 2026-05-20 PM after ablation backtest invalidated them:
+    # - Monday skip : rejected bucket was 59.5% WR / +$7.25 PnL (winners!)
+    # - mtype=other : never triggered on RN1's flow (all titles classify)
 
     # NOTE removed vs Option B v2:
     # - Qualification skip (was wrong — corrected analysis shows 95.2% WR)
