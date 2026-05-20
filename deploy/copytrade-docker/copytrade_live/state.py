@@ -116,6 +116,7 @@ def reconcile_resolved(positions: dict, *, size_threshold: float = 0.01,
                        drop_grace_seconds: int = 600,
                        redeemable_min_value: float = 0.50,
                        near_loss_price: float = 0.01,
+                       near_win_price: float = 0.99,
                        ) -> tuple[list[str], list[str], list[dict]]:
     """Sync local state with Polymarket data-api /positions (source of truth).
 
@@ -133,6 +134,10 @@ def reconcile_resolved(positions: dict, *, size_threshold: float = 0.01,
       resolved-lost (even if Polymarket has not flipped redeemable yet) — this
       frees the slot quickly when the orderbook prices it dead, without waiting
       hours for the UMA oracle. Grace period still applies.
+      Symmetrically, positions with curPrice >= near_win_price are treated as
+      effectively won-pending — slot freed early so the bot can scan for new
+      opportunities. Cash stays locked in the shares until user clicks Redeem
+      (Telegram alert fires when oracle officially flips redeemable=True).
     - ADOPT remote active positions absent from local state — covers manual orders
       placed outside the poller flow (e.g. ad-hoc execs, limit orders filling
       after a restart) so the dashboard reflects the truth.
@@ -168,7 +173,7 @@ def reconcile_resolved(positions: dict, *, size_threshold: float = 0.01,
         if p.get("asset")
         and not p.get("redeemable")
         and float(p.get("size") or 0) > size_threshold
-        and float(p.get("curPrice") or 0) > near_loss_price
+        and near_loss_price < float(p.get("curPrice") or 0) < near_win_price
     }
 
     now = int(time.time())
@@ -184,8 +189,14 @@ def reconcile_resolved(positions: dict, *, size_threshold: float = 0.01,
         removed.append(tid)
         # Identify drop reason for log clarity
         remote_entry = next((p for p in remote if p.get("asset") == tid), None)
-        if remote_entry and float(remote_entry.get("curPrice") or 0) <= near_loss_price and not remote_entry.get("redeemable"):
-            reason = f"near-loss cur={remote_entry.get('curPrice')}"
+        if remote_entry and not remote_entry.get("redeemable"):
+            cp = float(remote_entry.get("curPrice") or 0)
+            if cp <= near_loss_price:
+                reason = f"near-loss cur={cp:.4f}"
+            elif cp >= near_win_price:
+                reason = f"near-win cur={cp:.4f} (cash still locked, click Redeem when oracle fires)"
+            else:
+                reason = f"gone-from-remote cur={cp:.4f}"
         elif remote_entry and remote_entry.get("redeemable"):
             reason = "redeemable"
         else:
