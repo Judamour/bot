@@ -25,6 +25,8 @@ Environment=RN1_OPTIONE_NORMAL_SIZE=4.5
 Environment=RN1_OPTIONE_PENNY_SIZE=1.0
 Environment=RN1_OPTIONE_PRE_EVENT_MIN_S=1800
 Environment=RN1_OPTIONE_BAD_HOURS_UTC=18,19,20,21,22,23
+# Tennis Qualif skip: "all" (default) | "heavy_fav_ok" (only p>=0.80) | "off"
+Environment=RN1_OPTIONE_SKIP_QUALIF=all
 ExecStart=/home/botuser/bot-trading/venv/bin/python -m analysis.rn1.paper_optione
 Restart=on-failure
 RestartSec=30

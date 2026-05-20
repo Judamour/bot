@@ -19,6 +19,9 @@ wash-trade study + Polymarket COPYCAT newsletter):
        has already started OR starts within 30 min. Phemex (Apr 2026)
        identified RN1's edge as ~45s information advantage on live-score
        markets — uncopyable via REST polling.
+    5. Tennis Qualification skip (live empirical evidence 2026-05-20 PM:
+       3 RG Qualif mid-price entries lost ~$20, only heavy_fav 84¢ won).
+       Env QUALIF_MODE: "all" (default) | "heavy_fav_ok" | "off".
 
 Sizing identical to absband: penny $1, normal $4.5, MIN_TARGET=$200,
 $4.5/market, max 8 positions.
@@ -97,6 +100,14 @@ PRE_EVENT_MIN_S = int(os.environ.get("RN1_OPTIONE_PRE_EVENT_MIN_S", "1800"))
 # Set to empty string to disable.
 _BAD_HOURS_ENV = os.environ.get("RN1_OPTIONE_BAD_HOURS_UTC", "18,19,20,21,22,23")
 BAD_HOURS_UTC = {int(h) for h in _BAD_HOURS_ENV.split(",") if h.strip().isdigit()}
+# Tennis Qualification filter. Empirical evidence from user's live wallet
+# (2026-05-20 PM): 3 Roland Garros Qualif mid-price entries (45-65¢) lost
+# all ~$20, only heavy_fav 84¢ won. The earlier REDEEM analysis claiming
+# 95.2% WR was biased toward heavy_fav fast resolutions. Modes:
+#   "off"           = no skip (Option C behavior)
+#   "all"           = skip all Qualif markets (default, conservative)
+#   "heavy_fav_ok"  = skip Qualif except entries >= 0.80 (RN1's true edge zone)
+QUALIF_MODE = os.environ.get("RN1_OPTIONE_SKIP_QUALIF", "all").lower()
 
 # Gamma API — has gameStartTime, unlike CLOB
 GAMMA_API = "https://gamma-api.polymarket.com"
@@ -358,6 +369,17 @@ def _trade_passes(
         seconds_until_start = start_ts - ts
         if seconds_until_start < PRE_EVENT_MIN_S:
             return False, f"opte_live_or_close({seconds_until_start}s)"
+
+    # 5. Tennis Qualification skip. User's live wallet 2026-05-20 lost
+    #    ~$20 on 3 RG Qualif mid-price entries (45-65¢) — these are coin
+    #    flips even RN1 doesn't crack. Heavy_fav Qualif (>=0.80) still
+    #    has documented edge (single winner Hanyu Guo 84¢ +19%).
+    title = trade.get("title") or trade.get("market") or ""
+    if QUALIF_MODE != "off" and "qualification" in title.lower():
+        if QUALIF_MODE == "heavy_fav_ok" and price >= 0.80:
+            pass  # let the trade through
+        else:
+            return False, f"opte_qualif({QUALIF_MODE})"
     # --- end Option E v2 filters ---
 
     return True, "ok"
@@ -642,8 +664,8 @@ def main() -> None:
     pre_evt = (
         f"pre_event>={PRE_EVENT_MIN_S}s" if PRE_EVENT_MIN_S >= 0 else "pre_event=off"
     )
-    log.info(f"Boot — RN1 paper Option E v2 (cross-side + cross-event + "
-             f"bad_hours_utc=[{bad_hr}] + {pre_evt}), "
+    log.info(f"Boot — RN1 paper Option E v2.1 (cross-side + cross-event + "
+             f"bad_hours_utc=[{bad_hr}] + {pre_evt} + qualif={QUALIF_MODE}), "
              f"capital=${INITIAL_CAPITAL_USD}, max_pos={MAX_POSITIONS}, "
              f"max_per_market=${MAX_USD_PER_MARKET}, min_target=${MIN_TARGET_SIZE_USD}")
     log.info(f"Tier grid — penny[{TIER_PENNY_MIN}-{TIER_PENNY_MAX}): ${TIER_PENNY_SIZE} | "
