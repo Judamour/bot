@@ -1743,6 +1743,42 @@
     </table>
   </details>
 
+  <!-- ═══ Paper Surfandturf — separate wallet (NBA/foot whale conviction) ═══ -->
+  <h3 style="margin:24px 0 8px 0;font-size:14px;display:flex;align-items:center;gap:8px">
+    🟣 Paper Surfandturf — different wallet (NBA/foot whale conviction)
+    <span style="font-size:11px;padding:2px 6px;border-radius:6px;background:#a855f7;color:#fff;font-weight:600">PAPER $600</span>
+  </h3>
+  <p style="color:var(--muted);font-size:12px;margin:0 0 8px 0">
+    Mirrors wallet <code>0x9f2fe025…2ca8</code> — a high-conviction NBA + foot whale ($1K-$200K per chunk).
+    Sizing: penny [0.02-0.20): $1 · normal [0.20-0.85]: $4.50 · &gt;0.85 SKIP. <strong>MIN_TARGET=$500</strong>
+    (catch his conviction only, skip his $1-100 scouts). No category/hour filters — his strategy is
+    "follow his big convictions raw". The 4th comparison strategy, totally distinct wallet/edge.
+  </p>
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:18px">
+    <div class="rn1-stat"><div class="rn1-lbl">Equity</div><div class="rn1-val" id="rn1st-equity">—</div></div>
+    <div class="rn1-stat"><div class="rn1-lbl">Perf</div><div class="rn1-val" id="rn1st-perf">—</div></div>
+    <div class="rn1-stat"><div class="rn1-lbl">Cash</div><div class="rn1-val" id="rn1st-cash">—</div></div>
+    <div class="rn1-stat"><div class="rn1-lbl">Open positions</div><div class="rn1-val" id="rn1st-open">—</div></div>
+    <div class="rn1-stat"><div class="rn1-lbl">Resolved</div><div class="rn1-val" id="rn1st-resolved">—</div></div>
+    <div class="rn1-stat"><div class="rn1-lbl">Win rate</div><div class="rn1-val" id="rn1st-wr">—</div></div>
+  </div>
+
+  <details style="margin-bottom:18px;border:1px solid var(--border);border-radius:4px;padding:6px 10px">
+    <summary style="cursor:pointer;font-size:13px;color:var(--muted)">Open Surfandturf positions (<span id="rn1st-open-n">0</span>)</summary>
+    <table class="rn1-tbl" style="margin-top:8px">
+      <thead><tr><th>Title</th><th>Outcome</th><th>Tier</th><th class="num">Shares</th><th class="num">Avg px</th><th class="num">Cost</th></tr></thead>
+      <tbody id="rn1st-open-tbl"><tr><td colspan="6" style="color:var(--muted);padding:8px">No open positions.</td></tr></tbody>
+    </table>
+  </details>
+
+  <details style="margin-bottom:24px;border:1px solid var(--border);border-radius:4px;padding:6px 10px">
+    <summary style="cursor:pointer;font-size:13px;color:var(--muted)">Recent Surfandturf actions (last 30)</summary>
+    <table class="rn1-tbl" style="margin-top:8px">
+      <thead><tr><th>Action</th><th>Title</th><th>Outcome</th><th>Tier</th><th class="num">Cost</th><th class="num">PnL</th></tr></thead>
+      <tbody id="rn1st-trades-tbl"><tr><td colspan="6" style="color:var(--muted);padding:8px">No actions yet.</td></tr></tbody>
+    </table>
+  </details>
+
   <!-- ═══ Autobot section ═══ -->
   <h3 style="margin:24px 0 8px 0;font-size:14px;display:flex;align-items:center;gap:8px">
     🤖 Autobot — autonomous Polymarket scanner (RN1-style criteria, no signal copy)
@@ -3329,9 +3365,84 @@ async function loadRn1() {
     }
   }
 
-  // ── A/B/C/D Comparison: 3 RN1 strategies + surfandturf ──
+  // ── Paper Surfandturf stats ──
   const surfandturf = data.paper_surfandturf || {};
   const stLast = surfandturf.latest_equity || {};
+  setText('rn1st-equity', stLast.equity_usd != null ? '$' + stLast.equity_usd.toFixed(2) : '—');
+  const stPerfEl = document.getElementById('rn1st-perf');
+  if (stPerfEl && stLast.perf_pct != null) {
+    stPerfEl.textContent = (stLast.perf_pct > 0 ? '+' : '') + stLast.perf_pct.toFixed(2) + '%';
+    stPerfEl.className = 'rn1-val ' + _rn1RoiClass(stLast.perf_pct / 100);
+  }
+  setText('rn1st-cash', stLast.cash_usd != null ? '$' + stLast.cash_usd.toFixed(2) : '—');
+  setText('rn1st-open', (stLast.n_open || 0));
+  setText('rn1st-resolved', (stLast.n_resolved || 0) + ' (' + (stLast.n_won || 0) + ' W / ' +
+    Math.max((stLast.n_resolved || 0) - (stLast.n_won || 0), 0) + ' L)');
+  const stWrEl = document.getElementById('rn1st-wr');
+  if (stWrEl) {
+    const wr = (stLast.win_rate || 0) * 100;
+    stWrEl.textContent = (stLast.n_resolved > 0 ? wr.toFixed(1) + '%' : '—');
+    stWrEl.className = 'rn1-val ' + (wr >= 60 ? 'rn1-roi-pos' : (wr >= 50 ? 'rn1-roi-flat' : 'rn1-roi-neg'));
+  }
+  const stOpen = surfandturf.open_positions || [];
+  const stSetN = document.getElementById('rn1st-open-n');
+  if (stSetN) stSetN.textContent = stOpen.length;
+  const stOpenTb = document.getElementById('rn1st-open-tbl');
+  if (stOpenTb) {
+    stOpenTb.innerHTML = '';
+    if (!stOpen.length) {
+      stOpenTb.innerHTML = '<tr><td colspan="6" style="color:var(--muted);padding:8px">No open positions.</td></tr>';
+    } else {
+      stOpen.slice(0, 30).forEach(p => {
+        stOpenTb.insertAdjacentHTML('beforeend',
+          '<tr>' +
+          '<td>' + (p.title || '').slice(0, 45) + '</td>' +
+          '<td>' + (p.outcome || '') + '</td>' +
+          '<td><code style="font-size:11px">' + (p.tier || '—') + '</code></td>' +
+          '<td class="num">' + (p.shares || 0).toFixed(2) + '</td>' +
+          '<td class="num">' + (p.avg_price || 0).toFixed(3) + '</td>' +
+          '<td class="num">$' + (p.cost_basis || 0).toFixed(2) + '</td>' +
+          '</tr>');
+      });
+    }
+  }
+  const stTrades = (surfandturf.recent_trades || []).slice().reverse();
+  const stTrTb = document.getElementById('rn1st-trades-tbl');
+  if (stTrTb) {
+    stTrTb.innerHTML = '';
+    if (!stTrades.length) {
+      stTrTb.innerHTML = '<tr><td colspan="6" style="color:var(--muted);padding:8px">No actions yet.</td></tr>';
+    } else {
+      stTrades.forEach(t => {
+        const action = t.action || '';
+        let actionEl, pnlEl;
+        if (action === 'buy') {
+          actionEl = '<span style="color:#3fb950">BUY</span>';
+          pnlEl = '—';
+        } else if (action === 'resolve') {
+          actionEl = t.result === 'won'
+            ? '<span style="color:#3fb950">RESOLVE ✓</span>'
+            : '<span style="color:#f85149">RESOLVE ✗</span>';
+          const pnl = t.pnl || 0;
+          pnlEl = '<span class="' + _rn1RoiClass(pnl / 5) + '">' + (pnl > 0 ? '+' : '') + '$' + pnl.toFixed(2) + '</span>';
+        } else {
+          actionEl = action;
+          pnlEl = '—';
+        }
+        stTrTb.insertAdjacentHTML('beforeend',
+          '<tr>' +
+          '<td>' + actionEl + '</td>' +
+          '<td>' + (t.title || '').slice(0, 40) + '</td>' +
+          '<td>' + (t.outcome || t.outcome_bought || '') + '</td>' +
+          '<td><code style="font-size:11px">' + (t.tier || '—') + '</code></td>' +
+          '<td class="num">$' + (t.cost || t.cost_basis || 0).toFixed(2) + '</td>' +
+          '<td class="num">' + pnlEl + '</td>' +
+          '</tr>');
+      });
+    }
+  }
+
+  // ── A/B/C/D Comparison: 3 RN1 strategies + surfandturf ──
   (function renderABCComparison() {
     const bots = [
       {key: 'absband',     label: 'absband (raw)',         color: '#d97706', last: abLast},
