@@ -1554,14 +1554,55 @@
     </table>
   </details>
 
-  <!-- ═══ Paper Absband — Option A config (mirror live $628 RN1) ═══ -->
+  <!-- ═══ A/B Comparison — paper_absband vs paper_optionb ═══ -->
   <h3 style="margin:24px 0 8px 0;font-size:14px;display:flex;align-items:center;gap:8px">
-    🎯 Paper Absband — Option A (mirror live $628 RN1)
-    <span style="font-size:11px;padding:2px 6px;border-radius:6px;background:#d97706;color:#fff;font-weight:600">PAPER $628</span>
+    ⚔️ A/B Comparison — Yesterday strategy vs Validated v2
+    <span style="font-size:11px;padding:2px 6px;border-radius:6px;background:#0ea5e9;color:#fff;font-weight:600">$600 each</span>
   </h3>
   <p style="color:var(--muted);font-size:12px;margin:0 0 8px 0">
-    penny [0.06-0.20): $2 · normal [0.20-0.95]: $8 · MIN_TARGET=$10, MAX_POS=25, MAX_USD_MARKET=$25.
-    Mirror exact du bot live $628, sans filtre additionnel — référence baseline.
+    Both bots start at $600 paper, mirror RN1 BUYs. Same sizing (penny $1, normal $4.5).
+    Difference: <strong>optionb</strong> applies 4 filters validated by 3500+ REDEEM events
+    (Qualification, hour 18-24 UTC, mtype={other}, whale >$10K). Direct A/B test.
+  </p>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:24px">
+    <div style="border:1px solid var(--border);border-radius:6px;padding:12px" id="rn1-ab-cmp-absband-box">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <strong style="font-size:13px">🟡 absband (hier-style)</strong>
+        <span id="rn1-ab-cmp-absband-trophy" style="font-size:11px;padding:2px 6px;border-radius:4px;background:transparent;color:#fff;font-weight:700"></span>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px">
+        <div><span style="color:var(--muted)">Equity</span><br><strong id="rn1-ab-cmp-absband-eq" style="font-size:18px">—</strong></div>
+        <div><span style="color:var(--muted)">Perf</span><br><strong id="rn1-ab-cmp-absband-perf" style="font-size:18px">—</strong></div>
+        <div><span style="color:var(--muted)">Win rate</span><br><strong id="rn1-ab-cmp-absband-wr">—</strong></div>
+        <div><span style="color:var(--muted)">Trades</span><br><strong id="rn1-ab-cmp-absband-tr">—</strong></div>
+      </div>
+    </div>
+    <div style="border:1px solid var(--border);border-radius:6px;padding:12px" id="rn1-ab-cmp-optionb-box">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <strong style="font-size:13px">🟢 optionb (validé v2)</strong>
+        <span id="rn1-ab-cmp-optionb-trophy" style="font-size:11px;padding:2px 6px;border-radius:4px;background:transparent;color:#fff;font-weight:700"></span>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px">
+        <div><span style="color:var(--muted)">Equity</span><br><strong id="rn1-ab-cmp-optionb-eq" style="font-size:18px">—</strong></div>
+        <div><span style="color:var(--muted)">Perf</span><br><strong id="rn1-ab-cmp-optionb-perf" style="font-size:18px">—</strong></div>
+        <div><span style="color:var(--muted)">Win rate</span><br><strong id="rn1-ab-cmp-optionb-wr">—</strong></div>
+        <div><span style="color:var(--muted)">Trades</span><br><strong id="rn1-ab-cmp-optionb-tr">—</strong></div>
+      </div>
+    </div>
+  </div>
+  <div style="background:var(--card);border:1px solid var(--border);border-radius:6px;padding:10px 12px;margin-bottom:24px;font-size:13px" id="rn1-ab-cmp-verdict">
+    <span style="color:var(--muted)">Verdict:</span> <strong id="rn1-ab-cmp-verdict-text">awaiting data…</strong>
+  </div>
+
+  <!-- ═══ Paper Absband — yesterday-style sizing, no Option B filters ═══ -->
+  <h3 style="margin:24px 0 8px 0;font-size:14px;display:flex;align-items:center;gap:8px">
+    🟡 Paper Absband — "yesterday strategy" (no Option B filters)
+    <span style="font-size:11px;padding:2px 6px;border-radius:6px;background:#d97706;color:#fff;font-weight:600">PAPER $600</span>
+  </h3>
+  <p style="color:var(--muted);font-size:12px;margin:0 0 8px 0">
+    penny [0.06-0.20): $1 · normal [0.20-0.95]: $4.5 · MIN_TARGET=$200, MAX_POS=8, MAX_USD_MARKET=$5.
+    "Yesterday strategy" from the $40 surfandturf wallet that grew to $60, now applied to RN1.
+    Raw absband — NO Option B exclusion filters.
   </p>
   <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:18px">
     <div class="rn1-stat"><div class="rn1-lbl">Equity</div><div class="rn1-val" id="rn1ab-equity">—</div></div>
@@ -1590,13 +1631,16 @@
 
   <!-- ═══ Paper Option B — Absband + data-driven exclusion filters ═══ -->
   <h3 style="margin:24px 0 8px 0;font-size:14px;display:flex;align-items:center;gap:8px">
-    🎯 Paper Option B — Absband + filtres data-driven
-    <span style="font-size:11px;padding:2px 6px;border-radius:6px;background:#7c3aed;color:#fff;font-weight:600">PAPER $628</span>
+    🟢 Paper Option B v2 — validated via 3500+ REDEEM events deep analysis
+    <span style="font-size:11px;padding:2px 6px;border-radius:6px;background:#16a34a;color:#fff;font-weight:600">PAPER $600</span>
   </h3>
   <p style="color:var(--muted);font-size:12px;margin:0 0 8px 0">
-    Même config que Option A, PLUS 3 filtres dérivés de l'analyse 6010 trades :
-    🚫 skip heure 18-24 UTC (-14% ROI) · 🚫 skip market_type draw/spread/winner_yes_no/other ·
-    🚫 skip RN1's whale bets >$10K (-27% ROI). Test paper avant migration live.
+    Same sizing as absband (penny $1, normal $4.5, MIN_TARGET=$200, MAX_USD_MARKET=$4.5)
+    PLUS 4 validated filters:
+    🚫 skip <strong>Qualification</strong> tennis (51% WR vs 89-95% others, deep-data validated) ·
+    🚫 skip hour 18-24 UTC (-14% ROI) ·
+    🚫 skip mtype=<code>other</code> (catch-all, low signal) ·
+    🚫 skip whale >$10K (-27% ROI).
   </p>
   <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:18px">
     <div class="rn1-stat"><div class="rn1-lbl">Equity</div><div class="rn1-val" id="rn1ob-equity">—</div></div>
@@ -3131,6 +3175,77 @@ async function loadRn1() {
       });
     }
   }
+
+  // ── A/B Comparison: absband (yesterday) vs optionb (validated v2) ──
+  (function renderABComparison() {
+    const abEq = abLast.equity_usd;
+    const obEq = obLast.equity_usd;
+    const abPerf = abLast.perf_pct;
+    const obPerf = obLast.perf_pct;
+    const abWr = (abLast.win_rate || 0) * 100;
+    const obWr = (obLast.win_rate || 0) * 100;
+    const abN = abLast.n_resolved || 0;
+    const obN = obLast.n_resolved || 0;
+
+    setText('rn1-ab-cmp-absband-eq', abEq != null ? '$' + abEq.toFixed(2) : '—');
+    setText('rn1-ab-cmp-optionb-eq', obEq != null ? '$' + obEq.toFixed(2) : '—');
+
+    const perfStr = (p) => p == null ? '—' : ((p > 0 ? '+' : '') + p.toFixed(2) + '%');
+    const abPerfNode = document.getElementById('rn1-ab-cmp-absband-perf');
+    const obPerfNode = document.getElementById('rn1-ab-cmp-optionb-perf');
+    if (abPerfNode) {
+      abPerfNode.textContent = perfStr(abPerf);
+      abPerfNode.style.color = (abPerf == null) ? '' : (abPerf > 0 ? '#3fb950' : (abPerf < 0 ? '#f85149' : ''));
+    }
+    if (obPerfNode) {
+      obPerfNode.textContent = perfStr(obPerf);
+      obPerfNode.style.color = (obPerf == null) ? '' : (obPerf > 0 ? '#3fb950' : (obPerf < 0 ? '#f85149' : ''));
+    }
+
+    setText('rn1-ab-cmp-absband-wr', abN > 0 ? abWr.toFixed(1) + '% (' + (abLast.n_won || 0) + '/' + abN + ')' : '—');
+    setText('rn1-ab-cmp-optionb-wr', obN > 0 ? obWr.toFixed(1) + '% (' + (obLast.n_won || 0) + '/' + obN + ')' : '—');
+    setText('rn1-ab-cmp-absband-tr', abN);
+    setText('rn1-ab-cmp-optionb-tr', obN);
+
+    // Highlight winner with trophy + box border
+    const abBox = document.getElementById('rn1-ab-cmp-absband-box');
+    const obBox = document.getElementById('rn1-ab-cmp-optionb-box');
+    const abTrophy = document.getElementById('rn1-ab-cmp-absband-trophy');
+    const obTrophy = document.getElementById('rn1-ab-cmp-optionb-trophy');
+    if (abBox && obBox) {
+      abBox.style.borderColor = 'var(--border)';
+      obBox.style.borderColor = 'var(--border)';
+      if (abTrophy) { abTrophy.textContent = ''; abTrophy.style.background = 'transparent'; }
+      if (obTrophy) { obTrophy.textContent = ''; obTrophy.style.background = 'transparent'; }
+      if (abEq != null && obEq != null && abEq !== obEq) {
+        if (obEq > abEq) {
+          obBox.style.borderColor = '#16a34a';
+          if (obTrophy) { obTrophy.textContent = '🏆 LEADING'; obTrophy.style.background = '#16a34a'; }
+        } else {
+          abBox.style.borderColor = '#d97706';
+          if (abTrophy) { abTrophy.textContent = '🏆 LEADING'; abTrophy.style.background = '#d97706'; }
+        }
+      }
+    }
+
+    // Verdict block
+    const verdictEl = document.getElementById('rn1-ab-cmp-verdict-text');
+    if (verdictEl) {
+      if (abEq == null || obEq == null) {
+        verdictEl.textContent = 'awaiting data…';
+      } else {
+        const diff = obEq - abEq;
+        const diffPct = (Math.abs(diff) / Math.max(abEq, obEq)) * 100;
+        if (Math.abs(diff) < 0.5) {
+          verdictEl.innerHTML = '<span style="color:#9ca3af">tie</span> — Δ < $0.50';
+        } else if (diff > 0) {
+          verdictEl.innerHTML = '<span style="color:#16a34a">✓ Option B v2 leads</span> by $' + diff.toFixed(2) + ' (' + diffPct.toFixed(2) + '%). Filtres data-driven valident l\'hypothèse.';
+        } else {
+          verdictEl.innerHTML = '<span style="color:#d97706">⚠ Yesterday-style leads</span> by $' + Math.abs(diff).toFixed(2) + ' (' + diffPct.toFixed(2) + '%). Les filtres Option B v2 réduisent (encore) la perf.';
+        }
+      }
+    }
+  })();
 
   // ── Autobot stats ──
   const autobot = data.autobot || {};
