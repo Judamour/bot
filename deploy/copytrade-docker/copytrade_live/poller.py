@@ -249,6 +249,11 @@ def main() -> None:
              f"max_drift={config.MAX_PRICE_DRIFT}x, "
              f"max_per_market=${config.MAX_USD_PER_MARKET}, "
              f"min_target=${config.MIN_TARGET_SIZE_USD}")
+    if config.AUTO_UNWIND_ENABLED:
+        log.info(f"Auto-unwind — sell on curPx>={config.AUTO_UNWIND_THRESHOLD} "
+                 f"(min_bid_floor={config.AUTO_UNWIND_MIN_PRICE})")
+    else:
+        log.info("Auto-unwind — DISABLED (manual Redeem only)")
     log.info(f"Decisions source: {config.DECISIONS_PATH}")
 
     meta = state.load_meta()
@@ -294,6 +299,37 @@ def main() -> None:
                 clob_bal = executor.get_clob_balance_usd()
             except Exception as e:
                 log.warning(f"Balance refresh échec: {type(e).__name__}: {e}")
+        # Auto-unwind near-wins BEFORE reconcile: place SELL on positions
+        # whose curPrice has reached threshold, freeing cash hours faster
+        # than waiting for the $1 Redeem. Sell submits go on the orderbook;
+        # next reconcile drops the position once data-api shows size=0.
+        if config.AUTO_UNWIND_ENABLED:
+            try:
+                near_wins = state.find_near_wins(
+                    positions,
+                    near_win_price=config.AUTO_UNWIND_THRESHOLD,
+                )
+                for nw in near_wins:
+                    log.info(f"auto_unwind: {nw['market'][:50]} curPx={nw['cur_price']:.4f} "
+                             f"→ SELL {nw['size']:.2f} shares (min_price={config.AUTO_UNWIND_MIN_PRICE})")
+                    res = executor.place_sell(
+                        token_id=nw["token_id"],
+                        size_shares=nw["size"],
+                        min_price=config.AUTO_UNWIND_MIN_PRICE,
+                    )
+                    if res.get("status") == "submitted":
+                        log.info(f"auto_unwind: SELL submitted @ {res.get('price'):.4f} "
+                                 f"(~${res.get('proceeds_usd'):.2f}) {nw['market'][:40]}")
+                    elif res.get("status") == "price_too_low":
+                        log.info(f"auto_unwind: bid {res.get('bid'):.4f} < min "
+                                 f"{config.AUTO_UNWIND_MIN_PRICE} — holding for Redeem {nw['market'][:40]}")
+                    elif res.get("status") == "dry_run":
+                        pass  # already logged in executor
+                    else:
+                        log.warning(f"auto_unwind: SELL {res.get('status')} {nw['market'][:40]} {res}")
+            except Exception as e:
+                log.warning(f"auto_unwind échec: {type(e).__name__}: {e}")
+
         # Reconcile + redeemable detection every cycle: data-api lag means
         # winning positions can flip redeemable=True and be redeemed via UI
         # within minutes — checking only on 5-cycle cadence misses fast windows.

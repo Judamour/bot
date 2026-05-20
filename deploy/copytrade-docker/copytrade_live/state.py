@@ -231,6 +231,58 @@ def reconcile_resolved(positions: dict, *, size_threshold: float = 0.01,
     return removed, added, redeemables
 
 
+def find_near_wins(
+    positions: dict,
+    *,
+    near_win_price: float = 0.99,
+    size_threshold: float = 0.01,
+    timeout: float = 8.0,
+) -> list[dict]:
+    """Return local positions whose remote curPrice has reached near_win_price
+    AND that still hold shares (size>0, not yet redeemable).
+
+    Used by the poller to place pre-emptive SELL orders on positions priced
+    at ~99¢ — recycles cash hours faster than waiting for the $1 Redeem.
+    Mirrors the paper bots' _resolve_positions near-resolve path (commit
+    5015bfc) but on the live orderbook instead of paper accounting.
+
+    Returns a list of dicts: {token_id, size, cur_price, market}.
+    """
+    try:
+        r = httpx.get(
+            DATA_API_POSITIONS_URL,
+            params={"user": config.FUNDER, "sizeThreshold": size_threshold},
+            timeout=timeout,
+        )
+        r.raise_for_status()
+        remote = r.json()
+    except Exception as e:
+        log.warning(f"find_near_wins data-api err: {type(e).__name__}: {e}")
+        return []
+    if not isinstance(remote, list):
+        return []
+    candidates = []
+    for p in remote:
+        tid = p.get("asset")
+        if not tid or tid not in positions:
+            continue
+        if p.get("redeemable"):
+            continue  # already settled — user clicks Redeem in UI
+        size = float(p.get("size") or 0)
+        cur_price = float(p.get("curPrice") or 0)
+        if size <= size_threshold:
+            continue
+        if cur_price < near_win_price:
+            continue
+        candidates.append({
+            "token_id": tid,
+            "size": size,
+            "cur_price": cur_price,
+            "market": p.get("title") or positions[tid].get("market") or "?",
+        })
+    return candidates
+
+
 def equity_snapshot(positions: dict, cash_usd: float, mtm_prices: dict[str, float]) -> dict:
     mtm_value = sum(
         pos["size_shares"] * mtm_prices.get(token_id, pos["avg_price"])

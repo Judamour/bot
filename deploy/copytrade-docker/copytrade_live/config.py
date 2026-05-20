@@ -66,6 +66,17 @@ TIER_NORMAL_SIZE = float(os.getenv("COPYTRADE_TIER_NORMAL_SIZE", "4.5"))
 OPTIONB_FILTERS = os.getenv("COPYTRADE_OPTIONB_FILTERS", "false").lower() == "true"
 DRY_RUN = os.getenv("COPYTRADE_DRY_RUN", "true").lower() == "true"
 
+# Auto-unwind near-wins: when a position's curPrice hits AUTO_UNWIND_THRESHOLD,
+# place a SELL on the orderbook instead of waiting for the $1 Redeem. Recycles
+# cash hours earlier. Mirrors the paper bots' near-resolve path (commit 5015bfc).
+# Set AUTO_UNWIND_ENABLED=false to revert to manual redeem-only workflow.
+AUTO_UNWIND_ENABLED = os.getenv("COPYTRADE_AUTO_UNWIND_ENABLED", "true").lower() == "true"
+AUTO_UNWIND_THRESHOLD = float(os.getenv("COPYTRADE_AUTO_UNWIND_THRESHOLD", "0.99"))
+# Safety floor on the orderbook bid — if the bid is below this, don't sell
+# (thin liquidity, prefer waiting for Redeem). 0.95 means we accept a 4-5%
+# haircut vs $1 but refuse anything worse.
+AUTO_UNWIND_MIN_PRICE = float(os.getenv("COPYTRADE_AUTO_UNWIND_MIN_PRICE", "0.95"))
+
 GAMMA_API = "https://gamma-api.polymarket.com"
 
 
