@@ -102,32 +102,6 @@ def handle_buy(decision: dict, positions: dict) -> None:
             write_jsonl("trades.jsonl", {**decision, "local_action": f"skip_{conv_reason}"})
             return
 
-        # Reversal detection: if we hold the OPPOSITE outcome on this binary,
-        # RN1 is signaling he's switched sides. Close our losing position first.
-        rev_tok, rev_pos = optionb.detect_reversal(decision, positions)
-        if rev_tok and rev_pos:
-            rev_size = float(rev_pos.get("size_shares", 0))
-            # Round down to avoid balance/allowance precision mismatches
-            rev_size = int(rev_size * 100) / 100
-            log.warning(
-                f"REVERSAL: closing our {rev_pos.get('outcome', '?')} "
-                f"({rev_size:.2f} sh) before mirroring RN1's {decision.get('outcome', '?')} BUY"
-            )
-            if rev_size > 0:
-                sell_result = executor.place_sell(rev_tok, rev_size, min_price=0.001)
-                write_jsonl("trades.jsonl", {
-                    **decision,
-                    "local_action": "reversal_sell",
-                    "reversal_token": rev_tok,
-                    "reversal_outcome": rev_pos.get("outcome"),
-                    "reversal_size_shares": rev_size,
-                    "sell_result": sell_result,
-                })
-                # Drop from local state immediately; reconcile_resolved will
-                # re-sync next cycle if needed.
-                positions.pop(rev_tok, None)
-                state.save_positions(positions)
-
     trade_pct = float(decision.get("trade_pct", 0) or 0)
     tier = sizing.describe_tier(p, trade_pct)
     size_usd = sizing.compute_size_usd(p, trade_pct)
@@ -154,13 +128,19 @@ def handle_buy(decision: dict, positions: dict) -> None:
             return
 
     cond_id = resolved.get("condition_id", "")
-    existing_cost_same_market = sum(
+    outcome_idx = int(resolved.get("outcome_index", 0))
+    # Cap per (market, outcome) — NOT per market, so we can mirror RN1's
+    # pattern of buying both sides of a binary as the match unfolds (his
+    # "reverse conviction" — he never SELLs the original side, just adds
+    # to the new winner side). Each binary outcome has its own $cap.
+    existing_cost_same_outcome = sum(
         p["cost_usd"] for p in positions.values()
         if p.get("condition_id") == cond_id
+        and int(p.get("outcome_index", -1)) == outcome_idx
     )
-    if existing_cost_same_market + size_usd > config.MAX_USD_PER_MARKET:
-        log.info(f"SKIP BUY: market saturé (${existing_cost_same_market:.2f} + ${size_usd:.2f} > ${config.MAX_USD_PER_MARKET}) tier={tier}")
-        write_jsonl("trades.jsonl", {**decision, "local_action": "skip_market_saturated", "tier": tier})
+    if existing_cost_same_outcome + size_usd > config.MAX_USD_PER_MARKET:
+        log.info(f"SKIP BUY: outcome saturé (${existing_cost_same_outcome:.2f} + ${size_usd:.2f} > ${config.MAX_USD_PER_MARKET}) tier={tier}")
+        write_jsonl("trades.jsonl", {**decision, "local_action": "skip_outcome_saturated", "tier": tier})
         return
 
     his_entry = decision.get("price", 0)

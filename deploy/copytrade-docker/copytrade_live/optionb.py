@@ -8,13 +8,15 @@ Edge zones to AVOID when copying RN1:
 - Market types draw/spread/winner_yes_no/other: -6.07% ROI on winner_yes_no alone
 - Whale trades >$10K: -27.13% ROI (his desperate DCA / manipulation buckets)
 
-Adds two further behaviors (2026-05-20):
+Adds one further behavior (2026-05-20):
 - Conviction filter (whale + net-buy aggregation): only fire when RN1 has
   committed >=$50 to a (market, outcome) — either in one chunk or cumulated
   over a 10min window. Filters out his exploratory hedge dust ($1-5).
-- Reversal detection: if RN1 BUYs the OPPOSITE outcome of a market we hold,
-  treat it as a reversal signal — SELL our (now-losing) position before
-  mirroring his new direction.
+
+Note on RN1's "reverse conviction": he never SELLs losing positions; when the
+market moves against him he ADDs to the winning side instead, holding both
+sides until resolution. We mirror that pattern by capping per (cond_id,
+outcome) rather than per cond_id — see poller.py's outcome_saturated check.
 """
 from datetime import datetime, timezone
 
@@ -136,18 +138,3 @@ def conviction_passes(
     return False, f"below_conviction_${cum:.0f}<{threshold_usd:.0f}"
 
 
-def detect_reversal(decision: dict, positions: dict) -> tuple[str | None, dict | None]:
-    """Return (token_id, position_dict) of our holding on the OPPOSITE outcome
-    of the market RN1 just BUY-ed, or (None, None) if not a reversal.
-
-    Binary market assumption: outcomeIndex 0 ↔ 1.
-    """
-    cid = decision.get("conditionId") or ""
-    if not cid:
-        return None, None
-    oi = int(decision.get("outcomeIndex") or 0)
-    opposite_oi = 1 - oi
-    for tok, pos in positions.items():
-        if pos.get("condition_id") == cid and int(pos.get("outcome_index", -1)) == opposite_oi:
-            return tok, pos
-    return None, None
