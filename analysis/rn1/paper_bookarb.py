@@ -297,17 +297,88 @@ def resolve_positions(state: dict, positions: dict) -> None:
 
 SPORT_NAME_TO_ID = {name.lower(): sid for name, sid in SPORT_ROTATION}
 
+# Polymarket slug prefix → OddsPapi sport name. The slug is our most reliable
+# signal because Polymarket tags are always empty. Markets without these
+# prefixes typically aren't per-match sports (futures, politics, etc.).
+SLUG_PREFIX_TO_SPORT: dict[str, str] = {
+    # Tennis (ATP/WTA tours)
+    "wta-": "Tennis", "atp-": "Tennis", "tennis-": "Tennis",
+    "challenger-": "Tennis", "itf-": "Tennis",
+    # Soccer (most leagues use 3-letter prefixes or "soccer-")
+    "soccer-": "Soccer", "epl-": "Soccer", "laliga-": "Soccer",
+    "la-liga-": "Soccer", "seriea-": "Soccer", "serie-a-": "Soccer",
+    "bundesliga-": "Soccer", "ligue1-": "Soccer", "ligue-1-": "Soccer",
+    "champions-league-": "Soccer", "europa-league-": "Soccer",
+    "uefa-": "Soccer", "fifa-": "Soccer", "mls-": "Soccer",
+    "cl-": "Soccer", "el-": "Soccer",
+    # Basketball
+    "nba-": "Basketball", "wnba-": "Basketball",
+    "basketball-": "Basketball", "euroleague-": "Basketball",
+    "ncaa-basketball-": "Basketball",
+}
+
+# Hard exclude: esports + sports we don't trade
+EXCLUDE_SLUG_PREFIXES = (
+    "cs2-", "cs-", "csgo-", "csgo2-", "dota-", "dota2-",
+    "lol-", "valorant-", "cod-", "rocketleague-",
+    "mlb-", "nhl-", "nfl-", "ufc-",  # not in our rotation yet
+    "cricipl-", "cricket-", "cric-",  # cricket (IPL etc. — false-positive "premier league")
+    "rugby-", "afl-", "golf-", "f1-", "formula1-",
+    "darts-", "snooker-", "table-tennis-", "tabletennis-",
+)
+EXCLUDE_QUESTION_TERMS = (
+    "counter-strike", "csgo", "cs:go", "valorant", "rocket league",
+    "league of legends", "esport", "e-sport",
+    "indian premier league", "ipl ",  # cricket false-positive
+    "rugby", "cricket",
+)
+
 
 def detect_sport(market: dict) -> str | None:
-    """Identify the OddsPapi sport name from a Polymarket market's tags/slug."""
-    tags = [(t or "").lower() for t in (market.get("tags") or []) if isinstance(t, str)]
+    """Identify Tennis/Soccer/Basketball from a Polymarket market.
+    Slug prefix is the primary signal. Returns None for:
+      - esports (cs2-, dota-, lol-, valorant-)
+      - futures bets ("Will X win the 2026 FIFA WC")
+      - unsupported sports (mlb-, nfl-, nhl-)
+      - unknown / non-sport markets
+    """
     slug = (market.get("slug") or "").lower()
     q = (market.get("question") or "").lower()
-    blob = " ".join(tags) + " " + slug + " " + q
-    # Order matters — more specific first
-    for name in ("tennis", "soccer", "basketball"):
-        if name in blob:
-            return name.capitalize()
+
+    # Hard exclusions
+    if any(slug.startswith(p) for p in EXCLUDE_SLUG_PREFIXES):
+        return None
+    if any(t in q for t in EXCLUDE_QUESTION_TERMS):
+        return None
+
+    # Skip futures bets — different bookmaker market structure
+    is_future = q.startswith("will ") and any(t in q for t in (
+        "win the", "win 2026", "win 2027", "champion", "trophy",
+        "world cup", "grand slam", "title", "league championship",
+    ))
+    if is_future:
+        return None
+
+    # Primary: slug prefix exact match
+    for prefix, sport in SLUG_PREFIX_TO_SPORT.items():
+        if slug.startswith(prefix):
+            return sport
+
+    # Fallback: tournament/league keyword in slug+question
+    blob = slug + " " + q
+    if any(k in blob for k in ("wta ", "atp ", "wimbledon", "roland garros",
+                                "french open", "us open", "australian open",
+                                " open:")):
+        return "Tennis"
+    if any(k in blob for k in ("english premier", "champions league",
+                                "europa league", "europa conference",
+                                "la liga ", "laliga", "serie a ", "bundesliga",
+                                "ligue 1 ", "mls ", "fifa world cup")):
+        return "Soccer"
+    if any(k in blob for k in ("nba ", " nba", "wnba", "euroleague",
+                                "ncaa basketball",)):
+        return "Basketball"
+
     return None
 
 
