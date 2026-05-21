@@ -9,6 +9,12 @@ Type=simple
 User=botuser
 WorkingDirectory=/home/botuser/bot-trading
 EnvironmentFile=-/home/botuser/bot-trading/.env
+# Rescaled from $100K → $600 paper to match the 11 other paper bots.
+# Sizing kept at 0.5% per trade ($3) to preserve original risk profile.
+# Max 100 positions since each is $3 ($300 max deployed if all slots used).
+Environment=AUTOBOT_INITIAL=600
+Environment=AUTOBOT_SIZE=3
+Environment=AUTOBOT_MAX_POSITIONS=100
 ExecStart=/home/botuser/bot-trading/venv/bin/python -m analysis.rn1.autobot
 Restart=on-failure
 RestartSec=30
