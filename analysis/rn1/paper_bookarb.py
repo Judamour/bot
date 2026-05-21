@@ -69,7 +69,10 @@ MAX_HOURS_TO_EVENT = float(os.environ.get("BOOKARB_MAX_HOURS_TO_EVENT", "4"))
 NEAR_RESOLVE = float(os.environ.get("BOOKARB_NEAR_RESOLVE", "0.99"))
 STOP_LOSS_PCT = float(os.environ.get("BOOKARB_STOP_LOSS_PCT", "-0.50"))
 TAKER_FEE = 0.02
-POLL_INTERVAL_S = int(os.environ.get("BOOKARB_POLL_S", "10800"))  # 3 hours
+POLL_INTERVAL_S = int(os.environ.get("BOOKARB_POLL_S", "10800"))  # 3h fallback ceiling
+SMART_POLLING = os.environ.get("BOOKARB_SMART_POLLING", "true").lower() != "false"
+SMART_MIN_INTERVAL_S = int(os.environ.get("BOOKARB_SMART_MIN_S", "900"))  # 15min floor
+SMART_PRE_EVENT_WINDOW_S = int(os.environ.get("BOOKARB_PRE_EVENT_WINDOW_S", "1800"))  # T-30min target
 
 # Sport rotation (v4 sport IDs confirmed via /v4/sports response 2026-05-21)
 SPORT_ROTATION = [
@@ -380,8 +383,54 @@ def detect_sport(market: dict) -> str | None:
     return None
 
 
+def compute_next_poll_delay(state: dict, positions: dict, now: int) -> tuple[int, str]:
+    """Smart polling: pick interval based on next imminent event.
+
+    Returns (delay_seconds, reason_string).
+    """
+    if not SMART_POLLING:
+        return POLL_INTERVAL_S, "smart_polling_disabled"
+
+    # Collect upcoming event timestamps (next 24h only, to limit list size)
+    upcoming = []
+    for ts in state.get("upcoming_event_starts", []):
+        if now < ts < now + 86400:
+            upcoming.append(ts)
+    for pos in positions.values():
+        ts = pos.get("event_start_ts", 0)
+        if ts and now < ts < now + 86400:
+            upcoming.append(ts)
+
+    if not upcoming:
+        return POLL_INTERVAL_S, "no_upcoming_events_3h_default"
+
+    nearest = min(upcoming)
+    time_to_next = nearest - now
+    target_poll_ts = nearest - SMART_PRE_EVENT_WINDOW_S  # T-30min before event
+
+    if time_to_next < SMART_PRE_EVENT_WINDOW_S:
+        # Event imminent / past entry window — skip ahead to next event
+        if len(upcoming) >= 2:
+            sorted_up = sorted(upcoming)
+            second = sorted_up[1]
+            delay = max(SMART_MIN_INTERVAL_S, second - SMART_PRE_EVENT_WINDOW_S - now)
+            return min(POLL_INTERVAL_S, delay), f"past_window_skip_to_next_T-{int((second-now)/60)}min"
+        return SMART_MIN_INTERVAL_S, "no_more_events_after_imminent"
+
+    delay = max(SMART_MIN_INTERVAL_S, target_poll_ts - now)
+    delay = min(POLL_INTERVAL_S, delay)  # cap at 3h
+    return delay, f"T-30min_before_event_in_{int(time_to_next/60)}min"
+
+
 def cycle(state: dict, positions: dict, client: OddsPapiClient) -> None:
     """Poly-driven cycle : find PM candidates first, only call OddsPapi if needed."""
+    # Prune stale event starts (past or > 7 days ahead)
+    now_check = int(time.time())
+    state["upcoming_event_starts"] = [
+        ts for ts in state.get("upcoming_event_starts", [])
+        if now_check < ts < now_check + 7 * 86400
+    ]
+
     # 1. Resolve
     resolve_positions(state, positions)
 
@@ -441,6 +490,18 @@ def cycle(state: dict, positions: dict, client: OddsPapiClient) -> None:
 
         log.info(f"  → {sport_name}: {len(fixtures)} Pinnacle fixtures, "
                  f"{len(participants_map)} teams; PM candidates={len(sport_markets)}")
+
+        # Harvest upcoming fixture startTimes for smart polling
+        upcoming = state.setdefault("upcoming_event_starts", [])
+        for fx in fixtures:
+            st = fx.get("startTime")
+            if not st: continue
+            try:
+                ts = int(datetime.fromisoformat(st.replace("Z", "+00:00")).timestamp())
+                if ts > now and ts not in upcoming:
+                    upcoming.append(ts)
+            except Exception:
+                continue
 
         for m in sport_markets:
             title = m.get("question") or ""
@@ -566,8 +627,9 @@ def main() -> None:
     log.info(f"Entry edge >= {ENTRY_EDGE*100:.0f}pp, normal_size=${NORMAL_SIZE}, "
              f"max_pos={MAX_POSITIONS}, max_same_sport={MAX_SAME_SPORT}, "
              f"kill_switch={KILL_SWITCH_PCT*100:.0f}%")
-    log.info(f"Cycle = {POLL_INTERVAL_S}s ({POLL_INTERVAL_S/3600:.1f}h) → "
-             f"{86400/POLL_INTERVAL_S:.0f} calls/day → {250 // max(1, 86400//POLL_INTERVAL_S)} days runway")
+    mode = "SMART" if SMART_POLLING else "FIXED"
+    log.info(f"Polling mode: {mode} (min={SMART_MIN_INTERVAL_S}s, "
+             f"target=T-{SMART_PRE_EVENT_WINDOW_S}s before event, max={POLL_INTERVAL_S}s)")
 
     while _running:
         try:
@@ -577,7 +639,18 @@ def main() -> None:
             maybe_snapshot(state, positions)
         except Exception as e:
             log.error(f"cycle exception {type(e).__name__}: {e}")
-        time.sleep(POLL_INTERVAL_S)
+
+        # Smart polling: compute optimal next-poll delay
+        now = int(time.time())
+        delay, reason = compute_next_poll_delay(state, positions, now)
+        log.info(f"Next poll in {delay}s ({delay/60:.0f}min) — {reason}")
+
+        # SIGTERM-responsive sleep (30s chunks)
+        elapsed = 0
+        while _running and elapsed < delay:
+            sleep_chunk = min(30, delay - elapsed)
+            time.sleep(sleep_chunk)
+            elapsed += sleep_chunk
 
     log.info("Stopped")
 
