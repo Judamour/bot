@@ -29,7 +29,7 @@ from typing import Any
 
 log = logging.getLogger("oddspapi")
 
-BASE_URL = "https://v5.oddspapi.io/en"
+BASE_URL = "https://api.oddspapi.io/v4"
 DEFAULT_CACHE_TTL_S = 3 * 3600  # 3 hours
 MIN_INTERVAL_S = 10
 BUDGET_CAP = 250
@@ -173,22 +173,74 @@ class OddsPapiClient:
         sports_cache.write_text(json.dumps(data, indent=2))
         return data
 
+    def get_tournaments(self, sport_id: int) -> list[dict]:
+        """List tournaments for a sport. Cached 24h (refresh daily for new tournaments)."""
+        cache_path = self.state_dir / f"tournaments_sport{sport_id}.json"
+        if cache_path.exists():
+            try:
+                cached = json.loads(cache_path.read_text())
+                age = time.time() - cached.get("_cached_at", 0)
+                if age < 86400:  # 24h disk cache
+                    return cached["data"]
+            except Exception:
+                pass
+        data = self._get("/tournaments", {"sportId": sport_id}, cache_ttl_s=86400)
+        cache_path.write_text(json.dumps({"_cached_at": time.time(), "data": data}, indent=2))
+        return data
+
+    def get_participants(self, sport_id: int) -> list[dict]:
+        """List participants (teams/players) for a sport. Cached to disk forever."""
+        cache_path = self.state_dir / f"participants_sport{sport_id}.json"
+        if cache_path.exists():
+            try:
+                cached = json.loads(cache_path.read_text())
+                if cached.get("data"):
+                    return cached["data"]
+            except Exception:
+                pass
+        data = self._get("/participants", {"sportId": sport_id}, cache_ttl_s=86400 * 30)
+        cache_path.write_text(json.dumps({"_cached_at": time.time(), "data": data}, indent=2))
+        return data
+
+    def get_odds_by_tournaments(self, tournament_ids: list[int],
+                                 bookmaker: str = "pinnacle") -> list[dict]:
+        """Main value-call: all fixtures + odds for these tournaments in 1 call.
+
+        Response format (v4):
+          [{fixtureId, participant1Id, participant2Id, sportId, tournamentId,
+            startTime, hasOdds, bookmakerOdds: {pinnacle: {markets: {101: {outcomes: {...}}}}}}]
+        """
+        if not tournament_ids:
+            return []
+        ids_str = ",".join(str(i) for i in tournament_ids)
+        return self._get("/odds-by-tournaments",
+                         {"bookmaker": bookmaker, "tournamentIds": ids_str})
+
+    # Aliases for backward compatibility (paper_bookarb.py imports)
     def get_fixtures_today(self, sport_id: int | None = None,
                             bookmakers: str = "pinnacle") -> list[dict]:
-        """List today's fixtures (sport meta only, no odds yet)."""
-        params = {"bookmakers": bookmakers}
-        if sport_id:
-            params["sportId"] = sport_id
-        return self._get("/fixtures/today", params)
+        """Legacy v5 endpoint — replaced by get_odds_by_tournaments in v4."""
+        raise NotImplementedError("v4 has no /fixtures/today — use get_odds_by_tournaments")
 
     def get_fixtures_odds_main(self, sport_id: int | None = None,
                                 bookmakers: str = "pinnacle") -> list[dict]:
-        """List today's fixtures WITH main odds (h2h / moneyline)."""
-        params = {"bookmakers": bookmakers}
-        if sport_id:
-            params["sportId"] = sport_id
-        # This is the value-call: 1 call → all odds for the day for that sport
-        return self._get("/fixtures-odds/main", params)
+        """Legacy v5 endpoint shim — picks top tournaments for sport + fetches odds."""
+        if not sport_id:
+            raise ValueError("sport_id required in v4 mode (no all-sports batch endpoint)")
+        # Get tournaments with upcoming/future fixtures
+        tournaments = self.get_tournaments(sport_id)
+        active = [t for t in tournaments
+                  if (t.get("futureFixtures", 0) or 0) > 0
+                  or (t.get("upcomingFixtures", 0) or 0) > 0
+                  or (t.get("liveFixtures", 0) or 0) > 0]
+        # Top 5 tournaments by future+upcoming fixture count
+        active.sort(key=lambda t: -((t.get("futureFixtures", 0) or 0)
+                                     + (t.get("upcomingFixtures", 0) or 0)))
+        tids = [t["tournamentId"] for t in active[:5]]
+        if not tids:
+            log.info(f"No active tournaments for sportId={sport_id}")
+            return []
+        return self.get_odds_by_tournaments(tids, bookmakers.split(",")[0])
 
 
 # ── Helper for matching Polymarket questions ↔ OddsPapi fixtures ───────────
@@ -203,39 +255,106 @@ def normalize_team_name(s: str) -> str:
     return s
 
 
-def match_polymarket_to_fixture(poly_title: str, fixtures: list[dict]) -> dict | None:
-    """Find OddsPapi fixture matching a Polymarket question.
+def match_polymarket_to_fixture(poly_title: str, fixtures: list[dict],
+                                  participants_map: dict[int, str] | None = None) -> dict | None:
+    """Find OddsPapi v4 fixture matching a Polymarket question.
 
-    Polymarket titles look like 'PSG vs. Arsenal: O/U 1.5' or 'Will Arsenal win?'
-    OddsPapi fixtures have home/away or participants.
-    Returns the matching fixture dict, or None.
+    v4 fixture has `participant1Id` and `participant2Id` (numeric).
+    Use `participants_map` (id -> name) to resolve names for matching.
     """
     import re
     poly_low = (poly_title or "").lower()
-    # Extract team names from "X vs. Y" pattern
     m = re.search(r"([a-zà-üA-Z][\w\-\.' &]+?)\s+vs\.?\s+([a-zà-üA-Z][\w\-\.' &]+?)(?:\s*[:?(]|\s+-\s+|$)", poly_low)
     if not m:
         return None
     poly_a, poly_b = normalize_team_name(m.group(1)), normalize_team_name(m.group(2))
-    if not poly_a or not poly_b:
+    if not poly_a or not poly_b or not participants_map:
         return None
 
     best_match = None
     best_score = 0
     for fx in fixtures:
-        parts = fx.get("participants", [])
-        if not parts and "home" in fx:
-            parts = [fx.get("home", {}), fx.get("away", {})]
-        names = [normalize_team_name(p.get("name", "") if isinstance(p, dict) else str(p)) for p in parts]
-        names = [n for n in names if n]
-        if len(names) < 2: continue
-        # Both team names must appear as substring in either direction
-        a_in = any(poly_a in n or n in poly_a for n in names if n)
-        b_in = any(poly_b in n or n in poly_b for n in names if n)
+        p1 = participants_map.get(fx.get("participant1Id"), "")
+        p2 = participants_map.get(fx.get("participant2Id"), "")
+        n1, n2 = normalize_team_name(p1), normalize_team_name(p2)
+        if not n1 or not n2:
+            continue
+        a_in = poly_a in n1 or n1 in poly_a or poly_a in n2 or n2 in poly_a
+        b_in = poly_b in n1 or n1 in poly_b or poly_b in n2 or n2 in poly_b
         if a_in and b_in:
-            score = sum(len(set(poly_a.split()) & set(n.split())) +
-                        len(set(poly_b.split()) & set(n.split())) for n in names)
+            score = (len(set(poly_a.split()) & set(n1.split())) +
+                     len(set(poly_a.split()) & set(n2.split())) +
+                     len(set(poly_b.split()) & set(n1.split())) +
+                     len(set(poly_b.split()) & set(n2.split())))
             if score > best_score:
                 best_score = score
                 best_match = fx
+                best_match["_p1_name"] = p1
+                best_match["_p2_name"] = p2
     return best_match
+
+
+def sharp_implied_from_v4_fixture(fixture: dict, target_team: str,
+                                    bookmaker: str = "pinnacle") -> float | None:
+    """Extract Pinnacle implied probability for `target_team` from a v4 fixture.
+
+    v4 structure :
+      fixture.bookmakerOdds.{bookmaker}.markets.{marketId}.outcomes.{outcomeId}.players.0.price
+      Market 101 = moneyline (3-way for football, 2-way for basketball/tennis)
+      Outcome IDs : bookmakerOutcomeId field tells "home"/"draw"/"away"
+    """
+    target_norm = (target_team or "").lower().strip()
+    p1_name = (fixture.get("_p1_name") or "").lower()
+    p2_name = (fixture.get("_p2_name") or "").lower()
+
+    odds = (fixture.get("bookmakerOdds") or {}).get(bookmaker)
+    if not odds:
+        return None
+    moneyline = (odds.get("markets") or {}).get("101")
+    if not moneyline:
+        return None
+    outcomes = moneyline.get("outcomes") or {}
+
+    # Compute implied probabilities for all outcomes
+    implied = {}
+    for out_id, out_data in outcomes.items():
+        players = out_data.get("players") or {}
+        p0 = players.get("0") or {}
+        outcome_label = (p0.get("bookmakerOutcomeId") or "").lower()  # home/draw/away
+        try:
+            price = float(p0.get("price"))
+            if price <= 1.0:
+                continue
+        except (TypeError, ValueError):
+            continue
+        implied[outcome_label] = 1.0 / price
+
+    total = sum(implied.values())
+    if total <= 0:
+        return None
+
+    # Map target team -> home/draw/away label
+    if target_norm in ("draw", "tie"):
+        target_label = "draw"
+    elif p1_name and (target_norm in p1_name or p1_name in target_norm):
+        target_label = "home"
+    elif p2_name and (target_norm in p2_name or p2_name in target_norm):
+        target_label = "away"
+    else:
+        return None
+
+    if target_label not in implied:
+        return None
+    # Remove vig
+    return implied[target_label] / total
+
+
+def build_participants_map(participants: list[dict]) -> dict[int, str]:
+    """Build {participant_id: name} map from /v4/participants response."""
+    out = {}
+    for p in participants:
+        pid = p.get("participantId") or p.get("id")
+        name = p.get("participantName") or p.get("name") or ""
+        if pid is not None and name:
+            out[pid] = name
+    return out

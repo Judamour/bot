@@ -44,6 +44,7 @@ import httpx
 
 from .oddspapi import (
     OddsPapiClient, match_polymarket_to_fixture, BudgetExceeded,
+    sharp_implied_from_v4_fixture, build_participants_map,
 )
 
 DATA_DIR = Path(__file__).resolve().parent / "data_bookarb"
@@ -70,11 +71,11 @@ STOP_LOSS_PCT = float(os.environ.get("BOOKARB_STOP_LOSS_PCT", "-0.50"))
 TAKER_FEE = 0.02
 POLL_INTERVAL_S = int(os.environ.get("BOOKARB_POLL_S", "10800"))  # 3 hours
 
-# Sport rotation : we cycle through these, 1 per OddsPapi call
+# Sport rotation (v4 sport IDs confirmed via /v4/sports response 2026-05-21)
 SPORT_ROTATION = [
-    ("Tennis", 2),       # Tennis sport_id (typical; will be reconciled at boot)
-    ("Soccer", 1),       # Soccer
-    ("Basketball", 11),  # Basketball (NBA fits here per docs example)
+    ("Tennis", 12),      # Roland Garros active May-June 2026
+    ("Soccer", 10),      # FIFA World Cup 2026 June-July
+    ("Basketball", 11),  # NBA Finals
 ]
 
 logging.basicConfig(
@@ -166,41 +167,8 @@ def parse_iso_ts(s: str) -> int:
 
 
 def sharp_implied_from_fixture(fixture: dict, target_team: str) -> float | None:
-    """Extract Pinnacle implied probability for `target_team` from an OddsPapi
-    fixture-odds-main response. Returns None if structure not as expected.
-
-    OddsPapi structure is typically :
-      fixture.odds : [
-        {market: "h2h" or "moneyline", bookmaker: "pinnacle",
-         outcomes: [{name: "Home Team", price: 1.95}, {name: "Away Team", price: 2.05}]}
-      ]
-    Prices are decimal odds. implied = 1/price (then adjusted for vig if needed).
-    """
-    if not fixture or not target_team: return None
-    target_norm = target_team.lower().strip()
-    odds_blocks = fixture.get("odds") or []
-    for block in odds_blocks:
-        if (block.get("bookmaker", "") or "").lower() != "pinnacle":
-            continue
-        market = (block.get("market", "") or "").lower()
-        if market not in ("h2h", "moneyline", "match_winner"):
-            continue
-        outcomes = block.get("outcomes") or block.get("selections") or []
-        total_implied = 0.0
-        target_implied = None
-        for out in outcomes:
-            name = (out.get("name") or out.get("participant") or "").lower()
-            price = out.get("price") or out.get("odds") or out.get("decimal")
-            if not price: continue
-            try: imp = 1.0 / float(price)
-            except: continue
-            total_implied += imp
-            if target_norm in name or name in target_norm:
-                target_implied = imp
-        # Remove vig
-        if target_implied is not None and total_implied > 0:
-            return target_implied / total_implied
-    return None
+    """v4 wrapper around oddspapi.sharp_implied_from_v4_fixture."""
+    return sharp_implied_from_v4_fixture(fixture, target_team, bookmaker="pinnacle")
 
 
 # ── Paper accounting ───────────────────────────────────────────────────────
@@ -346,8 +314,11 @@ def cycle(state: dict, positions: dict, client: OddsPapiClient) -> None:
     sport_name, sport_id = SPORT_ROTATION[state["sport_rotation_idx"] % len(SPORT_ROTATION)]
     state["sport_rotation_idx"] = (state["sport_rotation_idx"] + 1) % len(SPORT_ROTATION)
 
-    # 4. Fetch OddsPapi fixtures-odds-main for this sport (1 call, cached 3h)
+    # 4. Fetch OddsPapi participants (cached forever after first call) + odds for this sport
     try:
+        participants = client.get_participants(sport_id=sport_id)
+        participants_map = build_participants_map(participants)
+        # get_fixtures_odds_main now resolves tournaments + odds-by-tournaments in v4 mode
         fixtures = client.get_fixtures_odds_main(sport_id=sport_id, bookmakers="pinnacle")
     except BudgetExceeded as e:
         log.error(f"OddsPapi budget exhausted: {e}")
@@ -355,7 +326,8 @@ def cycle(state: dict, positions: dict, client: OddsPapiClient) -> None:
     except Exception as e:
         log.error(f"OddsPapi fetch failed for sport={sport_name}: {e}")
         return
-    log.info(f"OddsPapi fixtures fetched: sport={sport_name}, n={len(fixtures)}, "
+    log.info(f"OddsPapi v4 fixtures fetched: sport={sport_name}, n={len(fixtures)}, "
+             f"participants={len(participants_map)}, "
              f"budget {client.calls_made}/250 ({client.remaining} remaining)")
 
     # 5. Fetch Polymarket sports markets (free)
@@ -391,8 +363,8 @@ def cycle(state: dict, positions: dict, client: OddsPapiClient) -> None:
             hours_to_event = (end_ts - now) / 3600
             if not (MIN_HOURS_TO_EVENT <= hours_to_event <= MAX_HOURS_TO_EVENT):
                 skip_counts["bad_time"] = skip_counts.get("bad_time", 0) + 1; continue
-        # Fuzzy-match to OddsPapi fixture
-        fx = match_polymarket_to_fixture(title, fixtures)
+        # Fuzzy-match to OddsPapi fixture using v4 participants map
+        fx = match_polymarket_to_fixture(title, fixtures, participants_map)
         if not fx:
             skip_counts["no_match"] = skip_counts.get("no_match", 0) + 1; continue
         # Parse outcomes + prices
