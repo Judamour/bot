@@ -1565,15 +1565,18 @@
     </table>
   </details>
 
-  <!-- ═══ Comparison — 11 strategies side-by-side ═══ -->
-  <h3 style="margin:24px 0 8px 0;font-size:14px;display:flex;align-items:center;gap:8px">
-    ⚔️ 11-Bot Comparison — RN1 variants + 4 alternative wallets
+  <!-- ═══ Comparison — 11 strategies, responsive grid (auto-wrap) ═══ -->
+  <h3 style="margin:24px 0 8px 0;font-size:14px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+    ⚔️ 11-Bot Comparison
     <span style="font-size:11px;padding:2px 6px;border-radius:6px;background:#0ea5e9;color:#fff;font-weight:600">$600 each</span>
+    <span style="font-size:11px;color:var(--muted);font-weight:400">7 RN1 variants + 4 alternative wallets</span>
   </h3>
-  <p style="color:var(--muted);font-size:12px;margin:0 0 8px 0">
-    7 RN1 variants + 4 alternative wallets: <strong>surf</strong> (NBA whale), <strong>newdog</strong> (#1 daily, quasi-cert arb — backtest -0.7%), <strong>Mosley1</strong> (#2 daily, whale conviction — backtest +2.62%), <strong>kch123</strong> (#3 all-time $12.5M, buy-and-hold).
+  <p style="color:var(--muted);font-size:11px;margin:0 0 8px 0;line-height:1.4">
+    <strong>surf</strong> (NBA whale) · <strong>newdog</strong> (#1 daily, quasi-cert — backtest -0.7%) ·
+    <strong>Mosley1</strong> (#2 daily, whale — backtest +2.62%) ·
+    <strong>kch123</strong> (#3 all-time, buy-and-hold).
   </p>
-  <div style="display:grid;grid-template-columns:repeat(11,1fr);gap:4px;margin-bottom:18px;font-size:9.5px">
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(155px,1fr));gap:8px;margin-bottom:14px">
     <div style="border:1px solid var(--border);border-radius:6px;padding:12px" id="rn1-ab-cmp-absband-box">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
         <strong style="font-size:13px">🟡 absband (raw)</strong>
@@ -4350,23 +4353,24 @@ async function loadRn1() {
       }
     }
 
-    // Verdict block
+    // Verdict block — show podium + worst, compact
     const verdictEl = document.getElementById('rn1-ab-cmp-verdict-text');
     if (verdictEl) {
-      const haveAll = bots.every(b => b.last.equity_usd != null);
-      if (!haveAll) {
+      const haveData = bots.filter(b => b.last.equity_usd != null);
+      if (haveData.length === 0) {
         verdictEl.textContent = 'awaiting data…';
       } else {
-        const sorted = bots.slice().sort((a, b) => b.last.equity_usd - a.last.equity_usd);
+        const sorted = haveData.slice().sort((a, b) => b.last.equity_usd - a.last.equity_usd);
         const top = sorted[0];
         const last = sorted[sorted.length - 1];
         const topVsLast = top.last.equity_usd - last.last.equity_usd;
         if (topVsLast < 0.5) {
-          verdictEl.innerHTML = '<span style="color:#9ca3af">tie</span> — all within $0.50';
+          verdictEl.innerHTML = '<span style="color:#9ca3af">tie</span> — all bots within $0.50';
         } else {
-          const others = sorted.slice(1).map(b => b.label + ' +$' + (top.last.equity_usd - b.last.equity_usd).toFixed(2)).join(' · ');
-          verdictEl.innerHTML = '<span style="color:' + top.color + '">🥇 ' + top.label + '</span> leads · ' +
-            '<span style="color:#9ca3af">vs ' + others + '</span>';
+          const fmt = (b, medal) => '<span style="color:' + b.color + ';font-weight:600">' + medal + ' ' + b.label.split(' ')[0] + '</span> $' + b.last.equity_usd.toFixed(0);
+          const podium = sorted.slice(0, 3).map((b, i) => fmt(b, ['🥇','🥈','🥉'][i])).join(' · ');
+          const worstStr = '<span style="color:#f85149">⛔ ' + last.label.split(' ')[0] + '</span> $' + last.last.equity_usd.toFixed(0) + ' (−$' + (top.last.equity_usd - last.last.equity_usd).toFixed(0) + ')';
+          verdictEl.innerHTML = podium + ' &nbsp;|&nbsp; ' + worstStr;
         }
       }
     }
