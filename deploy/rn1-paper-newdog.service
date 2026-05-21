@@ -1,0 +1,31 @@
+[Unit]
+Description=Newdogbeginning Paper — copy of #1 daily winner 0xfea31bc0…d227
+After=network.target bot-cp.service
+
+[Service]
+Type=simple
+User=botuser
+WorkingDirectory=/home/botuser/bot-trading
+EnvironmentFile=-/home/botuser/bot-trading/.env
+# newdogbeginning profile: arb on quasi-certainties at 0.95-0.99 entry
+# (Bitcoin $150K targets, Roland Garros heavy favs, NBA late-game).
+# 40 BUYs/day, $4.2M equity, +$370K daily profit on 2026-05-21.
+# Larger NORMAL_MAX (0.99 vs 0.85 surf) to capture his actual entry zone.
+# Conservative sizing $10/trade since edge per trade is tiny (~$0.01-2 per
+# 99¢ entry) — compounded by frequency.
+Environment=NEWDOG_INITIAL=600
+Environment=NEWDOG_MAX_POSITIONS=10
+Environment=NEWDOG_MIN_TARGET=500
+Environment=NEWDOG_MAX_USD_PER_MARKET=10
+Environment=NEWDOG_SKIP_HIGH=0.20
+Environment=NEWDOG_NORMAL_SIZE=10
+Environment=NEWDOG_PENNY_SIZE=2
+Environment=NEWDOG_NORMAL_MAX=0.99
+ExecStart=/home/botuser/bot-trading/venv/bin/python -m analysis.rn1.paper_newdog
+Restart=on-failure
+RestartSec=30
+StandardOutput=append:/home/botuser/bot-trading/logs/rn1/paper_newdog.log
+StandardError=append:/home/botuser/bot-trading/logs/rn1/paper_newdog.log
+
+[Install]
+WantedBy=multi-user.target

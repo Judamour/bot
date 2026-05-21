@@ -1075,6 +1075,17 @@ def api_rn1():
     surf_trades = _tail_jsonl(surf_trades_path, 30)
     surf_latest = surf_equity[-1] if surf_equity else {}
 
+    # Paper Newdog — #1 daily winner 2026-05-21 (+$370K), arb quasi-certainties
+    newdog_state_path = base / "analysis/rn1/data_newdog/state.json"
+    newdog_positions_path = base / "analysis/rn1/data_newdog/positions.json"
+    newdog_equity_path = base / "analysis/rn1/data_newdog/equity.jsonl"
+    newdog_trades_path = base / "analysis/rn1/data_newdog/trades.jsonl"
+    newdog_state = _read_json(newdog_state_path)
+    newdog_positions = _read_json(newdog_positions_path)
+    newdog_equity = _tail_jsonl(newdog_equity_path, 60)
+    newdog_trades = _tail_jsonl(newdog_trades_path, 30)
+    newdog_latest = newdog_equity[-1] if newdog_equity else {}
+
     # Paper Option E — absband + cross-side / cross-event defense
     optione_state_path = base / "analysis/rn1/data_optione/state.json"
     optione_positions_path = base / "analysis/rn1/data_optione/positions.json"
@@ -1155,6 +1166,13 @@ def api_rn1():
             "equity_curve": surf_equity,
             "open_positions": list(surf_positions.values()) if isinstance(surf_positions, dict) else [],
             "recent_trades": surf_trades,
+        },
+        "paper_newdog": {
+            "state": newdog_state,
+            "latest_equity": newdog_latest,
+            "equity_curve": newdog_equity,
+            "open_positions": list(newdog_positions.values()) if isinstance(newdog_positions, dict) else [],
+            "recent_trades": newdog_trades,
         },
         "paper_optione": {
             "state": optione_state,

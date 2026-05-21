@@ -13,12 +13,20 @@ TARGETS = [
     {
         "pseudonym": "RN1",
         "wallet": "0x2005d16a84ceefa912d4e380cd32e7ff827875ea",
-        "allocation_pct": 0.5,
+        "allocation_pct": 0.34,
     },
     {
         "pseudonym": "surfandturf",
         "wallet": "0x9f2fe025f84839ca81dd8e0338892605702d2ca8",
-        "allocation_pct": 0.5,
+        "allocation_pct": 0.33,
+    },
+    # newdogbeginning: #1 daily winner 2026-05-21 (+$370K), equity $4.2M,
+    # 40 BUYs/day arbing "quasi-certainties" at 0.99 (Bitcoin/Roland Garros).
+    # Added to copy-track while RN1 is in revenge-trading drawdown.
+    {
+        "pseudonym": "newdog",
+        "wallet": "0xfea31bc088000ff909be1dfd8d0e3f2c7ef2d227",
+        "allocation_pct": 0.33,
     },
 ]
 

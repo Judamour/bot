@@ -1527,8 +1527,8 @@
   <!-- ═══ Equity curves overlay — moved to top for at-a-glance comparison ═══ -->
   <div style="border:1px solid var(--border);border-radius:6px;padding:10px 12px;margin-bottom:18px;background:var(--card)">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-      <strong style="font-size:14px">📈 Equity curves overlay — A · B · C v1 · C v2 · C v3 · D · E · F</strong>
-      <span style="font-size:11px;color:var(--muted)">absband (🟡) · optionb (🟢) · optionc v1 (🟦) · optionc v2 (🔵) · optionc v3 (🩵) · surfandturf (🟣) · optione (🔴) · optionf (🩷) — 8 strategies from $600 baseline</span>
+      <strong style="font-size:14px">📈 Equity curves overlay — 9 strategies from $600 baseline</strong>
+      <span style="font-size:11px;color:var(--muted)">absband (🟡) · optionb (🟢) · optionc v1 (🟦) · optionc v2 (🔵) · optionc v3 (🩵) · surfandturf (🟣) · newdog (🟠) · optione (🔴) · optionf (🩷)</span>
     </div>
     <div style="height:280px;position:relative">
       <canvas id="rn1-abc-equity-chart"></canvas>
@@ -1565,24 +1565,15 @@
     </table>
   </details>
 
-  <!-- ═══ Comparison — 8 strategies side-by-side ═══ -->
+  <!-- ═══ Comparison — 9 strategies side-by-side ═══ -->
   <h3 style="margin:24px 0 8px 0;font-size:14px;display:flex;align-items:center;gap:8px">
-    ⚔️ A/B/C v1/C v2/C v3/D/E/F Comparison — 8 strategies side-by-side
+    ⚔️ 9-Bot Comparison — RN1 variants + 2 alternative wallets
     <span style="font-size:11px;padding:2px 6px;border-radius:6px;background:#0ea5e9;color:#fff;font-weight:600">$600 each</span>
   </h3>
   <p style="color:var(--muted);font-size:12px;margin:0 0 8px 0">
-    All 8 bots start at $600 paper, same sizing (penny $1, normal $4.5).
-    7 strategies on <strong>RN1</strong> + 1 on <strong>surfandturf</strong>:
-    <strong>absband</strong> = raw,
-    <strong>optionb</strong> = old MTM filters,
-    <strong>optionc v1</strong> = original 5-day MTM (h19 + Monday + lottery + mtype + whale — control arm),
-    <strong>optionc v2</strong> = ablation-trimmed (drops Monday + mtype),
-    <strong>optionc v3</strong> = v2 + extended toxic hours {0,1,19,21} UTC,
-    <strong>optione</strong> = full defense (cross + pre-event + Qualif),
-    <strong>optionf</strong> = optionc base + pre-event + Qualif,
-    <strong>surfandturf</strong> = different wallet.
+    All 9 bots start at $600 paper. 7 RN1 variants + surfandturf (NBA whale) + <strong>newdog</strong> (#1 daily winner 2026-05-21, +$370K, arb quasi-certs at 0.99).
   </p>
-  <div style="display:grid;grid-template-columns:repeat(8,1fr);gap:6px;margin-bottom:18px;font-size:10.5px">
+  <div style="display:grid;grid-template-columns:repeat(9,1fr);gap:5px;margin-bottom:18px;font-size:10px">
     <div style="border:1px solid var(--border);border-radius:6px;padding:12px" id="rn1-ab-cmp-absband-box">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
         <strong style="font-size:13px">🟡 absband (raw)</strong>
@@ -1645,7 +1636,7 @@
     </div>
     <div style="border:1px solid var(--border);border-radius:6px;padding:12px" id="rn1-ab-cmp-surfandturf-box">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-        <strong style="font-size:13px">🟣 surfandturf (NBA)</strong>
+        <strong style="font-size:13px">🟣 surfandturf</strong>
         <span id="rn1-ab-cmp-surfandturf-trophy" style="font-size:11px;padding:2px 6px;border-radius:4px;background:transparent;color:#fff;font-weight:700"></span>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px">
@@ -1653,6 +1644,18 @@
         <div><span style="color:var(--muted)">Perf</span><br><strong id="rn1-ab-cmp-surfandturf-perf" style="font-size:18px">—</strong></div>
         <div><span style="color:var(--muted)">Win rate</span><br><strong id="rn1-ab-cmp-surfandturf-wr">—</strong></div>
         <div><span style="color:var(--muted)">Trades</span><br><strong id="rn1-ab-cmp-surfandturf-tr">—</strong></div>
+      </div>
+    </div>
+    <div style="border:1px solid var(--border);border-radius:6px;padding:12px" id="rn1-ab-cmp-newdog-box">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <strong style="font-size:13px">🟠 newdog (#1 today)</strong>
+        <span id="rn1-ab-cmp-newdog-trophy" style="font-size:11px;padding:2px 6px;border-radius:4px;background:transparent;color:#fff;font-weight:700"></span>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px">
+        <div><span style="color:var(--muted)">Equity</span><br><strong id="rn1-ab-cmp-newdog-eq" style="font-size:18px">—</strong></div>
+        <div><span style="color:var(--muted)">Perf</span><br><strong id="rn1-ab-cmp-newdog-perf" style="font-size:18px">—</strong></div>
+        <div><span style="color:var(--muted)">Win rate</span><br><strong id="rn1-ab-cmp-newdog-wr">—</strong></div>
+        <div><span style="color:var(--muted)">Trades</span><br><strong id="rn1-ab-cmp-newdog-tr">—</strong></div>
       </div>
     </div>
     <div style="border:1px solid var(--border);border-radius:6px;padding:12px" id="rn1-ab-cmp-optione-box">
@@ -1902,6 +1905,44 @@
     <table class="rn1-tbl" style="margin-top:8px">
       <thead><tr><th>Action</th><th>Title</th><th>Outcome</th><th>Tier</th><th class="num">Cost</th><th class="num">PnL</th></tr></thead>
       <tbody id="rn1st-trades-tbl"><tr><td colspan="6" style="color:var(--muted);padding:8px">No actions yet.</td></tr></tbody>
+    </table>
+  </details>
+
+  <!-- ═══ Paper Newdog — #1 daily winner 0xfea31bc0...d227, quasi-cert arb ═══ -->
+  <h3 style="margin:24px 0 8px 0;font-size:14px;display:flex;align-items:center;gap:8px">
+    🟠 Paper Newdog — quasi-certainty arbitrageur (#1 daily winner 2026-05-21)
+    <span style="font-size:11px;padding:2px 6px;border-radius:6px;background:#f97316;color:#fff;font-weight:600">PAPER $600</span>
+  </h3>
+  <p style="color:var(--muted);font-size:12px;margin:0 0 8px 0">
+    Mirrors wallet <code>0xfea31bc0…d227</code> — discovered 2026-05-21 as Polymarket's #1 daily profit (+$370K).
+    Equity $4.2M, 40 BUYs/day, style = arbitrage of "quasi-certainties" at 0.95-0.99
+    (Bitcoin $150K targets, Roland Garros heavy favs, NBA late-game). Tiny edge per
+    trade compounded by volume. Sizing $10 normal / $2 penny / MIN_TARGET=$500 /
+    NORMAL_MAX=0.99 (captures his actual entry zone). Conservative observation
+    while RN1 is in drawdown.
+  </p>
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:18px">
+    <div class="rn1-stat"><div class="rn1-lbl">Equity</div><div class="rn1-val" id="rn1nd-equity">—</div></div>
+    <div class="rn1-stat"><div class="rn1-lbl">Perf</div><div class="rn1-val" id="rn1nd-perf">—</div></div>
+    <div class="rn1-stat"><div class="rn1-lbl">Cash</div><div class="rn1-val" id="rn1nd-cash">—</div></div>
+    <div class="rn1-stat"><div class="rn1-lbl">Open positions</div><div class="rn1-val" id="rn1nd-open">—</div></div>
+    <div class="rn1-stat"><div class="rn1-lbl">Resolved</div><div class="rn1-val" id="rn1nd-resolved">—</div></div>
+    <div class="rn1-stat"><div class="rn1-lbl">Win rate</div><div class="rn1-val" id="rn1nd-wr">—</div></div>
+  </div>
+
+  <details style="margin-bottom:18px;border:1px solid var(--border);border-radius:4px;padding:6px 10px">
+    <summary style="cursor:pointer;font-size:13px;color:var(--muted)">Open Newdog positions (<span id="rn1nd-open-n">0</span>)</summary>
+    <table class="rn1-tbl" style="margin-top:8px">
+      <thead><tr><th>Title</th><th>Outcome</th><th>Tier</th><th class="num">Shares</th><th class="num">Avg px</th><th class="num">Cost</th></tr></thead>
+      <tbody id="rn1nd-open-tbl"><tr><td colspan="6" style="color:var(--muted);padding:8px">No open positions.</td></tr></tbody>
+    </table>
+  </details>
+
+  <details style="margin-bottom:24px;border:1px solid var(--border);border-radius:4px;padding:6px 10px">
+    <summary style="cursor:pointer;font-size:13px;color:var(--muted)">Recent Newdog actions (last 30)</summary>
+    <table class="rn1-tbl" style="margin-top:8px">
+      <thead><tr><th>Action</th><th>Title</th><th>Outcome</th><th>Tier</th><th class="num">Cost</th><th class="num">PnL</th></tr></thead>
+      <tbody id="rn1nd-trades-tbl"><tr><td colspan="6" style="color:var(--muted);padding:8px">No actions yet.</td></tr></tbody>
     </table>
   </details>
 
@@ -3952,7 +3993,84 @@ async function loadRn1() {
     }
   }
 
-  // ── A/B/C/D/E/F Comparison: 5 RN1 strategies + surfandturf ──
+  // ── Paper Newdog stats ──
+  const newdog = data.paper_newdog || {};
+  const ndLast = newdog.latest_equity || {};
+  setText('rn1nd-equity', ndLast.equity_usd != null ? '$' + ndLast.equity_usd.toFixed(2) : '—');
+  const ndPerfEl = document.getElementById('rn1nd-perf');
+  if (ndPerfEl && ndLast.perf_pct != null) {
+    ndPerfEl.textContent = (ndLast.perf_pct > 0 ? '+' : '') + ndLast.perf_pct.toFixed(2) + '%';
+    ndPerfEl.className = 'rn1-val ' + _rn1RoiClass(ndLast.perf_pct / 100);
+  }
+  setText('rn1nd-cash', ndLast.cash_usd != null ? '$' + ndLast.cash_usd.toFixed(2) : '—');
+  setText('rn1nd-open', (ndLast.n_open || 0));
+  setText('rn1nd-resolved', (ndLast.n_resolved || 0) + ' (' + (ndLast.n_won || 0) + ' W / ' +
+    Math.max((ndLast.n_resolved || 0) - (ndLast.n_won || 0), 0) + ' L)');
+  const ndWrEl = document.getElementById('rn1nd-wr');
+  if (ndWrEl) {
+    const wr = (ndLast.win_rate || 0) * 100;
+    ndWrEl.textContent = (ndLast.n_resolved > 0 ? wr.toFixed(1) + '%' : '—');
+    ndWrEl.className = 'rn1-val ' + (wr >= 60 ? 'rn1-roi-pos' : (wr >= 50 ? 'rn1-roi-flat' : 'rn1-roi-neg'));
+  }
+  const ndOpen = newdog.open_positions || [];
+  const ndSetN = document.getElementById('rn1nd-open-n');
+  if (ndSetN) ndSetN.textContent = ndOpen.length;
+  const ndOpenTb = document.getElementById('rn1nd-open-tbl');
+  if (ndOpenTb) {
+    ndOpenTb.innerHTML = '';
+    if (!ndOpen.length) {
+      ndOpenTb.innerHTML = '<tr><td colspan="6" style="color:var(--muted);padding:8px">No open positions.</td></tr>';
+    } else {
+      ndOpen.slice(0, 30).forEach(p => {
+        ndOpenTb.insertAdjacentHTML('beforeend',
+          '<tr>' +
+          '<td>' + (p.title || '').slice(0, 45) + '</td>' +
+          '<td>' + (p.outcome || '') + '</td>' +
+          '<td><code style="font-size:11px">' + (p.tier || '—') + '</code></td>' +
+          '<td class="num">' + (p.shares || 0).toFixed(2) + '</td>' +
+          '<td class="num">' + (p.avg_price || 0).toFixed(3) + '</td>' +
+          '<td class="num">$' + (p.cost_basis || 0).toFixed(2) + '</td>' +
+          '</tr>');
+      });
+    }
+  }
+  const ndTrades = (newdog.recent_trades || []).slice().reverse();
+  const ndTrTb = document.getElementById('rn1nd-trades-tbl');
+  if (ndTrTb) {
+    ndTrTb.innerHTML = '';
+    if (!ndTrades.length) {
+      ndTrTb.innerHTML = '<tr><td colspan="6" style="color:var(--muted);padding:8px">No actions yet.</td></tr>';
+    } else {
+      ndTrades.forEach(t => {
+        const action = t.action || '';
+        let actionEl, pnlEl;
+        if (action === 'buy') {
+          actionEl = '<span style="color:#3fb950">BUY</span>';
+          pnlEl = '—';
+        } else if (action === 'resolve') {
+          actionEl = t.result === 'won'
+            ? '<span style="color:#3fb950">RESOLVE ✓</span>'
+            : '<span style="color:#f85149">RESOLVE ✗</span>';
+          const pnl = t.pnl || 0;
+          pnlEl = '<span class="' + _rn1RoiClass(pnl / 5) + '">' + (pnl > 0 ? '+' : '') + '$' + pnl.toFixed(2) + '</span>';
+        } else {
+          actionEl = action;
+          pnlEl = '—';
+        }
+        ndTrTb.insertAdjacentHTML('beforeend',
+          '<tr>' +
+          '<td>' + actionEl + '</td>' +
+          '<td>' + (t.title || '').slice(0, 40) + '</td>' +
+          '<td>' + (t.outcome || t.outcome_bought || '') + '</td>' +
+          '<td><code style="font-size:11px">' + (t.tier || '—') + '</code></td>' +
+          '<td class="num">$' + (t.cost || t.cost_basis || 0).toFixed(2) + '</td>' +
+          '<td class="num">' + pnlEl + '</td>' +
+          '</tr>');
+      });
+    }
+  }
+
+  // ── 9-Bot Comparison: 7 RN1 variants + surf + newdog ──
   (function renderABCComparison() {
     const bots = [
       {key: 'absband',     label: 'absband (raw)',         color: '#d97706', last: abLast},
@@ -3961,6 +4079,7 @@ async function loadRn1() {
       {key: 'optionc',     label: 'optionc v2 (trim)',     color: '#3b82f6', last: ocLast},
       {key: 'optioncv3',   label: 'optionc v3 (h-skip)',   color: '#06b6d4', last: cv3Last},
       {key: 'surfandturf', label: 'surfandturf (NBA)',     color: '#a855f7', last: stLast},
+      {key: 'newdog',      label: 'newdog (#1 today)',     color: '#f97316', last: ndLast},
       {key: 'optione',     label: 'optione (full defense)',color: '#ef4444', last: oeLast},
       {key: 'optionf',     label: 'optionf (C+ hybrid)',   color: '#ec4899', last: ofLast},
     ];
@@ -4049,6 +4168,7 @@ async function loadRn1() {
       {label: 'optionc v2',     color: '#3b82f6', curve: (data.paper_optionc || {}).equity_curve || []},
       {label: 'optionc v3',     color: '#06b6d4', curve: (data.paper_optioncv3 || {}).equity_curve || []},
       {label: 'surfandturf',    color: '#a855f7', curve: (data.paper_surfandturf || {}).equity_curve || []},
+      {label: 'newdog',         color: '#f97316', curve: (data.paper_newdog || {}).equity_curve || []},
       {label: 'optione (anti)', color: '#ef4444', curve: (data.paper_optione || {}).equity_curve || []},
       {label: 'optionf (C+)',   color: '#ec4899', curve: (data.paper_optionf || {}).equity_curve || []},
     ];
