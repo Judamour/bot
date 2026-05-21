@@ -1119,6 +1119,19 @@ def api_rn1():
     ultimate_trades = _tail_jsonl(ultimate_trades_path, 30)
     ultimate_latest = ultimate_equity[-1] if ultimate_equity else {}
 
+    # Paper Bot Ultime Moteur B (Bookmaker arb via OddsPapi)
+    bookarb_state_path = base / "analysis/rn1/data_bookarb/state.json"
+    bookarb_positions_path = base / "analysis/rn1/data_bookarb/positions.json"
+    bookarb_equity_path = base / "analysis/rn1/data_bookarb/equity.jsonl"
+    bookarb_trades_path = base / "analysis/rn1/data_bookarb/trades.jsonl"
+    bookarb_oddspapi_state_path = base / "analysis/rn1/data_bookarb/oddspapi_state.json"
+    bookarb_state = _read_json(bookarb_state_path)
+    bookarb_positions = _read_json(bookarb_positions_path)
+    bookarb_equity = _tail_jsonl(bookarb_equity_path, 60)
+    bookarb_trades = _tail_jsonl(bookarb_trades_path, 30)
+    bookarb_latest = bookarb_equity[-1] if bookarb_equity else {}
+    bookarb_oddspapi_state = _read_json(bookarb_oddspapi_state_path)
+
     # Paper Option E — absband + cross-side / cross-event defense
     optione_state_path = base / "analysis/rn1/data_optione/state.json"
     optione_positions_path = base / "analysis/rn1/data_optione/positions.json"
@@ -1227,6 +1240,18 @@ def api_rn1():
             "equity_curve": ultimate_equity,
             "open_positions": list(ultimate_positions.values()) if isinstance(ultimate_positions, dict) else [],
             "recent_trades": ultimate_trades,
+        },
+        "paper_bookarb": {
+            "state": bookarb_state,
+            "latest_equity": bookarb_latest,
+            "equity_curve": bookarb_equity,
+            "open_positions": list(bookarb_positions.values()) if isinstance(bookarb_positions, dict) else [],
+            "recent_trades": bookarb_trades,
+            "oddspapi_budget": {
+                "calls_made": (bookarb_oddspapi_state or {}).get("calls_made", 0),
+                "remaining": 250 - (bookarb_oddspapi_state or {}).get("calls_made", 0),
+                "cap": 250,
+            },
         },
         "paper_optione": {
             "state": optione_state,

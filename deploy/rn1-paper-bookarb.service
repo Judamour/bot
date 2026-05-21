@@ -1,0 +1,43 @@
+[Unit]
+Description=Bot Ultime — Moteur B (Bookmaker Arb vs Pinnacle via OddsPapi)
+After=network.target
+
+[Service]
+Type=simple
+User=botuser
+WorkingDirectory=/home/botuser/bot-trading
+EnvironmentFile=-/home/botuser/bot-trading/.env
+# Bookmaker arb directionnel — compares Polymarket sports markets to Pinnacle
+# sharp odds (via OddsPapi free tier). 250-call budget enforced by client.
+#
+# Cycle 3h (= 8 calls/day = 31 days runway from 250 budget).
+# Sport rotation : Tennis -> Soccer -> Basketball, 1 sport per cycle.
+# Cache 3h memory + persistent counter in data_bookarb/oddspapi_state.json.
+# Hard stop at 240/250 calls (10-call safety buffer).
+#
+# Entry signal : Polymarket undervalues sharp implied by >= 7pp.
+# Sizing : fractional Kelly with edge-based (1/4 multiplier).
+# Risk overlay : max 10 positions, max 5/sport, kill switch -15%.
+# Auto-unwind 99% + stop-loss -50% + time exit 2h post event start.
+Environment=BOOKARB_INITIAL=600
+Environment=BOOKARB_MOTEUR_B_CAP=280
+Environment=BOOKARB_NORMAL_SIZE=10
+Environment=BOOKARB_ENTRY_EDGE=0.07
+Environment=BOOKARB_MIN_VOLUME=5000
+Environment=BOOKARB_MIN_LIQ=500
+Environment=BOOKARB_MIN_HOURS_TO_EVENT=0.5
+Environment=BOOKARB_MAX_HOURS_TO_EVENT=4
+Environment=BOOKARB_MAX_POSITIONS=10
+Environment=BOOKARB_MAX_SAME_SPORT=5
+Environment=BOOKARB_KILL_SWITCH_PCT=-0.15
+Environment=BOOKARB_STOP_LOSS_PCT=-0.50
+Environment=BOOKARB_NEAR_RESOLVE=0.99
+Environment=BOOKARB_POLL_S=10800
+ExecStart=/home/botuser/bot-trading/venv/bin/python -m analysis.rn1.paper_bookarb
+Restart=on-failure
+RestartSec=60
+StandardOutput=append:/home/botuser/bot-trading/logs/rn1/paper_bookarb.log
+StandardError=append:/home/botuser/bot-trading/logs/rn1/paper_bookarb.log
+
+[Install]
+WantedBy=multi-user.target

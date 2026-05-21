@@ -1687,7 +1687,7 @@
     </div>
     <div style="border:2px solid #fbbf24;border-radius:6px;padding:12px;background:linear-gradient(180deg, rgba(251,191,36,0.05), transparent)" id="rn1-ab-cmp-ultimate-box">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-        <strong style="font-size:13px">🌟 Bot Ultime</strong>
+        <strong style="font-size:13px">🌟 Ultime A (HeavyFav)</strong>
         <span id="rn1-ab-cmp-ultimate-trophy" style="font-size:11px;padding:2px 6px;border-radius:4px;background:transparent;color:#fff;font-weight:700"></span>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px">
@@ -1695,6 +1695,18 @@
         <div><span style="color:var(--muted)">Perf</span><br><strong id="rn1-ab-cmp-ultimate-perf" style="font-size:18px">—</strong></div>
         <div><span style="color:var(--muted)">Win rate</span><br><strong id="rn1-ab-cmp-ultimate-wr">—</strong></div>
         <div><span style="color:var(--muted)">Trades</span><br><strong id="rn1-ab-cmp-ultimate-tr">—</strong></div>
+      </div>
+    </div>
+    <div style="border:2px solid #14b8a6;border-radius:6px;padding:12px;background:linear-gradient(180deg, rgba(20,184,166,0.05), transparent)" id="rn1-ab-cmp-bookarb-box">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <strong style="font-size:13px">📊 Ultime B (Pinnacle arb)</strong>
+        <span id="rn1-ab-cmp-bookarb-trophy" style="font-size:11px;padding:2px 6px;border-radius:4px;background:transparent;color:#fff;font-weight:700"></span>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px">
+        <div><span style="color:var(--muted)">Equity</span><br><strong id="rn1-ab-cmp-bookarb-eq" style="font-size:18px">—</strong></div>
+        <div><span style="color:var(--muted)">Perf</span><br><strong id="rn1-ab-cmp-bookarb-perf" style="font-size:18px">—</strong></div>
+        <div><span style="color:var(--muted)">Win rate</span><br><strong id="rn1-ab-cmp-bookarb-wr">—</strong></div>
+        <div><span style="color:var(--muted)">Trades</span><br><strong id="rn1-ab-cmp-bookarb-tr">—</strong></div>
       </div>
     </div>
     <div style="border:1px solid var(--border);border-radius:6px;padding:12px" id="rn1-ab-cmp-autobot-box">
@@ -2117,6 +2129,43 @@
     <table class="rn1-tbl" style="margin-top:8px">
       <thead><tr><th>Action</th><th>Title</th><th>Outcome</th><th class="num">Cost</th><th class="num">PnL</th></tr></thead>
       <tbody id="rn1u-trades-tbl"><tr><td colspan="5" style="color:var(--muted);padding:8px">No actions yet.</td></tr></tbody>
+    </table>
+  </details>
+
+  <!-- ═══ Paper Bot Ultime Moteur B — Bookmaker arb via OddsPapi ═══ -->
+  <h3 style="margin:24px 0 8px 0;font-size:14px;display:flex;align-items:center;gap:8px">
+    📊 Paper Bot Ultime — Moteur B (Bookmaker arb vs Pinnacle)
+    <span style="font-size:11px;padding:2px 6px;border-radius:6px;background:#14b8a6;color:#000;font-weight:600">PAPER $600</span>
+    <span id="rn1b-budget" style="font-size:11px;padding:2px 6px;border-radius:6px;background:#374151;color:#fff;font-weight:600">Budget —</span>
+  </h3>
+  <p style="color:var(--muted);font-size:12px;margin:0 0 8px 0">
+    Compare Polymarket sports prices vs Pinnacle sharp odds (via OddsPapi free tier, <strong>250-call budget enforced</strong>).
+    Entry signal: Polymarket undervalues sharp implied by ≥7pp. Cycle 3h, rotation Tennis → Soccer → Basketball
+    (1 sport per call = 31 days runway). Risk overlay shared with Moteur A: kill switch -15%, max 10 positions,
+    max 5/sport, auto-unwind 99%, stop-loss -50%, time exit 2h post event.
+  </p>
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:18px">
+    <div class="rn1-stat"><div class="rn1-lbl">Equity</div><div class="rn1-val" id="rn1b-equity">—</div></div>
+    <div class="rn1-stat"><div class="rn1-lbl">Perf</div><div class="rn1-val" id="rn1b-perf">—</div></div>
+    <div class="rn1-stat"><div class="rn1-lbl">Cash</div><div class="rn1-val" id="rn1b-cash">—</div></div>
+    <div class="rn1-stat"><div class="rn1-lbl">Open positions</div><div class="rn1-val" id="rn1b-open">—</div></div>
+    <div class="rn1-stat"><div class="rn1-lbl">Resolved</div><div class="rn1-val" id="rn1b-resolved">—</div></div>
+    <div class="rn1-stat"><div class="rn1-lbl">Win rate</div><div class="rn1-val" id="rn1b-wr">—</div></div>
+  </div>
+
+  <details style="margin-bottom:18px;border:1px solid var(--border);border-radius:4px;padding:6px 10px">
+    <summary style="cursor:pointer;font-size:13px;color:var(--muted)">Open Moteur B positions (<span id="rn1b-open-n">0</span>)</summary>
+    <table class="rn1-tbl" style="margin-top:8px">
+      <thead><tr><th>Title</th><th>Outcome</th><th>Sport</th><th class="num">Edge</th><th class="num">Cost</th></tr></thead>
+      <tbody id="rn1b-open-tbl"><tr><td colspan="5" style="color:var(--muted);padding:8px">No open positions.</td></tr></tbody>
+    </table>
+  </details>
+
+  <details style="margin-bottom:24px;border:1px solid var(--border);border-radius:4px;padding:6px 10px">
+    <summary style="cursor:pointer;font-size:13px;color:var(--muted)">Recent Moteur B actions (last 30)</summary>
+    <table class="rn1-tbl" style="margin-top:8px">
+      <thead><tr><th>Action</th><th>Title</th><th>Sport</th><th class="num">Edge/Exit</th><th class="num">PnL</th></tr></thead>
+      <tbody id="rn1b-trades-tbl"><tr><td colspan="5" style="color:var(--muted);padding:8px">No actions yet.</td></tr></tbody>
     </table>
   </details>
 
@@ -4426,6 +4475,79 @@ async function loadRn1() {
     }
   }
 
+  // ── Paper Bot Ultime Moteur B stats ──
+  const bookarb = data.paper_bookarb || {};
+  const bLast = bookarb.latest_equity || {};
+  const bBudget = bookarb.oddspapi_budget || {};
+  const bBudgetEl = document.getElementById('rn1b-budget');
+  if (bBudgetEl) {
+    bBudgetEl.textContent = 'Budget ' + (bBudget.calls_made || 0) + '/' + (bBudget.cap || 250);
+    if (bBudget.remaining != null) {
+      const remPct = bBudget.remaining / (bBudget.cap || 250);
+      bBudgetEl.style.background = remPct > 0.5 ? '#065f46' : (remPct > 0.2 ? '#92400e' : '#7f1d1d');
+    }
+  }
+  setText('rn1b-equity', bLast.equity_usd != null ? '$' + bLast.equity_usd.toFixed(2) : '—');
+  const bPerfEl = document.getElementById('rn1b-perf');
+  if (bPerfEl && bLast.perf_pct != null) {
+    bPerfEl.textContent = (bLast.perf_pct > 0 ? '+' : '') + bLast.perf_pct.toFixed(2) + '%';
+    bPerfEl.className = 'rn1-val ' + _rn1RoiClass(bLast.perf_pct / 100);
+  }
+  setText('rn1b-cash', bLast.cash_usd != null ? '$' + bLast.cash_usd.toFixed(2) : '—');
+  setText('rn1b-open', (bLast.n_open || 0));
+  setText('rn1b-resolved', (bLast.n_resolved || 0) + ' (' + (bLast.n_won || 0) + ' W / ' +
+    Math.max((bLast.n_resolved || 0) - (bLast.n_won || 0), 0) + ' L)');
+  const bWrEl = document.getElementById('rn1b-wr');
+  if (bWrEl) {
+    const wr = (bLast.win_rate || 0) * 100;
+    bWrEl.textContent = (bLast.n_resolved > 0 ? wr.toFixed(1) + '%' : '—');
+    bWrEl.className = 'rn1-val ' + (wr >= 60 ? 'rn1-roi-pos' : (wr >= 50 ? 'rn1-roi-flat' : 'rn1-roi-neg'));
+  }
+  const bOpen = bookarb.open_positions || [];
+  const bOpenN = document.getElementById('rn1b-open-n');
+  if (bOpenN) bOpenN.textContent = bOpen.length;
+  const bOpenTb = document.getElementById('rn1b-open-tbl');
+  if (bOpenTb) {
+    bOpenTb.innerHTML = '';
+    if (!bOpen.length) {
+      bOpenTb.innerHTML = '<tr><td colspan="5" style="color:var(--muted);padding:8px">No open positions.</td></tr>';
+    } else {
+      bOpen.slice(0, 30).forEach(p => {
+        const edgePp = ((p.edge_at_entry || 0) * 100).toFixed(1) + 'pp';
+        bOpenTb.insertAdjacentHTML('beforeend',
+          '<tr><td>' + (p.title || '').slice(0, 45) + '</td><td>' + (p.outcome || '') +
+          '</td><td>' + (p.sport || '') + '</td><td class="num">' + edgePp + '</td>' +
+          '<td class="num">$' + (p.cost_basis || 0).toFixed(2) + '</td></tr>');
+      });
+    }
+  }
+  const bTrades = (bookarb.recent_trades || []).slice().reverse();
+  const bTrTb = document.getElementById('rn1b-trades-tbl');
+  if (bTrTb) {
+    bTrTb.innerHTML = '';
+    if (!bTrades.length) {
+      bTrTb.innerHTML = '<tr><td colspan="5" style="color:var(--muted);padding:8px">No actions yet.</td></tr>';
+    } else {
+      bTrades.forEach(t => {
+        const action = t.action || ''; let actionEl, infoEl, pnlEl;
+        if (action === 'buy') {
+          actionEl = '<span style="color:#3fb950">BUY</span>';
+          infoEl = ((t.edge || 0) * 100).toFixed(1) + 'pp';
+          pnlEl = '—';
+        } else if (action === 'resolve') {
+          actionEl = t.outcome === 'won' ? '<span style="color:#3fb950">RESOLVE ✓</span>' : '<span style="color:#f85149">RESOLVE ✗</span>';
+          infoEl = t.exit_reason || '';
+          const pnl = t.pnl || 0;
+          pnlEl = '<span class="' + _rn1RoiClass(pnl / 5) + '">' + (pnl > 0 ? '+' : '') + '$' + pnl.toFixed(2) + '</span>';
+        } else { actionEl = action; infoEl = ''; pnlEl = '—'; }
+        bTrTb.insertAdjacentHTML('beforeend',
+          '<tr><td>' + actionEl + '</td><td>' + (t.title || '').slice(0, 40) + '</td>' +
+          '<td>' + (t.sport || '') + '</td><td class="num">' + infoEl + '</td>' +
+          '<td class="num">' + pnlEl + '</td></tr>');
+      });
+    }
+  }
+
   // ── 12-Bot Comparison: 7 RN1 variants + surf + newdog + mosley + kch + ultimate ──
   (function renderABCComparison() {
     const bots = [
@@ -4438,7 +4560,8 @@ async function loadRn1() {
       {key: 'newdog',      label: 'newdog (#1 today)',     color: '#f97316', last: ndLast},
       {key: 'mosley',      label: 'Mosley1 (#2 today)',    color: '#92400e', last: moLast},
       {key: 'kch',         label: 'kch123 (#3 all-time)',  color: '#404040', last: kcLast},
-      {key: 'ultimate',    label: 'Bot Ultime',            color: '#fbbf24', last: uLast},
+      {key: 'ultimate',    label: 'Ultime A (HeavyFav)',   color: '#fbbf24', last: uLast},
+      {key: 'bookarb',     label: 'Ultime B (Pinnacle)',   color: '#14b8a6', last: (data.paper_bookarb || {}).latest_equity || {}},
       {key: 'autobot',     label: 'autobot (auto-scan)',   color: '#0891b2', last: (data.autobot || {}).latest_equity || {}},
       {key: 'paper',       label: 'edge sim ($1K base)',   color: '#65a30d', last: (data.paper || {}).latest_equity || {}},
       {key: 'optione',     label: 'optione (full defense)',color: '#ef4444', last: oeLast},
@@ -4533,7 +4656,8 @@ async function loadRn1() {
       {label: 'newdog',         color: '#f97316', curve: (data.paper_newdog || {}).equity_curve || []},
       {label: 'Mosley1',        color: '#92400e', curve: (data.paper_mosley || {}).equity_curve || []},
       {label: 'kch123',         color: '#404040', curve: (data.paper_kch || {}).equity_curve || []},
-      {label: 'Bot Ultime 🌟',   color: '#fbbf24', curve: (data.paper_ultimate || {}).equity_curve || []},
+      {label: 'Ultime A 🌟',     color: '#fbbf24', curve: (data.paper_ultimate || {}).equity_curve || []},
+      {label: 'Ultime B 📊',     color: '#14b8a6', curve: (data.paper_bookarb || {}).equity_curve || []},
       {label: 'autobot',        color: '#0891b2', curve: (data.autobot || {}).equity_curve || []},
       {label: 'edge sim ($1K)', color: '#65a30d', curve: (data.paper || {}).equity_curve || []},
       {label: 'optione (anti)', color: '#ef4444', curve: (data.paper_optione || {}).equity_curve || []},
