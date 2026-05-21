@@ -349,12 +349,25 @@ def sharp_implied_from_v4_fixture(fixture: dict, target_team: str,
     return implied[target_label] / total
 
 
-def build_participants_map(participants: list[dict]) -> dict[int, str]:
-    """Build {participant_id: name} map from /v4/participants response."""
-    out = {}
-    for p in participants:
-        pid = p.get("participantId") or p.get("id")
-        name = p.get("participantName") or p.get("name") or ""
-        if pid is not None and name:
-            out[pid] = name
+def build_participants_map(participants) -> dict[int, str]:
+    """Build {participant_id: name} map from /v4/participants response.
+
+    v4 returns: {"1": "Queens Park Rangers", "10": "...", "100": "..."}
+    (dict with string keys mapping to names).
+    Falls back gracefully to list-of-dicts shape just in case.
+    """
+    out: dict[int, str] = {}
+    if isinstance(participants, dict):
+        for k, v in participants.items():
+            if not v: continue
+            try: out[int(k)] = str(v)
+            except (TypeError, ValueError): continue
+    elif isinstance(participants, list):
+        for p in participants:
+            if not isinstance(p, dict): continue
+            pid = p.get("participantId") or p.get("id")
+            name = p.get("participantName") or p.get("name") or ""
+            if pid is not None and name:
+                try: out[int(pid)] = str(name)
+                except (TypeError, ValueError): continue
     return out
