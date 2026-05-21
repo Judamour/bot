@@ -1685,6 +1685,30 @@
         <div><span style="color:var(--muted)">Trades</span><br><strong id="rn1-ab-cmp-kch-tr">—</strong></div>
       </div>
     </div>
+    <div style="border:1px solid var(--border);border-radius:6px;padding:12px" id="rn1-ab-cmp-autobot-box">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <strong style="font-size:13px">🤖 autobot</strong>
+        <span id="rn1-ab-cmp-autobot-trophy" style="font-size:11px;padding:2px 6px;border-radius:4px;background:transparent;color:#fff;font-weight:700"></span>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px">
+        <div><span style="color:var(--muted)">Equity</span><br><strong id="rn1-ab-cmp-autobot-eq" style="font-size:18px">—</strong></div>
+        <div><span style="color:var(--muted)">Perf</span><br><strong id="rn1-ab-cmp-autobot-perf" style="font-size:18px">—</strong></div>
+        <div><span style="color:var(--muted)">Win rate</span><br><strong id="rn1-ab-cmp-autobot-wr">—</strong></div>
+        <div><span style="color:var(--muted)">Trades</span><br><strong id="rn1-ab-cmp-autobot-tr">—</strong></div>
+      </div>
+    </div>
+    <div style="border:1px solid var(--border);border-radius:6px;padding:12px" id="rn1-ab-cmp-paper-box">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <strong style="font-size:13px">🧪 edge sim ($1K)</strong>
+        <span id="rn1-ab-cmp-paper-trophy" style="font-size:11px;padding:2px 6px;border-radius:4px;background:transparent;color:#fff;font-weight:700"></span>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px">
+        <div><span style="color:var(--muted)">Equity</span><br><strong id="rn1-ab-cmp-paper-eq" style="font-size:18px">—</strong></div>
+        <div><span style="color:var(--muted)">Perf</span><br><strong id="rn1-ab-cmp-paper-perf" style="font-size:18px">—</strong></div>
+        <div><span style="color:var(--muted)">Win rate</span><br><strong id="rn1-ab-cmp-paper-wr">—</strong></div>
+        <div><span style="color:var(--muted)">Trades</span><br><strong id="rn1-ab-cmp-paper-tr">—</strong></div>
+      </div>
+    </div>
     <div style="border:1px solid var(--border);border-radius:6px;padding:12px" id="rn1-ab-cmp-optione-box">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
         <strong style="font-size:13px">🔴 optione (full defense)</strong>
@@ -4302,6 +4326,8 @@ async function loadRn1() {
       {key: 'newdog',      label: 'newdog (#1 today)',     color: '#f97316', last: ndLast},
       {key: 'mosley',      label: 'Mosley1 (#2 today)',    color: '#92400e', last: moLast},
       {key: 'kch',         label: 'kch123 (#3 all-time)',  color: '#404040', last: kcLast},
+      {key: 'autobot',     label: 'autobot (auto-scan)',   color: '#0891b2', last: (data.autobot || {}).latest_equity || {}},
+      {key: 'paper',       label: 'edge sim ($1K base)',   color: '#65a30d', last: (data.paper || {}).latest_equity || {}},
       {key: 'optione',     label: 'optione (full defense)',color: '#ef4444', last: oeLast},
       {key: 'optionf',     label: 'optionf (C+ hybrid)',   color: '#ec4899', last: ofLast},
     ];
@@ -4394,6 +4420,8 @@ async function loadRn1() {
       {label: 'newdog',         color: '#f97316', curve: (data.paper_newdog || {}).equity_curve || []},
       {label: 'Mosley1',        color: '#92400e', curve: (data.paper_mosley || {}).equity_curve || []},
       {label: 'kch123',         color: '#404040', curve: (data.paper_kch || {}).equity_curve || []},
+      {label: 'autobot',        color: '#0891b2', curve: (data.autobot || {}).equity_curve || []},
+      {label: 'edge sim ($1K)', color: '#65a30d', curve: (data.paper || {}).equity_curve || []},
       {label: 'optione (anti)', color: '#ef4444', curve: (data.paper_optione || {}).equity_curve || []},
       {label: 'optionf (C+)',   color: '#ec4899', curve: (data.paper_optionf || {}).equity_curve || []},
     ];
