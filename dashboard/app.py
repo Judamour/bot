@@ -1108,6 +1108,17 @@ def api_rn1():
     kch_trades = _tail_jsonl(kch_trades_path, 30)
     kch_latest = kch_equity[-1] if kch_equity else {}
 
+    # Paper Bot Ultime — research-grade Heavy_fav + Bookmaker arb (Moteur A v1)
+    ultimate_state_path = base / "analysis/rn1/data_ultimate/state.json"
+    ultimate_positions_path = base / "analysis/rn1/data_ultimate/positions.json"
+    ultimate_equity_path = base / "analysis/rn1/data_ultimate/equity.jsonl"
+    ultimate_trades_path = base / "analysis/rn1/data_ultimate/trades.jsonl"
+    ultimate_state = _read_json(ultimate_state_path)
+    ultimate_positions = _read_json(ultimate_positions_path)
+    ultimate_equity = _tail_jsonl(ultimate_equity_path, 60)
+    ultimate_trades = _tail_jsonl(ultimate_trades_path, 30)
+    ultimate_latest = ultimate_equity[-1] if ultimate_equity else {}
+
     # Paper Option E — absband + cross-side / cross-event defense
     optione_state_path = base / "analysis/rn1/data_optione/state.json"
     optione_positions_path = base / "analysis/rn1/data_optione/positions.json"
@@ -1209,6 +1220,13 @@ def api_rn1():
             "equity_curve": kch_equity,
             "open_positions": list(kch_positions.values()) if isinstance(kch_positions, dict) else [],
             "recent_trades": kch_trades,
+        },
+        "paper_ultimate": {
+            "state": ultimate_state,
+            "latest_equity": ultimate_latest,
+            "equity_curve": ultimate_equity,
+            "open_positions": list(ultimate_positions.values()) if isinstance(ultimate_positions, dict) else [],
+            "recent_trades": ultimate_trades,
         },
         "paper_optione": {
             "state": optione_state,

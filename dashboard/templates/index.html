@@ -1685,6 +1685,18 @@
         <div><span style="color:var(--muted)">Trades</span><br><strong id="rn1-ab-cmp-kch-tr">—</strong></div>
       </div>
     </div>
+    <div style="border:2px solid #fbbf24;border-radius:6px;padding:12px;background:linear-gradient(180deg, rgba(251,191,36,0.05), transparent)" id="rn1-ab-cmp-ultimate-box">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <strong style="font-size:13px">🌟 Bot Ultime</strong>
+        <span id="rn1-ab-cmp-ultimate-trophy" style="font-size:11px;padding:2px 6px;border-radius:4px;background:transparent;color:#fff;font-weight:700"></span>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px">
+        <div><span style="color:var(--muted)">Equity</span><br><strong id="rn1-ab-cmp-ultimate-eq" style="font-size:18px">—</strong></div>
+        <div><span style="color:var(--muted)">Perf</span><br><strong id="rn1-ab-cmp-ultimate-perf" style="font-size:18px">—</strong></div>
+        <div><span style="color:var(--muted)">Win rate</span><br><strong id="rn1-ab-cmp-ultimate-wr">—</strong></div>
+        <div><span style="color:var(--muted)">Trades</span><br><strong id="rn1-ab-cmp-ultimate-tr">—</strong></div>
+      </div>
+    </div>
     <div style="border:1px solid var(--border);border-radius:6px;padding:12px" id="rn1-ab-cmp-autobot-box">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
         <strong style="font-size:13px">🤖 autobot</strong>
@@ -2065,6 +2077,46 @@
     <table class="rn1-tbl" style="margin-top:8px">
       <thead><tr><th>Action</th><th>Title</th><th>Outcome</th><th>Tier</th><th class="num">Cost</th><th class="num">PnL</th></tr></thead>
       <tbody id="rn1kc-trades-tbl"><tr><td colspan="6" style="color:var(--muted);padding:8px">No actions yet.</td></tr></tbody>
+    </table>
+  </details>
+
+  <!-- ═══ Paper Bot Ultime — research-grade Heavy_fav + Bookmaker arb ═══ -->
+  <h3 style="margin:24px 0 8px 0;font-size:14px;display:flex;align-items:center;gap:8px">
+    🌟 Paper Bot Ultime — research-grade Heavy_fav scan (Moteur A v1)
+    <span style="font-size:11px;padding:2px 6px;border-radius:6px;background:#fbbf24;color:#000;font-weight:600">PAPER $600</span>
+  </h3>
+  <p style="color:var(--muted);font-size:12px;margin:0 0 8px 0">
+    Autonomous scanner combining 2026-05-21 deep research findings:
+    <strong>Heavy_fav 0.85-0.95</strong> (validated by edge_sim 95.4% WR),
+    <strong>fractional Kelly sizing</strong> (1/4 with WR=0.954),
+    <strong>scoring rank</strong> (tighter spread + higher liquidity = priority),
+    <strong>risk overlay</strong> (MAX_POS 15, MAX_SAME_SPORT 5, KILL_SWITCH -15%),
+    <strong>category blacklist</strong> (esports/crypto_1h),
+    <strong>auto-unwind 99%</strong>.
+    Moteur A only ($280 sub-allocation). Moteur B (Bookmaker arb via OddsPapi) to be wired in v2.
+  </p>
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:18px">
+    <div class="rn1-stat"><div class="rn1-lbl">Equity</div><div class="rn1-val" id="rn1u-equity">—</div></div>
+    <div class="rn1-stat"><div class="rn1-lbl">Perf</div><div class="rn1-val" id="rn1u-perf">—</div></div>
+    <div class="rn1-stat"><div class="rn1-lbl">Cash</div><div class="rn1-val" id="rn1u-cash">—</div></div>
+    <div class="rn1-stat"><div class="rn1-lbl">Open positions</div><div class="rn1-val" id="rn1u-open">—</div></div>
+    <div class="rn1-stat"><div class="rn1-lbl">Resolved</div><div class="rn1-val" id="rn1u-resolved">—</div></div>
+    <div class="rn1-stat"><div class="rn1-lbl">Win rate</div><div class="rn1-val" id="rn1u-wr">—</div></div>
+  </div>
+
+  <details style="margin-bottom:18px;border:1px solid var(--border);border-radius:4px;padding:6px 10px">
+    <summary style="cursor:pointer;font-size:13px;color:var(--muted)">Open Bot Ultime positions (<span id="rn1u-open-n">0</span>)</summary>
+    <table class="rn1-tbl" style="margin-top:8px">
+      <thead><tr><th>Title</th><th>Outcome</th><th class="num">Shares</th><th class="num">Avg px</th><th class="num">Cost</th></tr></thead>
+      <tbody id="rn1u-open-tbl"><tr><td colspan="5" style="color:var(--muted);padding:8px">No open positions.</td></tr></tbody>
+    </table>
+  </details>
+
+  <details style="margin-bottom:24px;border:1px solid var(--border);border-radius:4px;padding:6px 10px">
+    <summary style="cursor:pointer;font-size:13px;color:var(--muted)">Recent Bot Ultime actions (last 30)</summary>
+    <table class="rn1-tbl" style="margin-top:8px">
+      <thead><tr><th>Action</th><th>Title</th><th>Outcome</th><th class="num">Cost</th><th class="num">PnL</th></tr></thead>
+      <tbody id="rn1u-trades-tbl"><tr><td colspan="5" style="color:var(--muted);padding:8px">No actions yet.</td></tr></tbody>
     </table>
   </details>
 
@@ -4314,7 +4366,67 @@ async function loadRn1() {
     }
   }
 
-  // ── 11-Bot Comparison: 7 RN1 variants + surf + newdog + mosley + kch ──
+  // ── Paper Bot Ultime stats ──
+  const ultimate = data.paper_ultimate || {};
+  const uLast = ultimate.latest_equity || {};
+  setText('rn1u-equity', uLast.equity_usd != null ? '$' + uLast.equity_usd.toFixed(2) : '—');
+  const uPerfEl = document.getElementById('rn1u-perf');
+  if (uPerfEl && uLast.perf_pct != null) {
+    uPerfEl.textContent = (uLast.perf_pct > 0 ? '+' : '') + uLast.perf_pct.toFixed(2) + '%';
+    uPerfEl.className = 'rn1-val ' + _rn1RoiClass(uLast.perf_pct / 100);
+  }
+  setText('rn1u-cash', uLast.cash_usd != null ? '$' + uLast.cash_usd.toFixed(2) : '—');
+  setText('rn1u-open', (uLast.n_open || 0));
+  setText('rn1u-resolved', (uLast.n_resolved || 0) + ' (' + (uLast.n_won || 0) + ' W / ' +
+    Math.max((uLast.n_resolved || 0) - (uLast.n_won || 0), 0) + ' L)');
+  const uWrEl = document.getElementById('rn1u-wr');
+  if (uWrEl) {
+    const wr = (uLast.win_rate || 0) * 100;
+    uWrEl.textContent = (uLast.n_resolved > 0 ? wr.toFixed(1) + '%' : '—');
+    uWrEl.className = 'rn1-val ' + (wr >= 60 ? 'rn1-roi-pos' : (wr >= 50 ? 'rn1-roi-flat' : 'rn1-roi-neg'));
+  }
+  const uOpen = ultimate.open_positions || [];
+  const uSetN = document.getElementById('rn1u-open-n');
+  if (uSetN) uSetN.textContent = uOpen.length;
+  const uOpenTb = document.getElementById('rn1u-open-tbl');
+  if (uOpenTb) {
+    uOpenTb.innerHTML = '';
+    if (!uOpen.length) {
+      uOpenTb.innerHTML = '<tr><td colspan="5" style="color:var(--muted);padding:8px">No open positions.</td></tr>';
+    } else {
+      uOpen.slice(0, 30).forEach(p => {
+        uOpenTb.insertAdjacentHTML('beforeend',
+          '<tr><td>' + (p.title || '').slice(0, 45) + '</td><td>' + (p.outcome || '') +
+          '</td><td class="num">' + (p.shares || 0).toFixed(2) + '</td>' +
+          '<td class="num">' + (p.avg_price || 0).toFixed(3) + '</td>' +
+          '<td class="num">$' + (p.cost_basis || 0).toFixed(2) + '</td></tr>');
+      });
+    }
+  }
+  const uTrades = (ultimate.recent_trades || []).slice().reverse();
+  const uTrTb = document.getElementById('rn1u-trades-tbl');
+  if (uTrTb) {
+    uTrTb.innerHTML = '';
+    if (!uTrades.length) {
+      uTrTb.innerHTML = '<tr><td colspan="5" style="color:var(--muted);padding:8px">No actions yet.</td></tr>';
+    } else {
+      uTrades.forEach(t => {
+        const action = t.action || ''; let actionEl, pnlEl;
+        if (action === 'buy') { actionEl = '<span style="color:#3fb950">BUY</span>'; pnlEl = '—'; }
+        else if (action === 'resolve') {
+          actionEl = t.outcome === 'won' ? '<span style="color:#3fb950">RESOLVE ✓</span>' : '<span style="color:#f85149">RESOLVE ✗</span>';
+          const pnl = t.pnl || 0;
+          pnlEl = '<span class="' + _rn1RoiClass(pnl / 5) + '">' + (pnl > 0 ? '+' : '') + '$' + pnl.toFixed(2) + '</span>';
+        } else { actionEl = action; pnlEl = '—'; }
+        uTrTb.insertAdjacentHTML('beforeend',
+          '<tr><td>' + actionEl + '</td><td>' + (t.title || '').slice(0, 40) + '</td><td>' +
+          (t.outcome || '') + '</td><td class="num">$' + (t.cost_basis || 0).toFixed(2) + '</td>' +
+          '<td class="num">' + pnlEl + '</td></tr>');
+      });
+    }
+  }
+
+  // ── 12-Bot Comparison: 7 RN1 variants + surf + newdog + mosley + kch + ultimate ──
   (function renderABCComparison() {
     const bots = [
       {key: 'absband',     label: 'absband (raw)',         color: '#d97706', last: abLast},
@@ -4326,6 +4438,7 @@ async function loadRn1() {
       {key: 'newdog',      label: 'newdog (#1 today)',     color: '#f97316', last: ndLast},
       {key: 'mosley',      label: 'Mosley1 (#2 today)',    color: '#92400e', last: moLast},
       {key: 'kch',         label: 'kch123 (#3 all-time)',  color: '#404040', last: kcLast},
+      {key: 'ultimate',    label: 'Bot Ultime',            color: '#fbbf24', last: uLast},
       {key: 'autobot',     label: 'autobot (auto-scan)',   color: '#0891b2', last: (data.autobot || {}).latest_equity || {}},
       {key: 'paper',       label: 'edge sim ($1K base)',   color: '#65a30d', last: (data.paper || {}).latest_equity || {}},
       {key: 'optione',     label: 'optione (full defense)',color: '#ef4444', last: oeLast},
@@ -4420,6 +4533,7 @@ async function loadRn1() {
       {label: 'newdog',         color: '#f97316', curve: (data.paper_newdog || {}).equity_curve || []},
       {label: 'Mosley1',        color: '#92400e', curve: (data.paper_mosley || {}).equity_curve || []},
       {label: 'kch123',         color: '#404040', curve: (data.paper_kch || {}).equity_curve || []},
+      {label: 'Bot Ultime 🌟',   color: '#fbbf24', curve: (data.paper_ultimate || {}).equity_curve || []},
       {label: 'autobot',        color: '#0891b2', curve: (data.autobot || {}).equity_curve || []},
       {label: 'edge sim ($1K)', color: '#65a30d', curve: (data.paper || {}).equity_curve || []},
       {label: 'optione (anti)', color: '#ef4444', curve: (data.paper_optione || {}).equity_curve || []},

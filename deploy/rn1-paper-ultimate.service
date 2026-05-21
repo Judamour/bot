@@ -1,0 +1,39 @@
+[Unit]
+Description=Bot Ultime — Moteur A (Heavy_fav autonomous scan, research-grade v1)
+After=network.target
+# No dependency on bot-cp — this bot scans Polymarket directly via Gamma API.
+
+[Service]
+Type=simple
+User=botuser
+WorkingDirectory=/home/botuser/bot-trading
+EnvironmentFile=-/home/botuser/bot-trading/.env
+# Research-grade Heavy_fav scanner (replacement candidate for autobot).
+# Combines: longshot bias edge (Quantpedia validated empirically at 95.4% WR),
+# fractional Kelly sizing, scoring/ranking, risk overlay (KILL_SWITCH -15%,
+# MAX_SAME_SPORT 5), category blacklist, auto-unwind 99%.
+# Moteur B (Bookmaker arb via OddsPapi) will be added as separate bot in v2.
+Environment=ULTIMATE_INITIAL=600
+Environment=ULTIMATE_MOTEUR_A_CAP=280
+Environment=ULTIMATE_MIN_LIQ=1000
+Environment=ULTIMATE_MIN_VOLUME=5000
+Environment=ULTIMATE_MAX_SPREAD=0.03
+Environment=ULTIMATE_MIN_HOURS_TO_END=2
+Environment=ULTIMATE_WIN_PRICE_MIN=0.85
+Environment=ULTIMATE_WIN_PRICE_MAX=0.95
+Environment=ULTIMATE_EMPIRICAL_WR=0.954
+Environment=ULTIMATE_KELLY_FRAC=0.25
+Environment=ULTIMATE_MIN_TRADE=4
+Environment=ULTIMATE_MAX_TRADE=28
+Environment=ULTIMATE_MAX_POSITIONS=15
+Environment=ULTIMATE_MAX_SAME_SPORT=5
+Environment=ULTIMATE_KILL_SWITCH_PCT=-0.15
+Environment=ULTIMATE_NEAR_RESOLVE=0.99
+ExecStart=/home/botuser/bot-trading/venv/bin/python -m analysis.rn1.paper_ultimate
+Restart=on-failure
+RestartSec=30
+StandardOutput=append:/home/botuser/bot-trading/logs/rn1/paper_ultimate.log
+StandardError=append:/home/botuser/bot-trading/logs/rn1/paper_ultimate.log
+
+[Install]
+WantedBy=multi-user.target
