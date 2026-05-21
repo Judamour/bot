@@ -1086,6 +1086,28 @@ def api_rn1():
     newdog_trades = _tail_jsonl(newdog_trades_path, 30)
     newdog_latest = newdog_equity[-1] if newdog_equity else {}
 
+    # Paper Mosley1 — #2 daily winner, backtest +2.62% ROI / +65%/yr
+    mosley_state_path = base / "analysis/rn1/data_mosley/state.json"
+    mosley_positions_path = base / "analysis/rn1/data_mosley/positions.json"
+    mosley_equity_path = base / "analysis/rn1/data_mosley/equity.jsonl"
+    mosley_trades_path = base / "analysis/rn1/data_mosley/trades.jsonl"
+    mosley_state = _read_json(mosley_state_path)
+    mosley_positions = _read_json(mosley_positions_path)
+    mosley_equity = _tail_jsonl(mosley_equity_path, 60)
+    mosley_trades = _tail_jsonl(mosley_trades_path, 30)
+    mosley_latest = mosley_equity[-1] if mosley_equity else {}
+
+    # Paper kch123 — #3 all-time, buy-and-hold whale
+    kch_state_path = base / "analysis/rn1/data_kch/state.json"
+    kch_positions_path = base / "analysis/rn1/data_kch/positions.json"
+    kch_equity_path = base / "analysis/rn1/data_kch/equity.jsonl"
+    kch_trades_path = base / "analysis/rn1/data_kch/trades.jsonl"
+    kch_state = _read_json(kch_state_path)
+    kch_positions = _read_json(kch_positions_path)
+    kch_equity = _tail_jsonl(kch_equity_path, 60)
+    kch_trades = _tail_jsonl(kch_trades_path, 30)
+    kch_latest = kch_equity[-1] if kch_equity else {}
+
     # Paper Option E — absband + cross-side / cross-event defense
     optione_state_path = base / "analysis/rn1/data_optione/state.json"
     optione_positions_path = base / "analysis/rn1/data_optione/positions.json"
@@ -1173,6 +1195,20 @@ def api_rn1():
             "equity_curve": newdog_equity,
             "open_positions": list(newdog_positions.values()) if isinstance(newdog_positions, dict) else [],
             "recent_trades": newdog_trades,
+        },
+        "paper_mosley": {
+            "state": mosley_state,
+            "latest_equity": mosley_latest,
+            "equity_curve": mosley_equity,
+            "open_positions": list(mosley_positions.values()) if isinstance(mosley_positions, dict) else [],
+            "recent_trades": mosley_trades,
+        },
+        "paper_kch": {
+            "state": kch_state,
+            "latest_equity": kch_latest,
+            "equity_curve": kch_equity,
+            "open_positions": list(kch_positions.values()) if isinstance(kch_positions, dict) else [],
+            "recent_trades": kch_trades,
         },
         "paper_optione": {
             "state": optione_state,

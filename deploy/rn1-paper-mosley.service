@@ -1,0 +1,29 @@
+[Unit]
+Description=Mosley1 Paper — copy of #2 daily winner 0x5bec79df…b215
+After=network.target bot-cp.service
+
+[Service]
+Type=simple
+User=botuser
+WorkingDirectory=/home/botuser/bot-trading
+EnvironmentFile=-/home/botuser/bot-trading/.env
+# Mosley1 profile: whale conviction NBA/foot, median chunk $4,347.
+# Backtest 61d: +2.62% ROI / +65%/yr at $10 sizing (best of 3 candidates).
+# NO catastrophic losses visible. Similar profile to surfandturf but
+# more active (7.4 BUYs/day vs surf 0.2/day).
+Environment=MOSLEY_INITIAL=600
+Environment=MOSLEY_MAX_POSITIONS=8
+Environment=MOSLEY_MIN_TARGET=500
+Environment=MOSLEY_MAX_USD_PER_MARKET=10
+Environment=MOSLEY_SKIP_HIGH=0.20
+Environment=MOSLEY_NORMAL_SIZE=10
+Environment=MOSLEY_PENNY_SIZE=2
+Environment=MOSLEY_NORMAL_MAX=0.95
+ExecStart=/home/botuser/bot-trading/venv/bin/python -m analysis.rn1.paper_mosley
+Restart=on-failure
+RestartSec=30
+StandardOutput=append:/home/botuser/bot-trading/logs/rn1/paper_mosley.log
+StandardError=append:/home/botuser/bot-trading/logs/rn1/paper_mosley.log
+
+[Install]
+WantedBy=multi-user.target

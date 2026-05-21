@@ -1527,8 +1527,8 @@
   <!-- ═══ Equity curves overlay — moved to top for at-a-glance comparison ═══ -->
   <div style="border:1px solid var(--border);border-radius:6px;padding:10px 12px;margin-bottom:18px;background:var(--card)">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-      <strong style="font-size:14px">📈 Equity curves overlay — 9 strategies from $600 baseline</strong>
-      <span style="font-size:11px;color:var(--muted)">absband (🟡) · optionb (🟢) · optionc v1 (🟦) · optionc v2 (🔵) · optionc v3 (🩵) · surfandturf (🟣) · newdog (🟠) · optione (🔴) · optionf (🩷)</span>
+      <strong style="font-size:14px">📈 Equity curves overlay — 11 strategies from $600 baseline</strong>
+      <span style="font-size:11px;color:var(--muted)">7 RN1 variants + surf + newdog + mosley + kch + optione/f</span>
     </div>
     <div style="height:280px;position:relative">
       <canvas id="rn1-abc-equity-chart"></canvas>
@@ -1565,15 +1565,15 @@
     </table>
   </details>
 
-  <!-- ═══ Comparison — 9 strategies side-by-side ═══ -->
+  <!-- ═══ Comparison — 11 strategies side-by-side ═══ -->
   <h3 style="margin:24px 0 8px 0;font-size:14px;display:flex;align-items:center;gap:8px">
-    ⚔️ 9-Bot Comparison — RN1 variants + 2 alternative wallets
+    ⚔️ 11-Bot Comparison — RN1 variants + 4 alternative wallets
     <span style="font-size:11px;padding:2px 6px;border-radius:6px;background:#0ea5e9;color:#fff;font-weight:600">$600 each</span>
   </h3>
   <p style="color:var(--muted);font-size:12px;margin:0 0 8px 0">
-    All 9 bots start at $600 paper. 7 RN1 variants + surfandturf (NBA whale) + <strong>newdog</strong> (#1 daily winner 2026-05-21, +$370K, arb quasi-certs at 0.99).
+    7 RN1 variants + 4 alternative wallets: <strong>surf</strong> (NBA whale), <strong>newdog</strong> (#1 daily, quasi-cert arb — backtest -0.7%), <strong>Mosley1</strong> (#2 daily, whale conviction — backtest +2.62%), <strong>kch123</strong> (#3 all-time $12.5M, buy-and-hold).
   </p>
-  <div style="display:grid;grid-template-columns:repeat(9,1fr);gap:5px;margin-bottom:18px;font-size:10px">
+  <div style="display:grid;grid-template-columns:repeat(11,1fr);gap:4px;margin-bottom:18px;font-size:9.5px">
     <div style="border:1px solid var(--border);border-radius:6px;padding:12px" id="rn1-ab-cmp-absband-box">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
         <strong style="font-size:13px">🟡 absband (raw)</strong>
@@ -1648,7 +1648,7 @@
     </div>
     <div style="border:1px solid var(--border);border-radius:6px;padding:12px" id="rn1-ab-cmp-newdog-box">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-        <strong style="font-size:13px">🟠 newdog (#1 today)</strong>
+        <strong style="font-size:13px">🟠 newdog</strong>
         <span id="rn1-ab-cmp-newdog-trophy" style="font-size:11px;padding:2px 6px;border-radius:4px;background:transparent;color:#fff;font-weight:700"></span>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px">
@@ -1656,6 +1656,30 @@
         <div><span style="color:var(--muted)">Perf</span><br><strong id="rn1-ab-cmp-newdog-perf" style="font-size:18px">—</strong></div>
         <div><span style="color:var(--muted)">Win rate</span><br><strong id="rn1-ab-cmp-newdog-wr">—</strong></div>
         <div><span style="color:var(--muted)">Trades</span><br><strong id="rn1-ab-cmp-newdog-tr">—</strong></div>
+      </div>
+    </div>
+    <div style="border:1px solid var(--border);border-radius:6px;padding:12px" id="rn1-ab-cmp-mosley-box">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <strong style="font-size:13px">🟤 Mosley1</strong>
+        <span id="rn1-ab-cmp-mosley-trophy" style="font-size:11px;padding:2px 6px;border-radius:4px;background:transparent;color:#fff;font-weight:700"></span>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px">
+        <div><span style="color:var(--muted)">Equity</span><br><strong id="rn1-ab-cmp-mosley-eq" style="font-size:18px">—</strong></div>
+        <div><span style="color:var(--muted)">Perf</span><br><strong id="rn1-ab-cmp-mosley-perf" style="font-size:18px">—</strong></div>
+        <div><span style="color:var(--muted)">Win rate</span><br><strong id="rn1-ab-cmp-mosley-wr">—</strong></div>
+        <div><span style="color:var(--muted)">Trades</span><br><strong id="rn1-ab-cmp-mosley-tr">—</strong></div>
+      </div>
+    </div>
+    <div style="border:1px solid var(--border);border-radius:6px;padding:12px" id="rn1-ab-cmp-kch-box">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <strong style="font-size:13px">⚫ kch123</strong>
+        <span id="rn1-ab-cmp-kch-trophy" style="font-size:11px;padding:2px 6px;border-radius:4px;background:transparent;color:#fff;font-weight:700"></span>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px">
+        <div><span style="color:var(--muted)">Equity</span><br><strong id="rn1-ab-cmp-kch-eq" style="font-size:18px">—</strong></div>
+        <div><span style="color:var(--muted)">Perf</span><br><strong id="rn1-ab-cmp-kch-perf" style="font-size:18px">—</strong></div>
+        <div><span style="color:var(--muted)">Win rate</span><br><strong id="rn1-ab-cmp-kch-wr">—</strong></div>
+        <div><span style="color:var(--muted)">Trades</span><br><strong id="rn1-ab-cmp-kch-tr">—</strong></div>
       </div>
     </div>
     <div style="border:1px solid var(--border);border-radius:6px;padding:12px" id="rn1-ab-cmp-optione-box">
@@ -1943,6 +1967,77 @@
     <table class="rn1-tbl" style="margin-top:8px">
       <thead><tr><th>Action</th><th>Title</th><th>Outcome</th><th>Tier</th><th class="num">Cost</th><th class="num">PnL</th></tr></thead>
       <tbody id="rn1nd-trades-tbl"><tr><td colspan="6" style="color:var(--muted);padding:8px">No actions yet.</td></tr></tbody>
+    </table>
+  </details>
+
+  <!-- ═══ Paper Mosley1 — #2 daily winner, whale conviction ═══ -->
+  <h3 style="margin:24px 0 8px 0;font-size:14px;display:flex;align-items:center;gap:8px">
+    🟤 Paper Mosley1 — #2 daily winner 2026-05-21, whale conviction NBA/foot
+    <span style="font-size:11px;padding:2px 6px;border-radius:6px;background:#92400e;color:#fff;font-weight:600">PAPER $600</span>
+  </h3>
+  <p style="color:var(--muted);font-size:12px;margin:0 0 8px 0">
+    Mirrors wallet <code>0x5bec79df…b215</code> — +$268K profit 2026-05-21, equity $456K.
+    Backtest 61d <strong>+2.62% ROI / +65%/yr</strong> (best of the 3 alternative candidates).
+    Whale conviction style (median chunk $4,347), 7.4 BUYs/day. Sizing $10/trade, MIN_TARGET=$500.
+  </p>
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:18px">
+    <div class="rn1-stat"><div class="rn1-lbl">Equity</div><div class="rn1-val" id="rn1mo-equity">—</div></div>
+    <div class="rn1-stat"><div class="rn1-lbl">Perf</div><div class="rn1-val" id="rn1mo-perf">—</div></div>
+    <div class="rn1-stat"><div class="rn1-lbl">Cash</div><div class="rn1-val" id="rn1mo-cash">—</div></div>
+    <div class="rn1-stat"><div class="rn1-lbl">Open positions</div><div class="rn1-val" id="rn1mo-open">—</div></div>
+    <div class="rn1-stat"><div class="rn1-lbl">Resolved</div><div class="rn1-val" id="rn1mo-resolved">—</div></div>
+    <div class="rn1-stat"><div class="rn1-lbl">Win rate</div><div class="rn1-val" id="rn1mo-wr">—</div></div>
+  </div>
+
+  <details style="margin-bottom:18px;border:1px solid var(--border);border-radius:4px;padding:6px 10px">
+    <summary style="cursor:pointer;font-size:13px;color:var(--muted)">Open Mosley1 positions (<span id="rn1mo-open-n">0</span>)</summary>
+    <table class="rn1-tbl" style="margin-top:8px">
+      <thead><tr><th>Title</th><th>Outcome</th><th>Tier</th><th class="num">Shares</th><th class="num">Avg px</th><th class="num">Cost</th></tr></thead>
+      <tbody id="rn1mo-open-tbl"><tr><td colspan="6" style="color:var(--muted);padding:8px">No open positions.</td></tr></tbody>
+    </table>
+  </details>
+
+  <details style="margin-bottom:24px;border:1px solid var(--border);border-radius:4px;padding:6px 10px">
+    <summary style="cursor:pointer;font-size:13px;color:var(--muted)">Recent Mosley1 actions (last 30)</summary>
+    <table class="rn1-tbl" style="margin-top:8px">
+      <thead><tr><th>Action</th><th>Title</th><th>Outcome</th><th>Tier</th><th class="num">Cost</th><th class="num">PnL</th></tr></thead>
+      <tbody id="rn1mo-trades-tbl"><tr><td colspan="6" style="color:var(--muted);padding:8px">No actions yet.</td></tr></tbody>
+    </table>
+  </details>
+
+  <!-- ═══ Paper kch123 — #3 all-time, buy-and-hold ═══ -->
+  <h3 style="margin:24px 0 8px 0;font-size:14px;display:flex;align-items:center;gap:8px">
+    ⚫ Paper kch123 — #3 all-time ($12.5M lifetime), buy-and-hold whale
+    <span style="font-size:11px;padding:2px 6px;border-radius:6px;background:#262626;color:#fff;font-weight:600">PAPER $600</span>
+  </h3>
+  <p style="color:var(--muted);font-size:12px;margin:0 0 8px 0">
+    Mirrors wallet <code>0x6a72f618…5ea2</code> — $12.5M lifetime profit, equity $151K.
+    Buy-and-hold style (3498 BUYs / 2 SELLs / 117d). 30 BUYs/day, median $301.
+    Auto-unwind 99% hook captures his winners automatically (he never sells).
+    Sizing $10/trade, MIN_TARGET=$200 (smaller to catch his typical chunk).
+  </p>
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:18px">
+    <div class="rn1-stat"><div class="rn1-lbl">Equity</div><div class="rn1-val" id="rn1kc-equity">—</div></div>
+    <div class="rn1-stat"><div class="rn1-lbl">Perf</div><div class="rn1-val" id="rn1kc-perf">—</div></div>
+    <div class="rn1-stat"><div class="rn1-lbl">Cash</div><div class="rn1-val" id="rn1kc-cash">—</div></div>
+    <div class="rn1-stat"><div class="rn1-lbl">Open positions</div><div class="rn1-val" id="rn1kc-open">—</div></div>
+    <div class="rn1-stat"><div class="rn1-lbl">Resolved</div><div class="rn1-val" id="rn1kc-resolved">—</div></div>
+    <div class="rn1-stat"><div class="rn1-lbl">Win rate</div><div class="rn1-val" id="rn1kc-wr">—</div></div>
+  </div>
+
+  <details style="margin-bottom:18px;border:1px solid var(--border);border-radius:4px;padding:6px 10px">
+    <summary style="cursor:pointer;font-size:13px;color:var(--muted)">Open kch123 positions (<span id="rn1kc-open-n">0</span>)</summary>
+    <table class="rn1-tbl" style="margin-top:8px">
+      <thead><tr><th>Title</th><th>Outcome</th><th>Tier</th><th class="num">Shares</th><th class="num">Avg px</th><th class="num">Cost</th></tr></thead>
+      <tbody id="rn1kc-open-tbl"><tr><td colspan="6" style="color:var(--muted);padding:8px">No open positions.</td></tr></tbody>
+    </table>
+  </details>
+
+  <details style="margin-bottom:24px;border:1px solid var(--border);border-radius:4px;padding:6px 10px">
+    <summary style="cursor:pointer;font-size:13px;color:var(--muted)">Recent kch123 actions (last 30)</summary>
+    <table class="rn1-tbl" style="margin-top:8px">
+      <thead><tr><th>Action</th><th>Title</th><th>Outcome</th><th>Tier</th><th class="num">Cost</th><th class="num">PnL</th></tr></thead>
+      <tbody id="rn1kc-trades-tbl"><tr><td colspan="6" style="color:var(--muted);padding:8px">No actions yet.</td></tr></tbody>
     </table>
   </details>
 
@@ -4070,7 +4165,129 @@ async function loadRn1() {
     }
   }
 
-  // ── 9-Bot Comparison: 7 RN1 variants + surf + newdog ──
+  // ── Paper Mosley1 stats ──
+  const mosley = data.paper_mosley || {};
+  const moLast = mosley.latest_equity || {};
+  setText('rn1mo-equity', moLast.equity_usd != null ? '$' + moLast.equity_usd.toFixed(2) : '—');
+  const moPerfEl = document.getElementById('rn1mo-perf');
+  if (moPerfEl && moLast.perf_pct != null) {
+    moPerfEl.textContent = (moLast.perf_pct > 0 ? '+' : '') + moLast.perf_pct.toFixed(2) + '%';
+    moPerfEl.className = 'rn1-val ' + _rn1RoiClass(moLast.perf_pct / 100);
+  }
+  setText('rn1mo-cash', moLast.cash_usd != null ? '$' + moLast.cash_usd.toFixed(2) : '—');
+  setText('rn1mo-open', (moLast.n_open || 0));
+  setText('rn1mo-resolved', (moLast.n_resolved || 0) + ' (' + (moLast.n_won || 0) + ' W / ' +
+    Math.max((moLast.n_resolved || 0) - (moLast.n_won || 0), 0) + ' L)');
+  const moWrEl = document.getElementById('rn1mo-wr');
+  if (moWrEl) {
+    const wr = (moLast.win_rate || 0) * 100;
+    moWrEl.textContent = (moLast.n_resolved > 0 ? wr.toFixed(1) + '%' : '—');
+    moWrEl.className = 'rn1-val ' + (wr >= 60 ? 'rn1-roi-pos' : (wr >= 50 ? 'rn1-roi-flat' : 'rn1-roi-neg'));
+  }
+  const moOpen = mosley.open_positions || [];
+  const moSetN = document.getElementById('rn1mo-open-n');
+  if (moSetN) moSetN.textContent = moOpen.length;
+  const moOpenTb = document.getElementById('rn1mo-open-tbl');
+  if (moOpenTb) {
+    moOpenTb.innerHTML = '';
+    if (!moOpen.length) {
+      moOpenTb.innerHTML = '<tr><td colspan="6" style="color:var(--muted);padding:8px">No open positions.</td></tr>';
+    } else {
+      moOpen.slice(0, 30).forEach(p => {
+        moOpenTb.insertAdjacentHTML('beforeend',
+          '<tr><td>' + (p.title || '').slice(0, 45) + '</td><td>' + (p.outcome || '') +
+          '</td><td><code style="font-size:11px">' + (p.tier || '—') + '</code></td>' +
+          '<td class="num">' + (p.shares || 0).toFixed(2) + '</td>' +
+          '<td class="num">' + (p.avg_price || 0).toFixed(3) + '</td>' +
+          '<td class="num">$' + (p.cost_basis || 0).toFixed(2) + '</td></tr>');
+      });
+    }
+  }
+  const moTrades = (mosley.recent_trades || []).slice().reverse();
+  const moTrTb = document.getElementById('rn1mo-trades-tbl');
+  if (moTrTb) {
+    moTrTb.innerHTML = '';
+    if (!moTrades.length) {
+      moTrTb.innerHTML = '<tr><td colspan="6" style="color:var(--muted);padding:8px">No actions yet.</td></tr>';
+    } else {
+      moTrades.forEach(t => {
+        const action = t.action || ''; let actionEl, pnlEl;
+        if (action === 'buy') { actionEl = '<span style="color:#3fb950">BUY</span>'; pnlEl = '—'; }
+        else if (action === 'resolve') {
+          actionEl = t.result === 'won' ? '<span style="color:#3fb950">RESOLVE ✓</span>' : '<span style="color:#f85149">RESOLVE ✗</span>';
+          const pnl = t.pnl || 0;
+          pnlEl = '<span class="' + _rn1RoiClass(pnl / 5) + '">' + (pnl > 0 ? '+' : '') + '$' + pnl.toFixed(2) + '</span>';
+        } else { actionEl = action; pnlEl = '—'; }
+        moTrTb.insertAdjacentHTML('beforeend',
+          '<tr><td>' + actionEl + '</td><td>' + (t.title || '').slice(0, 40) + '</td><td>' +
+          (t.outcome || t.outcome_bought || '') + '</td><td><code style="font-size:11px">' + (t.tier || '—') + '</code></td>' +
+          '<td class="num">$' + (t.cost || t.cost_basis || 0).toFixed(2) + '</td><td class="num">' + pnlEl + '</td></tr>');
+      });
+    }
+  }
+
+  // ── Paper kch123 stats ──
+  const kch = data.paper_kch || {};
+  const kcLast = kch.latest_equity || {};
+  setText('rn1kc-equity', kcLast.equity_usd != null ? '$' + kcLast.equity_usd.toFixed(2) : '—');
+  const kcPerfEl = document.getElementById('rn1kc-perf');
+  if (kcPerfEl && kcLast.perf_pct != null) {
+    kcPerfEl.textContent = (kcLast.perf_pct > 0 ? '+' : '') + kcLast.perf_pct.toFixed(2) + '%';
+    kcPerfEl.className = 'rn1-val ' + _rn1RoiClass(kcLast.perf_pct / 100);
+  }
+  setText('rn1kc-cash', kcLast.cash_usd != null ? '$' + kcLast.cash_usd.toFixed(2) : '—');
+  setText('rn1kc-open', (kcLast.n_open || 0));
+  setText('rn1kc-resolved', (kcLast.n_resolved || 0) + ' (' + (kcLast.n_won || 0) + ' W / ' +
+    Math.max((kcLast.n_resolved || 0) - (kcLast.n_won || 0), 0) + ' L)');
+  const kcWrEl = document.getElementById('rn1kc-wr');
+  if (kcWrEl) {
+    const wr = (kcLast.win_rate || 0) * 100;
+    kcWrEl.textContent = (kcLast.n_resolved > 0 ? wr.toFixed(1) + '%' : '—');
+    kcWrEl.className = 'rn1-val ' + (wr >= 60 ? 'rn1-roi-pos' : (wr >= 50 ? 'rn1-roi-flat' : 'rn1-roi-neg'));
+  }
+  const kcOpen = kch.open_positions || [];
+  const kcSetN = document.getElementById('rn1kc-open-n');
+  if (kcSetN) kcSetN.textContent = kcOpen.length;
+  const kcOpenTb = document.getElementById('rn1kc-open-tbl');
+  if (kcOpenTb) {
+    kcOpenTb.innerHTML = '';
+    if (!kcOpen.length) {
+      kcOpenTb.innerHTML = '<tr><td colspan="6" style="color:var(--muted);padding:8px">No open positions.</td></tr>';
+    } else {
+      kcOpen.slice(0, 30).forEach(p => {
+        kcOpenTb.insertAdjacentHTML('beforeend',
+          '<tr><td>' + (p.title || '').slice(0, 45) + '</td><td>' + (p.outcome || '') +
+          '</td><td><code style="font-size:11px">' + (p.tier || '—') + '</code></td>' +
+          '<td class="num">' + (p.shares || 0).toFixed(2) + '</td>' +
+          '<td class="num">' + (p.avg_price || 0).toFixed(3) + '</td>' +
+          '<td class="num">$' + (p.cost_basis || 0).toFixed(2) + '</td></tr>');
+      });
+    }
+  }
+  const kcTrades = (kch.recent_trades || []).slice().reverse();
+  const kcTrTb = document.getElementById('rn1kc-trades-tbl');
+  if (kcTrTb) {
+    kcTrTb.innerHTML = '';
+    if (!kcTrades.length) {
+      kcTrTb.innerHTML = '<tr><td colspan="6" style="color:var(--muted);padding:8px">No actions yet.</td></tr>';
+    } else {
+      kcTrades.forEach(t => {
+        const action = t.action || ''; let actionEl, pnlEl;
+        if (action === 'buy') { actionEl = '<span style="color:#3fb950">BUY</span>'; pnlEl = '—'; }
+        else if (action === 'resolve') {
+          actionEl = t.result === 'won' ? '<span style="color:#3fb950">RESOLVE ✓</span>' : '<span style="color:#f85149">RESOLVE ✗</span>';
+          const pnl = t.pnl || 0;
+          pnlEl = '<span class="' + _rn1RoiClass(pnl / 5) + '">' + (pnl > 0 ? '+' : '') + '$' + pnl.toFixed(2) + '</span>';
+        } else { actionEl = action; pnlEl = '—'; }
+        kcTrTb.insertAdjacentHTML('beforeend',
+          '<tr><td>' + actionEl + '</td><td>' + (t.title || '').slice(0, 40) + '</td><td>' +
+          (t.outcome || t.outcome_bought || '') + '</td><td><code style="font-size:11px">' + (t.tier || '—') + '</code></td>' +
+          '<td class="num">$' + (t.cost || t.cost_basis || 0).toFixed(2) + '</td><td class="num">' + pnlEl + '</td></tr>');
+      });
+    }
+  }
+
+  // ── 11-Bot Comparison: 7 RN1 variants + surf + newdog + mosley + kch ──
   (function renderABCComparison() {
     const bots = [
       {key: 'absband',     label: 'absband (raw)',         color: '#d97706', last: abLast},
@@ -4080,6 +4297,8 @@ async function loadRn1() {
       {key: 'optioncv3',   label: 'optionc v3 (h-skip)',   color: '#06b6d4', last: cv3Last},
       {key: 'surfandturf', label: 'surfandturf (NBA)',     color: '#a855f7', last: stLast},
       {key: 'newdog',      label: 'newdog (#1 today)',     color: '#f97316', last: ndLast},
+      {key: 'mosley',      label: 'Mosley1 (#2 today)',    color: '#92400e', last: moLast},
+      {key: 'kch',         label: 'kch123 (#3 all-time)',  color: '#404040', last: kcLast},
       {key: 'optione',     label: 'optione (full defense)',color: '#ef4444', last: oeLast},
       {key: 'optionf',     label: 'optionf (C+ hybrid)',   color: '#ec4899', last: ofLast},
     ];
@@ -4169,6 +4388,8 @@ async function loadRn1() {
       {label: 'optionc v3',     color: '#06b6d4', curve: (data.paper_optioncv3 || {}).equity_curve || []},
       {label: 'surfandturf',    color: '#a855f7', curve: (data.paper_surfandturf || {}).equity_curve || []},
       {label: 'newdog',         color: '#f97316', curve: (data.paper_newdog || {}).equity_curve || []},
+      {label: 'Mosley1',        color: '#92400e', curve: (data.paper_mosley || {}).equity_curve || []},
+      {label: 'kch123',         color: '#404040', curve: (data.paper_kch || {}).equity_curve || []},
       {label: 'optione (anti)', color: '#ef4444', curve: (data.paper_optione || {}).equity_curve || []},
       {label: 'optionf (C+)',   color: '#ec4899', curve: (data.paper_optionf || {}).equity_curve || []},
     ];

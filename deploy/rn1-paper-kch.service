@@ -1,0 +1,31 @@
+[Unit]
+Description=kch123 Paper — copy of #3 all-time ($12.5M lifetime) buy-and-hold
+After=network.target bot-cp.service
+
+[Service]
+Type=simple
+User=botuser
+WorkingDirectory=/home/botuser/bot-trading
+EnvironmentFile=-/home/botuser/bot-trading/.env
+# kch123: buy-and-hold whale. 3498 BUYs / 2 SELLs in 117 days — he never
+# unwinds, lets winners auto-resolve at $1. Our auto-unwind 99% hook
+# (paper_bot._resolve_positions) should capture his winning patterns
+# even though Gamma resolution is sparse for backtest.
+# Median chunk $301, max $370K. Lower MIN_TARGET catches more of his
+# typical sizing.
+Environment=KCH_INITIAL=600
+Environment=KCH_MAX_POSITIONS=10
+Environment=KCH_MIN_TARGET=200
+Environment=KCH_MAX_USD_PER_MARKET=10
+Environment=KCH_SKIP_HIGH=0.20
+Environment=KCH_NORMAL_SIZE=10
+Environment=KCH_PENNY_SIZE=2
+Environment=KCH_NORMAL_MAX=0.99
+ExecStart=/home/botuser/bot-trading/venv/bin/python -m analysis.rn1.paper_kch
+Restart=on-failure
+RestartSec=30
+StandardOutput=append:/home/botuser/bot-trading/logs/rn1/paper_kch.log
+StandardError=append:/home/botuser/bot-trading/logs/rn1/paper_kch.log
+
+[Install]
+WantedBy=multi-user.target
