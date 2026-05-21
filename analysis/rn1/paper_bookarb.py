@@ -115,7 +115,14 @@ def _append_jsonl(path: Path, record: dict) -> None:
 # ── Polymarket data (free) ─────────────────────────────────────────────────
 
 def fetch_polymarket_sports_markets(category_keywords: list[str] | None = None) -> list[dict]:
-    """Fetch active Polymarket sports markets within trading window."""
+    """Fetch all active Polymarket markets — caller filters via detect_sport().
+
+    Param `category_keywords` is ignored (kept for backward-compat). Reason :
+    Polymarket tags are always empty in practice (verified 2026-05-21), and
+    sport-prefixed slugs (`wta-`, `atp-`, `epl-`, `nba-`) don't contain the
+    word "tennis" / "soccer" etc., so a keyword pre-filter rejects valid
+    markets. Better to return all 2000 and let detect_sport() classify.
+    """
     out = []
     for offset in range(0, 2000, 500):
         try:
@@ -135,16 +142,7 @@ def fetch_polymarket_sports_markets(category_keywords: list[str] | None = None) 
         if not page: break
         out.extend(page)
         if len(page) < 500: break
-    # Filter to sports-tagged or sports-keyword markets
-    keywords = category_keywords or ["soccer", "tennis", "basketball", "baseball", "hockey", "mma", "football"]
-    sports = []
-    for m in out:
-        tags = [(t or "").lower() for t in (m.get("tags") or []) if isinstance(t, str)]
-        slug = (m.get("slug") or "").lower()
-        q = (m.get("question") or "").lower()
-        if any(k in tags for k in keywords) or any(k in slug for k in keywords) or any(k in q for k in keywords):
-            sports.append(m)
-    return sports
+    return out
 
 
 def fetch_market_resolution(cid: str) -> dict | None:
