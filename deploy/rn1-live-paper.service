@@ -9,6 +9,10 @@ Type=simple
 User=botuser
 WorkingDirectory=/home/botuser/bot-trading
 EnvironmentFile=-/home/botuser/bot-trading/.env
+# Rescaled 1000 -> 600 to match the other paper bots on dashboard.
+# Sizing ratio preserved: was 10/1000 = 1% per trade, now 6/600 = 1%.
+Environment=RN1_PAPER_INITIAL=600
+Environment=RN1_PAPER_SIZE=6
 ExecStart=/home/botuser/bot-trading/venv/bin/python -m analysis.rn1.live_paper
 Restart=on-failure
 RestartSec=30
