@@ -295,8 +295,24 @@ def resolve_positions(state: dict, positions: dict) -> None:
 
 # ── Cycle ──────────────────────────────────────────────────────────────────
 
+SPORT_NAME_TO_ID = {name.lower(): sid for name, sid in SPORT_ROTATION}
+
+
+def detect_sport(market: dict) -> str | None:
+    """Identify the OddsPapi sport name from a Polymarket market's tags/slug."""
+    tags = [(t or "").lower() for t in (market.get("tags") or []) if isinstance(t, str)]
+    slug = (market.get("slug") or "").lower()
+    q = (market.get("question") or "").lower()
+    blob = " ".join(tags) + " " + slug + " " + q
+    # Order matters — more specific first
+    for name in ("tennis", "soccer", "basketball"):
+        if name in blob:
+            return name.capitalize()
+    return None
+
+
 def cycle(state: dict, positions: dict, client: OddsPapiClient) -> None:
-    """One cycle : resolve, scan, match, enter."""
+    """Poly-driven cycle : find PM candidates first, only call OddsPapi if needed."""
     # 1. Resolve
     resolve_positions(state, positions)
 
@@ -309,95 +325,105 @@ def cycle(state: dict, positions: dict, client: OddsPapiClient) -> None:
         log.warning(f"KILL_SWITCH eq=${equity:.2f} dd={dd*100:.1f}% — no entries")
         return
 
-    # 3. Pick sport for this cycle (rotation)
-    state.setdefault("sport_rotation_idx", 0)
-    sport_name, sport_id = SPORT_ROTATION[state["sport_rotation_idx"] % len(SPORT_ROTATION)]
-    state["sport_rotation_idx"] = (state["sport_rotation_idx"] + 1) % len(SPORT_ROTATION)
+    # 3. Fetch Polymarket markets FIRST (free). Sports filter via keywords.
+    all_sport_keywords = [name.lower() for name, _ in SPORT_ROTATION]
+    poly_markets = fetch_polymarket_sports_markets(all_sport_keywords)
+    log.info(f"Polymarket sport markets fetched: {len(poly_markets)} total")
 
-    # 4. Fetch OddsPapi participants (cached forever after first call) + odds for this sport
-    try:
-        participants = client.get_participants(sport_id=sport_id)
-        participants_map = build_participants_map(participants)
-        # get_fixtures_odds_main now resolves tournaments + odds-by-tournaments in v4 mode
-        fixtures = client.get_fixtures_odds_main(sport_id=sport_id, bookmakers="pinnacle")
-    except BudgetExceeded as e:
-        log.error(f"OddsPapi budget exhausted: {e}")
+    # 4. Group by detected sport — only call OddsPapi for sports we actually need
+    by_sport: dict[str, list[dict]] = {}
+    skip_no_sport = 0
+    for m in poly_markets:
+        if m.get("closed"): continue
+        sport_name = detect_sport(m)
+        if not sport_name:
+            skip_no_sport += 1
+            continue
+        by_sport.setdefault(sport_name, []).append(m)
+
+    if not by_sport:
+        log.info(f"cycle: no Polymarket sport markets matched (skip_no_sport={skip_no_sport}) — "
+                 f"OddsPapi call SAVED. budget {client.calls_made}/250 ({client.remaining} remaining)")
         return
-    except Exception as e:
-        log.error(f"OddsPapi fetch failed for sport={sport_name}: {e}")
-        return
-    log.info(f"OddsPapi v4 fixtures fetched: sport={sport_name}, n={len(fixtures)}, "
-             f"participants={len(participants_map)}, "
-             f"budget {client.calls_made}/250 ({client.remaining} remaining)")
 
-    # 5. Fetch Polymarket sports markets (free)
-    poly_sports_keywords = [sport_name.lower()]
-    poly_markets = fetch_polymarket_sports_markets(poly_sports_keywords)
-    log.info(f"Polymarket markets for {sport_name}: {len(poly_markets)}")
+    log.info(f"Sports with PM markets this cycle: {dict((s, len(m)) for s, m in by_sport.items())}")
 
-    # 6. Match + signal
+    # 5. For each sport with PM candidates, fetch OddsPapi data + match
     candidates = []
     skip_counts: dict[str, int] = {}
     now = int(time.time())
-    for m in poly_markets:
-        title = m.get("question") or ""
-        slug = m.get("slug") or ""
-        if m.get("closed"): skip_counts["closed"] += 1 or 0; continue
-        # Skip if already held
-        cid = m.get("conditionId") or m.get("condition_id")
-        if not cid or cid in positions:
-            skip_counts["dup"] = skip_counts.get("dup", 0) + 1
-            continue
-        # Liquidity / volume gates
-        try:
-            liq = float(m.get("liquidity") or 0)
-            vol = float(m.get("volume") or 0)
-        except: continue
-        if liq < MIN_LIQUIDITY:
-            skip_counts["low_liq"] = skip_counts.get("low_liq", 0) + 1; continue
-        if vol < MIN_VOLUME:
-            skip_counts["low_vol"] = skip_counts.get("low_vol", 0) + 1; continue
-        # Time window to event
-        end_ts = parse_iso_ts(m.get("endDate") or m.get("gameStartTime") or "")
-        if end_ts > 0:
-            hours_to_event = (end_ts - now) / 3600
-            if not (MIN_HOURS_TO_EVENT <= hours_to_event <= MAX_HOURS_TO_EVENT):
-                skip_counts["bad_time"] = skip_counts.get("bad_time", 0) + 1; continue
-        # Fuzzy-match to OddsPapi fixture using v4 participants map
-        fx = match_polymarket_to_fixture(title, fixtures, participants_map)
-        if not fx:
-            skip_counts["no_match"] = skip_counts.get("no_match", 0) + 1; continue
-        # Parse outcomes + prices
-        try:
-            outcomes = m.get("outcomes")
-            outcomes = json.loads(outcomes) if isinstance(outcomes, str) else outcomes
-            prices_raw = m.get("outcomePrices")
-            prices = json.loads(prices_raw) if isinstance(prices_raw, str) else prices_raw
-            ctids_raw = m.get("clobTokenIds")
-            ctids = json.loads(ctids_raw) if isinstance(ctids_raw, str) else ctids_raw
-        except: continue
-        if not outcomes or not prices or len(outcomes) != 2: continue
-        # For each outcome, compute edge
-        for idx, (out_name, p) in enumerate(zip(outcomes, prices)):
-            try: poly_price = float(p)
-            except: continue
-            sharp = sharp_implied_from_fixture(fx, out_name)
-            if sharp is None: continue
-            edge = sharp - poly_price
-            if edge < ENTRY_EDGE: continue
-            candidates.append({
-                "condition_id": cid,
-                "title": title,
-                "outcome": out_name,
-                "token_id": str(ctids[idx]) if ctids and len(ctids) > idx else None,
-                "poly_price": poly_price,
-                "sharp_implied": sharp,
-                "edge": edge,
-                "sport": sport_name,
-                "event_start_ts": end_ts,
-            })
 
-    # 7. Rank by edge desc + open
+    for sport_name, sport_markets in by_sport.items():
+        sport_id = SPORT_NAME_TO_ID.get(sport_name.lower())
+        if not sport_id:
+            log.warning(f"No sport_id for {sport_name}")
+            continue
+
+        try:
+            participants = client.get_participants(sport_id=sport_id)
+            participants_map = build_participants_map(participants)
+            fixtures = client.get_fixtures_odds_main(sport_id=sport_id, bookmakers="pinnacle")
+        except BudgetExceeded as e:
+            log.error(f"OddsPapi budget exhausted on {sport_name}: {e}")
+            return
+        except Exception as e:
+            log.error(f"OddsPapi fetch failed for {sport_name}: {e}")
+            continue
+
+        log.info(f"  → {sport_name}: {len(fixtures)} Pinnacle fixtures, "
+                 f"{len(participants_map)} teams; PM candidates={len(sport_markets)}")
+
+        for m in sport_markets:
+            title = m.get("question") or ""
+            cid = m.get("conditionId") or m.get("condition_id")
+            if not cid or cid in positions:
+                skip_counts["dup"] = skip_counts.get("dup", 0) + 1
+                continue
+            try:
+                liq = float(m.get("liquidity") or 0)
+                vol = float(m.get("volume") or 0)
+            except: continue
+            if liq < MIN_LIQUIDITY:
+                skip_counts["low_liq"] = skip_counts.get("low_liq", 0) + 1; continue
+            if vol < MIN_VOLUME:
+                skip_counts["low_vol"] = skip_counts.get("low_vol", 0) + 1; continue
+            end_ts = parse_iso_ts(m.get("endDate") or m.get("gameStartTime") or "")
+            if end_ts > 0:
+                hours_to_event = (end_ts - now) / 3600
+                if not (MIN_HOURS_TO_EVENT <= hours_to_event <= MAX_HOURS_TO_EVENT):
+                    skip_counts["bad_time"] = skip_counts.get("bad_time", 0) + 1; continue
+            fx = match_polymarket_to_fixture(title, fixtures, participants_map)
+            if not fx:
+                skip_counts["no_match"] = skip_counts.get("no_match", 0) + 1; continue
+            try:
+                outcomes = m.get("outcomes")
+                outcomes = json.loads(outcomes) if isinstance(outcomes, str) else outcomes
+                prices_raw = m.get("outcomePrices")
+                prices = json.loads(prices_raw) if isinstance(prices_raw, str) else prices_raw
+                ctids_raw = m.get("clobTokenIds")
+                ctids = json.loads(ctids_raw) if isinstance(ctids_raw, str) else ctids_raw
+            except: continue
+            if not outcomes or not prices or len(outcomes) != 2: continue
+            for idx, (out_name, p) in enumerate(zip(outcomes, prices)):
+                try: poly_price = float(p)
+                except: continue
+                sharp = sharp_implied_from_fixture(fx, out_name)
+                if sharp is None: continue
+                edge = sharp - poly_price
+                if edge < ENTRY_EDGE: continue
+                candidates.append({
+                    "condition_id": cid,
+                    "title": title,
+                    "outcome": out_name,
+                    "token_id": str(ctids[idx]) if ctids and len(ctids) > idx else None,
+                    "poly_price": poly_price,
+                    "sharp_implied": sharp,
+                    "edge": edge,
+                    "sport": sport_name,
+                    "event_start_ts": end_ts,
+                })
+
+    # 6. Rank by edge desc + open
     candidates.sort(key=lambda c: -c["edge"])
     n_opened = 0
     for opp in candidates:
@@ -405,10 +431,11 @@ def cycle(state: dict, positions: dict, client: OddsPapiClient) -> None:
         if open_position(state, positions, opp):
             n_opened += 1
 
-    log.info(f"cycle: sport={sport_name} sharp_n={len(fixtures)} poly_n={len(poly_markets)} "
+    sports_covered = ",".join(by_sport.keys())
+    log.info(f"cycle: sports={sports_covered} poly_n={len(poly_markets)} "
              f"matched={len(candidates)} opened={n_opened} held={len(positions)} "
              f"cash=${state['cash_usd']:.2f} eq=${equity:.2f} dd={dd*100:+.1f}% "
-             f"skips={dict(skip_counts)}")
+             f"budget {client.calls_made}/250 skips={dict(skip_counts)}")
 
 
 def equity_snapshot(state: dict, positions: dict) -> dict:
